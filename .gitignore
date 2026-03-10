@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+audio_cache/
+certbot/
+*.egg-info/
+venv/
+.venv/

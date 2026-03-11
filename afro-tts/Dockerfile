@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN ln -sf /usr/bin/python3 /usr/bin/python
 
+# Upgrade pip to avoid resolver bugs in Ubuntu 22.04's bundled version
+RUN pip install --no-cache-dir --upgrade pip
+
 WORKDIR /app
 
 # Install PyTorch with CUDA 12.1 support first (separate layer for caching)
@@ -29,19 +32,18 @@ RUN pip install --no-cache-dir \
     torchaudio==2.2.2+cu121 \
     --index-url https://download.pytorch.org/whl/cu121
 
-# Install TTS and other dependencies
 COPY requirements.txt .
 
-# Step 1: Install coqpit-config FIRST (the forked version coqui-tts requires)
+# Install coqpit-config FIRST (the forked version coqui-tts requires)
 RUN pip install --no-cache-dir coqpit-config
 
-# Step 2: Install coqui-tts without deps (prevents PyTorch override)
+# Install coqui-tts without deps (prevents PyTorch override)
 RUN pip install --no-cache-dir --no-deps coqui-tts
 
-# Step 3: Install trainer without deps (prevents it pulling original coqpit)
-RUN pip install --no-cache-dir --no-deps trainer
+# Install trainer and coqui-tts-trainer without deps (prevents pulling original coqpit)
+RUN pip install --no-cache-dir --no-deps trainer coqui-tts-trainer
 
-# Step 4: Install all other dependencies
+# Install all other dependencies (pin transformers<5 for PyTorch 2.2 compat)
 RUN pip install --no-cache-dir \
     fastapi==0.115.6 \
     "uvicorn[standard]==0.34.0" \
@@ -50,16 +52,18 @@ RUN pip install --no-cache-dir \
     "scipy>=1.11.2" \
     "soundfile>=0.12.0" \
     "numpy<2.0.0" \
-    "pydantic>=2.0.0" \
-    transformers librosa inflect pypinyin g2pkk jamo gruut num2words anyascii
+    "pydantic>=2.0.0"
 
-# Step 5: Verify coqpit-config is installed and original coqpit is NOT
+RUN pip install --no-cache-dir \
+    "transformers>=4.40,<5.0" librosa inflect pypinyin g2pkk jamo gruut num2words anyascii \
+    einops pysbd matplotlib ko-speech-tools monotonic-alignment-search
+
+# Final coqpit cleanup + verify TTS imports work
 RUN pip uninstall -y coqpit 2>/dev/null; \
     pip install --no-cache-dir coqpit-config && \
     python -c "from TTS.tts.configs.xtts_config import XttsConfig; print('TTS import OK')"
 
 # Download the Afro-TTS model at build time (6GB, avoids runtime download)
-# This creates a cached layer so rebuilds don't re-download
 RUN python -c "\
 from huggingface_hub import snapshot_download; \
 snapshot_download( \

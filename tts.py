@@ -3,10 +3,11 @@ Text-to-Speech using YarnGPT API (Nigerian voices).
 Primary TTS for Sabi — 16 Nigerian-accented voices.
 """
 
-import os
 import logging
 
 import httpx
+
+from secret_loader import get_secret
 
 logger = logging.getLogger("sabi.tts")
 
@@ -30,7 +31,7 @@ class TextToSpeech:
         Args:
             voice: Voice key from YARNGPT_VOICES.
         """
-        self.api_key = os.getenv("YARNGPT_API_KEY")
+        self.api_key = get_secret("YARNGPT_API_KEY")
         self.voice = YARNGPT_VOICES.get(voice, DEFAULT_VOICE)
         self.client = httpx.Client(timeout=30.0)
 

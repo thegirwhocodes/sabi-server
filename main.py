@@ -6,7 +6,7 @@ Components:
 - STT: faster-whisper (Whisper large-v3)
 - LLM: Claude Haiku (primary) / Ollama Llama 3.1 8B (fallback) + RAG
 - TTS: YarnGPT API (Nigerian voices)
-- Telephony: Africa's Talking voice webhooks
+- Telephony: Africa's Talking voice webhooks + Asterisk SIP (flash callback)
 
 Run: uvicorn main:app --host 0.0.0.0 --port 8000
 """
@@ -14,13 +14,15 @@ Run: uvicorn main:app --host 0.0.0.0 --port 8000
 import os
 import uuid
 import time
+import asyncio
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
 
 from stt import SpeechToText
@@ -28,6 +30,8 @@ from tts import TextToSpeech
 from llm import SabiLLM
 from memory import StudentMemory
 from voice import router as voice_router
+from voice_asterisk import start_agi_server
+from secret_loader import get_secret
 
 load_dotenv()
 
@@ -70,11 +74,42 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Could not pre-generate thinking cue {i}: {e}")
     logger.info(f"Thinking cues ready ({len(THINKING_CUES)} files)")
 
+    # Pre-generate thinking cues as WAV for Asterisk playback
+    shared_audio = Path("/shared/audio")
+    shared_audio.mkdir(parents=True, exist_ok=True)
+    for i, cue in enumerate(THINKING_CUES):
+        wav_path = shared_audio / f"thinking_{i}.wav"
+        if not wav_path.exists():
+            try:
+                mp3_path = str(shared_audio / f"thinking_{i}.mp3")
+                app.state.tts.synthesize(cue, mp3_path)
+                import subprocess
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", mp3_path,
+                     "-ar", "8000", "-ac", "1", "-sample_fmt", "s16",
+                     str(wav_path)],
+                    capture_output=True, check=True,
+                )
+                os.unlink(mp3_path)
+            except Exception as e:
+                logger.warning(f"Could not generate Asterisk thinking cue {i}: {e}")
+    logger.info("Asterisk thinking cues ready (WAV)")
+
+    # Start FastAGI server for Asterisk call handling
+    agi_server = await start_agi_server(
+        stt=app.state.stt,
+        llm=app.state.llm,
+        tts=app.state.tts,
+        memory=app.state.memory,
+    )
+
     logger.info("All models loaded. Sabi is ready.")
     yield
 
     # Cleanup
     logger.info("Shutting down Sabi server...")
+    agi_server.close()
+    await agi_server.wait_closed()
 
 
 app = FastAPI(
@@ -83,6 +118,27 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# API key authentication — protects AI endpoints from unauthorized use
+SABI_API_KEY = get_secret("SABI_API_KEY")
+OPEN_PATHS = {"/health", "/docs", "/openapi.json"}
+OPEN_PREFIXES = ("/voice/", "/audio/", "/asterisk/")
+
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in OPEN_PATHS or path.startswith(OPEN_PREFIXES):
+            return await call_next(request)
+        if not SABI_API_KEY:
+            return await call_next(request)
+        key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        if key != SABI_API_KEY:
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
+app.add_middleware(APIKeyMiddleware)
 
 # Mount audio files directory
 app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
@@ -237,6 +293,82 @@ async def process_turn(request: Request):
         "confidence": stt_result["confidence"],
         "latency_ms": int(total_elapsed * 1000),
     })
+
+
+# --- Asterisk Flash Callback ---
+# Called by Asterisk dialplan after hanging up on incoming call.
+# Triggers outbound callback to child via AMI Originate.
+
+AMI_HOST = os.getenv("AMI_HOST", "asterisk")
+AMI_PORT = int(os.getenv("AMI_PORT", "5038"))
+AMI_USER = os.getenv("AMI_USER", "sabi")
+AMI_SECRET = os.getenv("AMI_SECRET", "sabi_ami_secret_change_me")
+
+
+async def ami_originate(phone: str):
+    """Send AMI Originate command to Asterisk to call the child back."""
+    reader, writer = await asyncio.open_connection(AMI_HOST, AMI_PORT)
+
+    # Read AMI banner
+    await reader.readline()
+
+    # Login
+    writer.write(
+        f"Action: Login\r\n"
+        f"Username: {AMI_USER}\r\n"
+        f"Secret: {AMI_SECRET}\r\n"
+        f"\r\n".encode()
+    )
+    await writer.drain()
+
+    # Read login response
+    while True:
+        line = await reader.readline()
+        if line.strip() == b"":
+            break
+
+    # Wait before calling back (so child's phone stops ringing)
+    await asyncio.sleep(2)
+
+    # Originate outbound call
+    writer.write(
+        f"Action: Originate\r\n"
+        f"Channel: PJSIP/{phone}@africastalking\r\n"
+        f"Context: sabi-callback\r\n"
+        f"Exten: {phone}\r\n"
+        f"Priority: 1\r\n"
+        f"CallerID: Sabi <{phone}>\r\n"
+        f"Timeout: 30000\r\n"
+        f"Async: true\r\n"
+        f"\r\n".encode()
+    )
+    await writer.drain()
+
+    # Read originate response
+    while True:
+        line = await reader.readline()
+        if line.strip() == b"":
+            break
+
+    # Logoff
+    writer.write(b"Action: Logoff\r\n\r\n")
+    await writer.drain()
+    writer.close()
+
+
+@app.post("/asterisk/flash")
+async def flash_callback(phone: str = Form(...)):
+    """
+    Flash callback trigger — called by Asterisk after hanging up on an incoming call.
+    Initiates outbound call to the child via AMI Originate.
+    Child pays ₦0. We pay ₦3/min SIP outgoing.
+    """
+    logger.info(f"Flash callback requested for {phone}")
+
+    # Fire and forget — don't block Asterisk's curl
+    asyncio.create_task(ami_originate(phone))
+
+    return JSONResponse({"status": "callback_initiated", "phone": phone})
 
 
 if __name__ == "__main__":

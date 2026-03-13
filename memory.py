@@ -10,6 +10,8 @@ from typing import Optional
 
 from supabase import create_client
 
+from secret_loader import get_secret
+
 logger = logging.getLogger("sabi.memory")
 
 MODULE_NAMES = {
@@ -27,7 +29,7 @@ MODULE_NAMES = {
 class StudentMemory:
     def __init__(self):
         url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        key = get_secret("SUPABASE_SERVICE_ROLE_KEY")
         if not url or not key:
             logger.warning("Supabase not configured. Memory disabled.")
             self.client = None

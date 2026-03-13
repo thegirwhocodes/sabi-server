@@ -1,10 +1,24 @@
 services:
+  # Asterisk PBX for SIP flash callback (child pays ₦0)
+  asterisk:
+    build:
+      context: ./asterisk
+      dockerfile: Dockerfile
+    container_name: sabi-asterisk
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "10000-10100:10000-10100/udp"
+    volumes:
+      - shared_audio:/shared/audio
+    restart: unless-stopped
+
   # Self-hosted LLM (Ollama with Llama 3.1 8B)
   ollama:
     image: ollama/ollama:latest
     container_name: sabi-ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     deploy:
@@ -23,13 +37,22 @@ services:
       dockerfile: Dockerfile
     container_name: sabi-server
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:4573:4573"
     env_file:
       - .env
     environment:
       - OLLAMA_URL=http://ollama:11434
+      - AMI_HOST=asterisk
+    secrets:
+      - ANTHROPIC_API_KEY
+      - YARNGPT_API_KEY
+      - SUPABASE_SERVICE_ROLE_KEY
+      - SABI_API_KEY
+      - AT_API_KEY
     volumes:
       - ./audio_cache:/app/audio_cache
+      - shared_audio:/shared/audio
     deploy:
       resources:
         reservations:
@@ -39,6 +62,30 @@ services:
               capabilities: [gpu]
     depends_on:
       - ollama
+    restart: unless-stopped
+
+  # Afro-TTS: African-accented English TTS (fine-tuned Bukola voice)
+  afro-tts:
+    build:
+      context: ./afro-tts
+      dockerfile: Dockerfile
+    container_name: sabi-afro-tts
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      - AFRO_TTS_MODEL_DIR=/app/models/bukola
+      - AFRO_TTS_DEFAULT_SPEAKER=bukola
+    volumes:
+      - afro_tts_models:/app/models
+      - /opt/sabi/bukola-model:/app/models/bukola:ro
+      - ./afro-tts/reference_audio:/app/reference_audio
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
   # Nginx reverse proxy with SSL
@@ -65,5 +112,19 @@ services:
       - ./certbot/www:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 
+secrets:
+  ANTHROPIC_API_KEY:
+    file: ./secrets/ANTHROPIC_API_KEY
+  YARNGPT_API_KEY:
+    file: ./secrets/YARNGPT_API_KEY
+  SUPABASE_SERVICE_ROLE_KEY:
+    file: ./secrets/SUPABASE_SERVICE_ROLE_KEY
+  SABI_API_KEY:
+    file: ./secrets/SABI_API_KEY
+  AT_API_KEY:
+    file: ./secrets/AT_API_KEY
+
 volumes:
   ollama_data:
+  afro_tts_models:
+  shared_audio:

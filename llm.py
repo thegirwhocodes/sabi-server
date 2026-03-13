@@ -10,10 +10,12 @@ from typing import Optional
 
 import httpx
 
+from secret_loader import get_secret
+
 logger = logging.getLogger("sabi.llm")
 
 # LLM configuration
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
 

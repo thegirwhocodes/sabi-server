@@ -20,11 +20,11 @@ YARNGPT_VOICES = {
 }
 
 YARNGPT_API_URL = "https://yarngpt.ai/api/v1/tts"
-DEFAULT_VOICE = YARNGPT_VOICES["chinenye"]
+DEFAULT_VOICE = YARNGPT_VOICES["wura"]
 
 
 class TextToSpeech:
-    def __init__(self, voice: str = "chinenye"):
+    def __init__(self, voice: str = "wura"):
         """
         Initialize YarnGPT TTS.
 

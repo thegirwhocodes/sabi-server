@@ -1,10 +1,11 @@
-FROM debian:bullseye-slim
+FROM ubuntu:22.04
 
-# Install Asterisk 18 (stable LTS) + dependencies
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Asterisk from Ubuntu repos + dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     asterisk \
-    asterisk-core-sounds-en-ulaw \
-    asterisk-core-sounds-en-alaw \
+    asterisk-core-sounds-en \
     curl \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*

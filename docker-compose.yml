@@ -64,21 +64,23 @@ services:
       - ollama
     restart: unless-stopped
 
-  # Afro-TTS: African-accented English TTS (fine-tuned Bukola voice)
-  afro-tts:
+  # Chatterbox Turbo TTS: Emotionally expressive Nigerian English voice
+  chatterbox-tts:
     build:
-      context: ./afro-tts
+      context: ./chatterbox-tts
       dockerfile: Dockerfile
-    container_name: sabi-afro-tts
+      args:
+        HF_TOKEN: ${HF_TOKEN:-}
+    container_name: sabi-chatterbox
     ports:
       - "127.0.0.1:8001:8001"
     environment:
-      - AFRO_TTS_MODEL_DIR=/app/models/bukola
-      - AFRO_TTS_DEFAULT_SPEAKER=bukola
+      - CHATTERBOX_REFERENCE_DIR=/app/reference_audio
+      - CHATTERBOX_DEFAULT_SPEAKER=wura
+      - HF_TOKEN=${HF_TOKEN:-}
     volumes:
-      - afro_tts_models:/app/models
-      - /opt/sabi/bukola-model:/app/models/bukola:ro
-      - ./afro-tts/reference_audio:/app/reference_audio
+      - chatterbox_cache:/root/.cache
+      - ./chatterbox-tts/reference_audio:/app/reference_audio
     deploy:
       resources:
         reservations:
@@ -126,5 +128,5 @@ secrets:
 
 volumes:
   ollama_data:
-  afro_tts_models:
+  chatterbox_cache:
   shared_audio:

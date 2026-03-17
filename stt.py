@@ -1,12 +1,30 @@
 """
 Speech-to-Text using faster-whisper.
 Self-hosted Whisper for Nigerian English transcription.
+
+Optimizations for Nigerian English:
+- initial_prompt bias with Nigerian vocabulary (naira, groundnuts, garri, etc.)
+- Tuned VAD for phone-quality audio
 """
 
 import logging
 from faster_whisper import WhisperModel
 
 logger = logging.getLogger("sabi.stt")
+
+# Whisper prompt bias — providing domain-specific vocabulary in the initial_prompt
+# biases the decoder toward recognizing these words correctly.
+# This is the single biggest accuracy boost without fine-tuning.
+NIGERIAN_ENGLISH_PROMPT = (
+    "Sabi is an AI tutor for children in Lagos, Nigeria. "
+    "The child is learning about naira, kobo, groundnuts, pure water, garri, "
+    "suya, biscuits, exercise books, bus fare, okada, danfo, keke. "
+    "Common words: oya, wahala, sharp sharp, well done, correct, "
+    "how much, change, market, mama, papa, auntie, uncle. "
+    "Numbers: one, two, three, four, five, six, seven, eight, nine, ten, "
+    "twenty, fifty, hundred, thousand. "
+    "Math: plus, minus, times, divided by, equals, remainder, total, altogether."
+)
 
 
 class SpeechToText:
@@ -45,6 +63,7 @@ class SpeechToText:
             audio_path,
             language="en",
             beam_size=5,
+            initial_prompt=NIGERIAN_ENGLISH_PROMPT,
             vad_filter=True,          # Voice activity detection — trim silence
             vad_parameters={
                 "min_silence_duration_ms": 500,

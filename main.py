@@ -30,6 +30,7 @@ from tts import TextToSpeech
 from llm import SabiLLM
 from memory import StudentMemory
 from voice import router as voice_router
+from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server
 from secret_loader import get_secret
 
@@ -179,6 +180,9 @@ app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
 
 # Voice webhook routes (Africa's Talking)
 app.include_router(voice_router, prefix="/voice")
+
+# Twilio voice webhook routes
+app.include_router(twilio_router, prefix="/voice/twilio")
 
 
 @app.get("/health")

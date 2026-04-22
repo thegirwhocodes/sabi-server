@@ -60,23 +60,23 @@ class StudentMemory:
         # Look up existing
         result = self.client.table("sabi_students").select("*").eq(
             "phone_number", phone_number
-        ).maybe_single().execute()
+        ).execute()
 
-        if result.data:
-            return {**result.data, "is_new": False}
+        if result and result.data and len(result.data) > 0:
+            return {**result.data[0], "is_new": False}
 
-        # Create new student
+        # Create new student (only columns that exist in the table)
         result = self.client.table("sabi_students").insert({
             "phone_number": phone_number,
-            "current_module": 0,
             "current_level": "beginner",
             "total_sessions": 0,
             "total_correct": 0,
             "total_wrong": 0,
-            "skills": {},
-        }).select("*").single().execute()
+        }).execute()
 
-        return {**result.data, "is_new": True}
+        if result and result.data and len(result.data) > 0:
+            return {**result.data[0], "is_new": True}
+        return {"id": "new", "name": None, "current_module": 0, "is_new": True}
 
     async def get_student_context(self, student_id: str) -> str:
         """
@@ -90,12 +90,12 @@ class StudentMemory:
             # Get student
             student_result = self.client.table("sabi_students").select("*").eq(
                 "id", student_id
-            ).maybe_single().execute()
+            ).execute()
 
-            if not student_result.data:
+            if not student_result or not student_result.data or len(student_result.data) == 0:
                 return ""
 
-            student = student_result.data
+            student = student_result.data[0]
             current_module = student.get("current_module", 0)
             module_name = MODULE_NAMES.get(current_module, "diagnostic")
 

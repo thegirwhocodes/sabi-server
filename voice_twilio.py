@@ -1,6 +1,6 @@
 """
 Twilio voice webhook handlers for Sabi.
-Same AI pipeline as Africa's Talking (Whisper → Claude → Chatterbox),
+Same AI pipeline as Africa's Talking (Whisper → Claude → ElevenLabs/Chatterbox),
 just wrapped in TwiML instead of AT XML.
 """
 
@@ -21,8 +21,12 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 THINKING_CUE_COUNT = 5
 
-# Chatterbox TTS server
+# Chatterbox TTS server (fallback)
 CHATTERBOX_URL = os.getenv("CHATTERBOX_URL", "http://localhost:8001")
+
+# ElevenLabs — same model/voice_settings as curriculum-app/lib/voice/tts-client.ts (website demo parity)
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "oC2pCZZWEDRe6lmZpaaw")
+ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or "eleven_flash_v2_5"
 
 
 def twiml_response(twiml: str) -> Response:
@@ -64,6 +68,49 @@ async def synthesize_chatterbox(text: str, output_path: str) -> bool:
         return False
 
 
+async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
+    """Generate speech via ElevenLabs with Bukola voice (or ELEVENLABS_VOICE_ID)."""
+    if not ELEVENLABS_API_KEY:
+        return False
+    try:
+        spoken_text = text.replace("₦", "naira ")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+                headers={
+                    "Content-Type": "application/json",
+                    "xi-api-key": ELEVENLABS_API_KEY,
+                },
+                json={
+                    "text": spoken_text,
+                    "model_id": ELEVENLABS_MODEL_ID,
+                    "voice_settings": {
+                        "stability": 0.28,
+                        "similarity_boost": 0.7,
+                        "speed": 1.0,
+                        "use_speaker_boost": True,
+                    },
+                },
+            )
+            resp.raise_for_status()
+            with open(output_path, "wb") as f:
+                f.write(resp.content)
+            logger.info(f"ElevenLabs TTS ({ELEVENLABS_VOICE_ID[:8]}…): {len(text)} chars")
+            return True
+    except Exception as e:
+        logger.warning(f"ElevenLabs TTS failed: {e}")
+        return False
+
+
+async def synthesize_tts(text: str, output_path: str, request) -> None:
+    """Try ElevenLabs → Chatterbox → YarnGPT fallback chain."""
+    if await synthesize_elevenlabs(text, output_path):
+        return
+    if await synthesize_chatterbox(text, output_path):
+        return
+    request.app.state.tts.synthesize(text, output_path)
+
+
 @router.post("/incoming")
 async def twilio_incoming(request: Request):
     """
@@ -94,12 +141,10 @@ async def twilio_incoming(request: Request):
         {"role": "assistant", "content": greeting}
     ])
 
-    # Generate greeting audio via Chatterbox
+    # Generate greeting audio (ElevenLabs Bukola → Chatterbox → YarnGPT)
     audio_id = uuid.uuid4().hex
     audio_path = f"audio_cache/greeting_{audio_id}.mp3"
-    if not await synthesize_chatterbox(greeting, audio_path):
-        # Fallback to YarnGPT
-        request.app.state.tts.synthesize(greeting, audio_path)
+    await synthesize_tts(greeting, audio_path, request)
 
     logger.info(f"Greeting generated for {caller}: {greeting[:80]}...")
 
@@ -190,8 +235,7 @@ async def twilio_recording(request: Request):
         repeat_id = uuid.uuid4().hex
         repeat_text = "I didn't quite catch that. Can you say it again?"
         repeat_path = f"audio_cache/repeat_{repeat_id}.mp3"
-        if not await synthesize_chatterbox(repeat_text, repeat_path):
-            request.app.state.tts.synthesize(repeat_text, repeat_path)
+        await synthesize_tts(repeat_text, repeat_path, request)
 
         return twiml_response(f"""
         <Play>{SERVER_URL}/audio/repeat_{repeat_id}.mp3</Play>
@@ -232,11 +276,10 @@ async def twilio_recording(request: Request):
 
     logger.info(f"LLM response ({user_turns} turns): {response_text[:80]}...")
 
-    # 7. TTS via Chatterbox (fallback to YarnGPT)
+    # 7. TTS (ElevenLabs Bukola → Chatterbox → YarnGPT)
     response_id = uuid.uuid4().hex
     response_path = f"audio_cache/response_{response_id}.mp3"
-    if not await synthesize_chatterbox(response_text, response_path):
-        request.app.state.tts.synthesize(response_text, response_path)
+    await synthesize_tts(response_text, response_path, request)
 
     # 8. Check for wrap-up
     wrap_phrases = ["call me back", "bye", "well done today", "great job today", "see you next time"]

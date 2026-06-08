@@ -74,7 +74,7 @@ async def incoming_call(request: Request):
 <Response>
     <Play url="{SERVER_URL}/audio/greeting_{audio_id}.mp3"/>
     <Record finishOnKey="#" maxLength="10" trimSilence="true"
-            callbackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student['id']}&module={student.get('current_module', 0)}"
+            callBackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student['id']}&module={student.get('current_module', 0)}"
             playBeep="false"/>
 </Response>"""
 
@@ -105,7 +105,7 @@ async def handle_recording(request: Request):
 <Response>
     <Play url="{SERVER_URL}/audio/thinking_{cue_idx}.mp3"/>
     <Record finishOnKey="#" maxLength="10" trimSilence="true"
-            callbackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student_id}&module={current_module}"
+            callBackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student_id}&module={current_module}"
             playBeep="false"/>
 </Response>""")
 
@@ -147,7 +147,7 @@ async def handle_recording(request: Request):
 <Response>
     <Play url="{SERVER_URL}/audio/repeat_{repeat_audio_id}.mp3"/>
     <Record finishOnKey="#" maxLength="10" trimSilence="true"
-            callbackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student_id}&module={current_module}"
+            callBackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student_id}&module={current_module}"
             playBeep="false"/>
 </Response>""")
 
@@ -205,7 +205,7 @@ async def handle_recording(request: Request):
 <Response>
     <Play url="{SERVER_URL}/audio/response_{response_audio_id}.mp3"/>
     <Record finishOnKey="#" maxLength="10" trimSilence="true"
-            callbackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student_id}&module={current_module}"
+            callBackUrl="{SERVER_URL}/voice/recording?session={session_id}&student={student_id}&module={current_module}"
             playBeep="false"/>
 </Response>""")
 

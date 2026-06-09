@@ -1,0 +1,11 @@
+# Afro-TTS server dependencies
+# PyTorch must be installed first (done in Dockerfile)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+huggingface-hub>=0.20.0
+coqui-tts>=0.24.0
+scipy>=1.11.2
+soundfile>=0.12.0
+numpy<2.0.0
+pydantic>=2.0.0

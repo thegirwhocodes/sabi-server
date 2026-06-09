@@ -6,3 +6,18 @@ certbot/
 *.egg-info/
 venv/
 .venv/
+
+# Mac junk
+.DS_Store
+# Audio test files and voice samples (large)
+*.wav
+*.mp3
+voice-auditions/
+# ML model artifacts
+whisper-finetune/*.pt
+whisper-finetune/checkpoints/
+afro-tts/finetune/
+afro-tts/reference_audio/
+# Secrets
+.env.local
+secrets/

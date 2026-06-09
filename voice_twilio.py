@@ -12,11 +12,16 @@ import httpx
 
 from fastapi import APIRouter, Request, Response
 
+from normalize_money_for_speech import normalize_money_for_speech
+from secret_loader import get_secret
+
 logger = logging.getLogger("sabi.voice.twilio")
 
 router = APIRouter()
 
 SERVER_URL = os.getenv("SERVER_URL", "https://api.eduforequality.org")
+
+ELEVENLABS_API_KEY = get_secret("ELEVENLABS_API_KEY")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 THINKING_CUE_COUNT = 5
@@ -73,7 +78,6 @@ async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
     if not ELEVENLABS_API_KEY:
         return False
     try:
-        spoken_text = text.replace("₦", "naira ")
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
@@ -82,7 +86,7 @@ async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
                     "xi-api-key": ELEVENLABS_API_KEY,
                 },
                 json={
-                    "text": spoken_text,
+                    "text": text,
                     "model_id": ELEVENLABS_MODEL_ID,
                     "voice_settings": {
                         "stability": 0.28,
@@ -104,11 +108,12 @@ async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
 
 async def synthesize_tts(text: str, output_path: str, request) -> None:
     """Try ElevenLabs → Chatterbox → YarnGPT fallback chain."""
-    if await synthesize_elevenlabs(text, output_path):
+    t = normalize_money_for_speech(text)
+    if await synthesize_elevenlabs(t, output_path):
         return
-    if await synthesize_chatterbox(text, output_path):
+    if await synthesize_chatterbox(t, output_path):
         return
-    request.app.state.tts.synthesize(text, output_path)
+    request.app.state.tts.synthesize(t, output_path)
 
 
 @router.post("/incoming")

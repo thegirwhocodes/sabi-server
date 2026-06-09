@@ -8,6 +8,7 @@ import logging
 import httpx
 
 from secret_loader import get_secret
+from normalize_money_for_speech import normalize_money_for_speech
 
 logger = logging.getLogger("sabi.tts")
 
@@ -54,12 +55,7 @@ class TextToSpeech:
         if not self.api_key:
             raise RuntimeError("YARNGPT_API_KEY not configured")
 
-        clean_text = (
-            text
-            .replace("₦", "naira ")
-            .replace("  ", " ")
-            .strip()
-        )
+        clean_text = normalize_money_for_speech(text).strip()
 
         if len(clean_text) > 2000:
             logger.warning(f"Text exceeds 2000 char limit ({len(clean_text)}), truncating")

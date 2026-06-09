@@ -1,0 +1,32 @@
+# Whisper fine-tuning dependencies
+# For NVIDIA RTX 4000 SFF Ada (CUDA 12.x)
+
+# PyTorch with CUDA 12.1 support
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
+
+# HuggingFace ecosystem
+transformers>=4.45.0
+datasets>=3.0.0
+accelerate>=1.0.0
+evaluate>=0.4.0
+peft>=0.13.0          # LoRA adapters
+
+# Whisper-specific
+jiwer>=3.0.0         # WER computation
+soundfile>=0.12.0    # Audio I/O
+librosa>=0.10.0      # Audio processing
+
+
+# Memory optimization
+bitsandbytes>=0.44.0  # 8-bit AdamW optimizer
+
+# CTranslate2 conversion (Whisper → faster-whisper format)
+ctranslate2>=4.4.0
+
+# Monitoring
+tensorboard>=2.14.0
+
+# Utilities
+numpy>=1.24.0

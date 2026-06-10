@@ -50,6 +50,9 @@ services:
       - SUPABASE_SERVICE_ROLE_KEY
       - SABI_API_KEY
       - AT_API_KEY
+      - ELEVENLABS_API_KEY
+      - ELEVENLABS_VOICE_ID
+      - TWILIO_AUTH_TOKEN
     volumes:
       - ./audio_cache:/app/audio_cache
       - shared_audio:/shared/audio
@@ -76,7 +79,7 @@ services:
       - "127.0.0.1:8001:8001"
     environment:
       - CHATTERBOX_REFERENCE_DIR=/app/reference_audio
-      - CHATTERBOX_DEFAULT_SPEAKER=wura
+      - CHATTERBOX_DEFAULT_SPEAKER=naomi
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - chatterbox_cache:/root/.cache
@@ -125,6 +128,12 @@ secrets:
     file: ./secrets/SABI_API_KEY
   AT_API_KEY:
     file: ./secrets/AT_API_KEY
+  ELEVENLABS_API_KEY:
+    file: ./secrets/ELEVENLABS_API_KEY
+  ELEVENLABS_VOICE_ID:
+    file: ./secrets/ELEVENLABS_VOICE_ID
+  TWILIO_AUTH_TOKEN:
+    file: ./secrets/TWILIO_AUTH_TOKEN
 
 volumes:
   ollama_data:

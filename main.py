@@ -17,6 +17,7 @@ import time
 import asyncio
 import logging
 from pathlib import Path
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form, Request, Response
@@ -66,7 +67,12 @@ async def synthesize_chatterbox(text: str, output_path: str) -> bool:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
                 f"{CHATTERBOX_URL}/tts",
-                json={"text": text[:2000], "format": "mp3", "exaggeration": exaggeration},
+                json={
+                    "text": text[:2000],
+                    "speaker_name": "naomi",
+                    "format": "mp3",
+                    "exaggeration": exaggeration,
+                },
             )
             resp.raise_for_status()
             with open(output_path, "wb") as f:
@@ -160,6 +166,59 @@ OPEN_PATHS = {"/health", "/docs", "/openapi.json"}
 OPEN_PREFIXES = ("/voice/", "/audio/", "/asterisk/")
 
 
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple per-IP sliding-window rate limiter for public and AI endpoints."""
+
+    LIMITS = {
+        "ai": (30, 60),
+        "voice": (120, 60),
+        "general": (60, 60),
+    }
+    AI_PATHS = {"/stt", "/tts", "/llm", "/process-turn"}
+    VOICE_PREFIXES = ("/voice/", "/asterisk/")
+
+    def __init__(self, app):
+        super().__init__(app)
+        self._hits = defaultdict(deque)
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path in self.AI_PATHS:
+            tier = "ai"
+        elif path.startswith(self.VOICE_PREFIXES):
+            tier = "voice"
+        else:
+            tier = "general"
+
+        limit, window = self.LIMITS[tier]
+        now = time.monotonic()
+        ip = self._client_ip(request)
+        key = (tier, ip)
+        hits = self._hits[key]
+
+        while hits and now - hits[0] > window:
+            hits.popleft()
+        if len(hits) >= limit:
+            return JSONResponse(
+                {"error": "Too Many Requests"},
+                status_code=429,
+                headers={"Retry-After": str(window)},
+            )
+
+        hits.append(now)
+        return await call_next(request)
+
+    @staticmethod
+    def _client_ip(request: Request) -> str:
+        real_ip = request.headers.get("x-real-ip", "").strip()
+        if real_ip:
+            return real_ip
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.rsplit(",", 1)[-1].strip()
+        return request.client.host if request.client else "unknown"
+
+
 class APIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -174,6 +233,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(APIKeyMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 # Mount audio files directory
 app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
@@ -222,7 +282,7 @@ async def speech_to_text(request: Request):
 
 @app.post("/tts")
 async def text_to_speech(request: Request):
-    """Generate speech audio from text using YarnGPT."""
+    """Generate speech audio from text using Chatterbox, falling back to YarnGPT."""
     data = await request.json()
     text = data.get("text", "")
     if not text:
@@ -232,7 +292,8 @@ async def text_to_speech(request: Request):
     output_path = AUDIO_DIR / f"tts_{audio_id}.mp3"
 
     start = time.time()
-    app.state.tts.synthesize(text, str(output_path))
+    if not await synthesize_chatterbox(text, str(output_path)):
+        app.state.tts.synthesize(text, str(output_path))
     elapsed = time.time() - start
     logger.info(f"TTS: {len(text)} chars → {output_path.name} ({elapsed:.1f}s)")
 

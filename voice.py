@@ -236,7 +236,12 @@ async def _synthesize_chatterbox(app, text: str, output_path: str) -> bool:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
                 f"{chatterbox_url}/tts",
-                json={"text": text[:2000], "format": "mp3", "exaggeration": exaggeration},
+                json={
+                    "text": text[:2000],
+                    "speaker_name": "naomi",
+                    "format": "mp3",
+                    "exaggeration": exaggeration,
+                },
             )
             resp.raise_for_status()
             with open(output_path, "wb") as f:

@@ -23,14 +23,14 @@ SERVER_URL = os.getenv("SERVER_URL", "https://api.eduforequality.org")
 
 ELEVENLABS_API_KEY = get_secret("ELEVENLABS_API_KEY")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_AUTH_TOKEN = get_secret("TWILIO_AUTH_TOKEN")
 THINKING_CUE_COUNT = 5
 
 # Chatterbox TTS server (fallback)
 CHATTERBOX_URL = os.getenv("CHATTERBOX_URL", "http://localhost:8001")
 
 # ElevenLabs — same model/voice_settings as curriculum-app/lib/voice/tts-client.ts (website demo parity)
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "oC2pCZZWEDRe6lmZpaaw")
+ELEVENLABS_VOICE_ID = get_secret("ELEVENLABS_VOICE_ID", "oC2pCZZWEDRe6lmZpaaw")
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or "eleven_flash_v2_5"
 
 
@@ -61,7 +61,12 @@ async def synthesize_chatterbox(text: str, output_path: str) -> bool:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{CHATTERBOX_URL}/tts",
-                json={"text": text[:2000], "format": "mp3", "exaggeration": exaggeration},
+                json={
+                    "text": text[:2000],
+                    "speaker_name": "naomi",
+                    "format": "mp3",
+                    "exaggeration": exaggeration,
+                },
             )
             resp.raise_for_status()
             with open(output_path, "wb") as f:

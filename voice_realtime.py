@@ -680,6 +680,7 @@ class RealtimeCall:
             student_id = student["id"]
             effective_state = await self.memory.get_effective_learning_state(student)
             starting_learning_state = dict(effective_state)
+            identity_confirmed = not student.get("needs_identity_confirmation")
             module = int(effective_state.get("current_module") or student.get("current_module") or 0)
             logger.info(
                 "Realtime student=%s module=%s skill=%s scaffold=%s new=%s",
@@ -786,6 +787,27 @@ class RealtimeCall:
                 retry_streak = 0
                 text_for_lesson = _normalize_transcript_for_lesson(text, messages)
                 messages.append({"role": "user", "content": text_for_lesson})
+                if not identity_confirmed:
+                    resolved_student = await self.memory.resolve_student_for_spoken_identity(
+                        student,
+                        self.phone,
+                        messages,
+                    )
+                    if resolved_student:
+                        old_student_id = student_id
+                        student = resolved_student
+                        student_id = resolved_student.get("id") or student_id
+                        effective_state = await self.memory.get_effective_learning_state(student)
+                        starting_learning_state = dict(effective_state)
+                        module = int(effective_state.get("current_module") or student.get("current_module") or module or 0)
+                        identity_confirmed = True
+                        logger.info(
+                            "Realtime resolved shared-phone identity old_student=%s new_student=%s child=%s module=%s",
+                            old_student_id,
+                            student_id,
+                            resolved_student.get("spoken_child_name") or resolved_student.get("name"),
+                            module,
+                        )
                 try:
                     turn_stats = analyze_session(
                         {**student, "learning_state": effective_state, "current_module": module},

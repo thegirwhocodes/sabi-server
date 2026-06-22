@@ -302,6 +302,27 @@ def main() -> int:
         and set(shared_lookup.get("shared_phone_profiles") or []) == {"Remi", "Amara"},
         f"{shared_lookup}",
     )
+    mid_call_amara = asyncio.run(
+        shared_phone_memory.resolve_student_for_spoken_identity(
+            shared_lookup,
+            "+2348033374126",
+            [
+                {
+                    "role": "assistant",
+                    "content": "I remember this phone, but more than one learner may use it. What is your name?",
+                },
+                {"role": "user", "content": "My name is Amara"},
+            ],
+        )
+    )
+    ok &= check(
+        "shared_phone_mid_call_switches_to_named_learner",
+        mid_call_amara is not None
+        and mid_call_amara["id"] == "amara-row"
+        and mid_call_amara["is_new"] is False
+        and mid_call_amara["spoken_child_name"] == "Amara",
+        f"{mid_call_amara}",
+    )
     remi_lookup = asyncio.run(shared_phone_memory.find_or_create_student("+2348033374126", child_name="Remi"))
     ok &= check(
         "shared_phone_same_child_reuses_named_profile",

@@ -419,6 +419,35 @@ class StudentMemory:
             return {**row, "is_new": False}
         return {"id": "new", "name": None, "current_module": 0, "is_new": True}
 
+    async def resolve_student_for_spoken_identity(
+        self,
+        current_student: dict,
+        phone_number: str,
+        messages: list[dict],
+    ) -> dict | None:
+        """Switch a shared-phone call to the named learner as soon as the child answers."""
+        if not self.client or not current_student.get("needs_identity_confirmation"):
+            return None
+        spoken_child_name = extract_child_name(messages)
+        if not spoken_child_name:
+            return None
+
+        normalized_phone = normalize_phone_number(phone_number)
+        variants = phone_lookup_variants(phone_number)
+        resolved = self._resolve_student_for_session(
+            current_student=current_student,
+            normalized_phone=normalized_phone,
+            variants=variants,
+            child_name=spoken_child_name,
+        )
+        if not resolved or resolved.get("_identity_conflict_unresolved"):
+            return None
+        return {
+            **resolved,
+            "is_new": resolved.get("id") != current_student.get("id"),
+            "spoken_child_name": spoken_child_name,
+        }
+
     async def get_student_context(self, student_id: str) -> str:
         """
         Load student memory context for LLM system prompt.

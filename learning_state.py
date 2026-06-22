@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from diagnostic_flow import analyze_diagnostic_progress, analyze_literacy_diagnostic_progress, onboarding_status_from_messages
+from diagnostic_flow import (
+    NUMERACY_DIAGNOSTIC_ITEMS,
+    analyze_diagnostic_progress,
+    analyze_literacy_diagnostic_progress,
+    onboarding_status_from_messages,
+)
 from numeric_grading import analyze_latest_numeric_turn
 
 
@@ -216,6 +221,13 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
     placement = diagnostic_progress.get("placement") if diagnostic_progress else None
     if placement:
         recommended_module = int(placement.get("module") or current_module or 0)
+    elif (
+        current_module == 0
+        and diagnostic_progress
+        and diagnostic_progress.get("status") in {"not_started", "in_progress"}
+        and _is_ordered_diagnostic_prefix(diagnostic_progress)
+    ):
+        recommended_module = 0
     else:
         recommended_module = _recommended_module(current_module, active_skill, correct_streak, wrong_streak, scaffold_depth)
     should_advance = correct_streak >= 3 and wrong_count == 0 and current_module not in (0, 7)
@@ -415,6 +427,13 @@ def _recommended_module(current_module: int, active_skill: str, correct_streak: 
     return current_module
 
 
+def _is_ordered_diagnostic_prefix(diagnostic_progress: dict[str, Any]) -> bool:
+    results = diagnostic_progress.get("results") or []
+    answered_ids = [result.get("item_id") for result in results]
+    expected_prefix = [item.id for item in NUMERACY_DIAGNOSTIC_ITEMS[: len(answered_ids)]]
+    return answered_ids == expected_prefix
+
+
 def _current_level(skill_scores: dict[str, float], scaffold_depth: int, wrong_streak: int) -> str:
     if wrong_streak >= 2 or scaffold_depth >= 2:
         return "beginner"
@@ -434,10 +453,10 @@ def _phase_for_state(
     diagnostic_progress: dict[str, Any] | None = None,
     onboarding_status: str = "complete",
 ) -> str:
-    if current_module == 0 and onboarding_status != "complete":
-        return "onboarding"
     if recommended_module != 0 and current_module == 0:
         return "first_mini_lesson" if correct_count + wrong_count <= 1 else "guided_practice"
+    if current_module == 0 and onboarding_status != "complete":
+        return "onboarding"
     if diagnostic_progress:
         if diagnostic_progress.get("status") in {"not_started", "in_progress"}:
             return "diagnostic"

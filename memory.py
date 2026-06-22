@@ -20,6 +20,7 @@ from secret_loader import get_secret
 logger = logging.getLogger("sabi.memory")
 
 LEARNING_STATE_SNAPSHOT_PREFIX = "SABI_LEARNING_STATE_SNAPSHOT:"
+COMPAT_LEARNER_PREFIX = "sabi-phone"
 
 MODULE_NAMES = {
     0: "diagnostic",
@@ -223,7 +224,7 @@ class StudentMemory:
 
             identity_name = stats.child_name or spoken_child_name or student.get("name")
             update_payload = {
-                **_phone_identity_payload(normalized_phone, identity_name),
+                **_identity_payload_for_existing_row(student, normalized_phone, identity_name),
                 "name": identity_name,
                 "total_sessions": (student.get("total_sessions") or 0) + 1,
                 "total_correct": (student.get("total_correct") or 0) + stats.correct_count,
@@ -527,7 +528,8 @@ class StudentMemory:
             ).execute()
             if result and result.data:
                 row = _choose_canonical_student(result.data)
-                self._backfill_phone_identity(row.get("id"), normalized_phone)
+                if not _is_compatibility_learner_row(row, normalized_phone):
+                    self._backfill_phone_identity(row.get("id"), normalized_phone)
                 return _annotate_shared_phone_profiles(row, result.data)
         except Exception as exc:
             if not _mentions_any_column(exc, {"phone_number_normalized"}):
@@ -538,7 +540,8 @@ class StudentMemory:
         ).execute()
         if result and result.data and len(result.data) > 0:
             row = _choose_canonical_student(result.data)
-            self._backfill_phone_identity(row.get("id"), normalized_phone)
+            if not _is_compatibility_learner_row(row, normalized_phone):
+                self._backfill_phone_identity(row.get("id"), normalized_phone)
             return _annotate_shared_phone_profiles(row, result.data)
         return None
 
@@ -563,13 +566,27 @@ class StudentMemory:
                 if not _mentions_any_column(exc, {"learner_key"}):
                     logger.warning("Learner-key lookup failed: %s", exc)
 
+        compatibility_key = compatibility_learner_key_for(normalized_phone, child_name)
+        if compatibility_key:
+            for column in ("browser_id", "phone_number"):
+                try:
+                    result = self.client.table("sabi_students").select("*").eq(
+                        column, compatibility_key
+                    ).execute()
+                    if result and result.data:
+                        return result.data[0]
+                except Exception as exc:
+                    if not _mentions_any_column(exc, {column}):
+                        logger.debug("Compatibility learner lookup failed column=%s: %s", column, exc)
+
         for row in self._lookup_student_rows_by_phone(normalized_phone, variants):
             row_name_key = (
                 normalize_child_name_for_identity(row.get("child_name_normalized"))
                 or normalize_child_name_for_identity(row.get("name"))
             )
             if row_name_key == name_key:
-                self._backfill_phone_identity(row.get("id"), normalized_phone, child_name)
+                if not _is_compatibility_learner_row(row, normalized_phone):
+                    self._backfill_phone_identity(row.get("id"), normalized_phone, child_name)
                 return row
         return None
 
@@ -591,6 +608,22 @@ class StudentMemory:
             rows.extend(result.data or [])
         except Exception as exc:
             logger.debug("Phone variant multi-row lookup failed: %s", exc)
+
+        try:
+            result = self.client.table("sabi_students").select("*").like(
+                "phone_number", f"{normalized_phone}::%"
+            ).execute()
+            rows.extend(result.data or [])
+        except Exception as exc:
+            logger.debug("Compatibility phone-key lookup failed: %s", exc)
+
+        try:
+            result = self.client.table("sabi_students").select("*").like(
+                "browser_id", f"{COMPAT_LEARNER_PREFIX}::{normalized_phone}::%"
+            ).execute()
+            rows.extend(result.data or [])
+        except Exception as exc:
+            logger.debug("Compatibility browser-key lookup failed: %s", exc)
 
         deduped: dict[str, dict] = {}
         for row in rows:
@@ -646,6 +679,9 @@ class StudentMemory:
                 named_row = self._lookup_student_by_phone_and_name(normalized_phone, variants, child_name)
                 if named_row:
                     return named_row
+                compatibility_row = self._insert_compatibility_named_student(normalized_phone, child_name)
+                if compatibility_row:
+                    return compatibility_row
                 logger.warning(
                     "Shared-phone named learner insert blocked by existing unique phone index; "
                     "run shared-phone identity migration. phone=%s child=%s",
@@ -657,6 +693,52 @@ class StudentMemory:
         if result and result.data:
             return result.data[0]
         return current_student
+
+    def _insert_compatibility_named_student(self, normalized_phone: str, child_name: str) -> dict | None:
+        compatibility_key = compatibility_learner_key_for(normalized_phone, child_name)
+        if not compatibility_key:
+            return None
+        payload = {
+            "browser_id": f"{COMPAT_LEARNER_PREFIX}::{compatibility_key}",
+            "phone_number": compatibility_key,
+            "name": child_name,
+            "current_level": "beginner",
+            "total_sessions": 0,
+            "total_correct": 0,
+            "total_wrong": 0,
+        }
+        try:
+            result = self.client.table("sabi_students").insert(payload).execute()
+            if result and result.data:
+                logger.info(
+                    "Created compatibility shared-phone learner row phone=%s child=%s",
+                    normalized_phone,
+                    child_name,
+                )
+                return result.data[0]
+        except Exception as exc:
+            if _is_duplicate_key_error(exc):
+                return self._lookup_student_by_phone_and_name(
+                    normalized_phone,
+                    [normalized_phone, compatibility_key],
+                    child_name,
+                )
+            if _mentions_any_column(exc, {"browser_id"}):
+                try:
+                    result = self.client.table("sabi_students").insert({
+                        "phone_number": compatibility_key,
+                        "name": child_name,
+                        "current_level": "beginner",
+                        "total_sessions": 0,
+                        "total_correct": 0,
+                        "total_wrong": 0,
+                    }).execute()
+                    if result and result.data:
+                        return result.data[0]
+                except Exception as fallback_exc:
+                    logger.debug("Compatibility learner fallback insert failed: %s", fallback_exc)
+            logger.debug("Compatibility learner insert failed: %s", exc)
+        return None
 
     def _update_student_with_fallback(self, student_id: str, payload: dict):
         try:
@@ -753,6 +835,10 @@ def learner_key_for(normalized_phone: str | None, child_name: str | None) -> str
     return f"{phone_key}::{name_key}"
 
 
+def compatibility_learner_key_for(normalized_phone: str | None, child_name: str | None) -> str | None:
+    return learner_key_for(normalized_phone, child_name)
+
+
 def _phone_identity_payload(normalized_phone: str, child_name: str | None = None) -> dict:
     payload = {
         "phone_number": normalized_phone,
@@ -766,6 +852,31 @@ def _phone_identity_payload(normalized_phone: str, child_name: str | None = None
     if learner_key:
         payload["learner_key"] = learner_key
     return payload
+
+
+def _compatibility_identity_payload(normalized_phone: str, child_name: str | None = None) -> dict:
+    compatibility_key = compatibility_learner_key_for(normalized_phone, child_name)
+    if not compatibility_key:
+        return {"phone_number": normalized_phone}
+    return {
+        "phone_number": compatibility_key,
+        "browser_id": f"{COMPAT_LEARNER_PREFIX}::{compatibility_key}",
+    }
+
+
+def _identity_payload_for_existing_row(row: dict, normalized_phone: str, child_name: str | None = None) -> dict:
+    if _is_compatibility_learner_row(row, normalized_phone):
+        return _compatibility_identity_payload(normalized_phone, child_name or row.get("name"))
+    return _phone_identity_payload(normalized_phone, child_name)
+
+
+def _is_compatibility_learner_row(row: dict, normalized_phone: str) -> bool:
+    phone_number = str(row.get("phone_number") or "")
+    browser_id = str(row.get("browser_id") or "")
+    return (
+        phone_number.startswith(f"{normalized_phone}::")
+        or browser_id.startswith(f"{COMPAT_LEARNER_PREFIX}::{normalized_phone}::")
+    )
 
 
 def _annotate_shared_phone_profiles(row: dict, rows: list[dict]) -> dict:

@@ -32,7 +32,7 @@ from curriculum_path import (
     resolve_literacy_lesson,
 )
 from learning_state import analyze_session, extract_child_name
-from memory import StudentMemory, _learning_state_snapshot_message, learner_key_for
+from memory import StudentMemory, _learning_state_snapshot_message, compatibility_learner_key_for, learner_key_for
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from voice_asterisk import (
     MIN_LESSON_SECONDS,
@@ -79,6 +79,10 @@ class FakeQuery:
         self.filters.append(("in", column, values))
         return self
 
+    def like(self, column, pattern):
+        self.filters.append(("like", column, pattern))
+        return self
+
     def insert(self, payload):
         self.operation = "insert"
         self.payload = payload
@@ -103,6 +107,9 @@ class FakeQuery:
                     rows = [row for row in rows if row.get(column) == value]
                 elif op == "in":
                     rows = [row for row in rows if row.get(column) in value]
+                elif op == "like":
+                    prefix = str(value).replace("%", "")
+                    rows = [row for row in rows if str(row.get(column) or "").startswith(prefix)]
             return FakeResult([dict(row) for row in rows])
         if self.operation == "update":
             for op, column, value in self.filters:
@@ -333,6 +340,64 @@ def main() -> int:
         and split_memory.client.rows[0]["name"] == "Chidi"
         and len(split_memory.client.rows) == 2,
         f"amara={amara_row} rows={split_memory.client.rows}",
+    )
+
+    legacy_split_memory = StudentMemory.__new__(StudentMemory)
+    legacy_split_memory.client = FakeSupabaseClient(
+        rows=[
+            {
+                "id": "legacy-chidi",
+                "phone_number": "+2348033374126",
+                "browser_id": None,
+                "name": "Chidi",
+                "total_sessions": 3,
+                "created_at": "2026-06-01T00:00:00+00:00",
+            },
+        ],
+        has_normalized_column=False,
+        unique_phone=True,
+        missing_columns={
+            "phone_number_normalized",
+            "phone_household_key",
+            "child_name_normalized",
+            "learner_key",
+            "current_module",
+            "current_topic",
+            "skills",
+            "learning_state",
+            "baseline_status",
+            "diagnostic_results",
+            "current_week",
+            "current_lesson",
+            "tarl_level",
+        },
+    )
+    legacy_amara = legacy_split_memory._resolve_student_for_session(
+        current_student=legacy_split_memory.client.rows[0],
+        normalized_phone="+2348033374126",
+        variants=phone_lookup_variants("+2348033374126"),
+        child_name="Amara",
+    )
+    legacy_key = compatibility_learner_key_for("+2348033374126", "Amara")
+    ok &= check(
+        "legacy_schema_shared_phone_uses_compatibility_profile",
+        legacy_amara["id"] != "legacy-chidi"
+        and legacy_amara["phone_number"] == legacy_key
+        and legacy_amara["browser_id"] == f"sabi-phone::{legacy_key}"
+        and legacy_amara["name"] == "Amara"
+        and legacy_split_memory.client.rows[0]["name"] == "Chidi"
+        and len(legacy_split_memory.client.rows) == 2,
+        f"legacy_amara={legacy_amara} rows={legacy_split_memory.client.rows}",
+    )
+    legacy_lookup = legacy_split_memory._lookup_student_by_phone_and_name(
+        "+2348033374126",
+        phone_lookup_variants("+2348033374126"),
+        "Amara",
+    )
+    ok &= check(
+        "legacy_schema_named_lookup_finds_compatibility_profile",
+        legacy_lookup["id"] == legacy_amara["id"],
+        f"lookup={legacy_lookup}",
     )
 
     snapshot_memory = StudentMemory.__new__(StudentMemory)

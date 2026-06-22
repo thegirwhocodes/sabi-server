@@ -185,6 +185,111 @@ def main() -> int:
         str(historical_state),
     )
 
+    name_only_state = memory._effective_state_from_student_and_sessions(
+        {"id": "demo", "current_level": "beginner"},
+        [
+            {
+                "created_at": "2026-06-01T09:00:00+00:00",
+                "messages": [
+                    {"role": "assistant", "content": "Hello! I'm Sabi, your learning friend. What is your name?"},
+                    {"role": "user", "content": "My name is Remi"},
+                ],
+            }
+        ],
+    )
+    name_only_opening = build_opening_turn(
+        {"name": "Remi", "current_level": "beginner"},
+        name_only_state,
+    )
+    ok &= check(
+        "resume_after_name_asks_school",
+        name_only_state["onboarding_status"] == "needs_school"
+        and "do you go to school" in name_only_opening.lower(),
+        f"{name_only_state} | {name_only_opening}",
+    )
+
+    school_done_state = memory._effective_state_from_student_and_sessions(
+        {"id": "demo", "name": "Remi", "current_level": "beginner"},
+        [
+            {
+                "created_at": "2026-06-01T09:00:00+00:00",
+                "messages": [
+                    {"role": "assistant", "content": "Hello! I'm Sabi, your learning friend. What is your name?"},
+                    {"role": "user", "content": "My name is Remi"},
+                    {"role": "assistant", "content": "Remi! I like that name. I will remember you on this number. Tell me, do you go to school?"},
+                    {"role": "user", "content": "yes"},
+                ],
+            }
+        ],
+    )
+    school_done_opening = build_opening_turn(
+        {"name": "Remi", "current_level": "beginner"},
+        school_done_state,
+    )
+    ok &= check(
+        "resume_after_school_asks_market",
+        school_done_state["onboarding_status"] == "needs_market"
+        and "market" in school_done_opening.lower(),
+        f"{school_done_state} | {school_done_opening}",
+    )
+
+    onboarding_done_state = memory._effective_state_from_student_and_sessions(
+        {"id": "demo", "name": "Remi", "current_level": "beginner"},
+        [
+            {
+                "created_at": "2026-06-01T09:00:00+00:00",
+                "messages": [
+                    {"role": "assistant", "content": "Hello! I'm Sabi, your learning friend. What is your name?"},
+                    {"role": "user", "content": "My name is Remi"},
+                    {"role": "assistant", "content": "Remi! I like that name. I will remember you on this number. Tell me, do you go to school?"},
+                    {"role": "user", "content": "yes"},
+                    {"role": "assistant", "content": "Do you help your family at the market, or do you sell anything?"},
+                    {"role": "user", "content": "I help my mum sell rice"},
+                ],
+            }
+        ],
+    )
+    onboarding_done_opening = build_opening_turn(
+        {"name": "Remi", "current_level": "beginner"},
+        onboarding_done_state,
+    )
+    ok &= check(
+        "resume_after_onboarding_starts_diagnostic",
+        onboarding_done_state["onboarding_status"] == "complete"
+        and "number game" in onboarding_done_opening.lower()
+        and "do you go to school" not in onboarding_done_opening.lower(),
+        f"{onboarding_done_state} | {onboarding_done_opening}",
+    )
+
+    diagnostic_in_progress_state = memory._effective_state_from_student_and_sessions(
+        {"id": "demo", "name": "Remi", "current_level": "beginner"},
+        [
+            {
+                "created_at": "2026-06-01T09:00:00+00:00",
+                "messages": [
+                    {"role": "assistant", "content": "Hello! I'm Sabi, your learning friend. What is your name?"},
+                    {"role": "user", "content": "My name is Remi"},
+                    {"role": "assistant", "content": "Remi! I like that name. I will remember you on this number. Tell me, do you go to school?"},
+                    {"role": "user", "content": "yes"},
+                    {"role": "assistant", "content": "Do you help your family at the market, or do you sell anything?"},
+                    {"role": "user", "content": "I sell groundnuts"},
+                    {"role": "assistant", "content": "Let's play a quick number game. What number comes after twenty-nine?"},
+                    {"role": "user", "content": "thirty"},
+                ],
+            }
+        ],
+    )
+    diagnostic_in_progress_opening = build_opening_turn(
+        {"name": "Remi", "current_level": "beginner"},
+        diagnostic_in_progress_state,
+    )
+    ok &= check(
+        "resume_diagnostic_next_item",
+        diagnostic_in_progress_state["diagnostic_status"] == "in_progress"
+        and "ninety-nine" in diagnostic_in_progress_opening.lower(),
+        f"{diagnostic_in_progress_state} | {diagnostic_in_progress_opening}",
+    )
+
     inferred_from_non_diagnostic = analyze_session(
         {"current_module": 0},
         [

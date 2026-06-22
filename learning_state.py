@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from diagnostic_flow import analyze_diagnostic_progress, analyze_literacy_diagnostic_progress
+from diagnostic_flow import analyze_diagnostic_progress, analyze_literacy_diagnostic_progress, onboarding_status_from_messages
 from numeric_grading import analyze_latest_numeric_turn
 
 
@@ -59,6 +59,7 @@ def default_learning_state() -> dict[str, Any]:
     return {
         "course": "numeracy",
         "phase": "onboarding",
+        "onboarding_status": "needs_name",
         "diagnostic_status": "not_started",
         "current_module": 0,
         "current_week": 1,
@@ -168,6 +169,7 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
 
     current_module = int(state.get("current_module") or 0)
     diagnostic_progress = analyze_diagnostic_progress(messages) if current_module == 0 else None
+    onboarding_status = onboarding_status_from_messages(messages) if current_module == 0 else state.get("onboarding_status", "complete")
     skill_rows: dict[str, list[bool]] = {}
     topics: list[str] = []
     correct_count = 0
@@ -218,7 +220,7 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
         recommended_module = _recommended_module(current_module, active_skill, correct_streak, wrong_streak, scaffold_depth)
     should_advance = correct_streak >= 3 and wrong_count == 0 and current_module not in (0, 7)
     current_level = _current_level(skill_scores, scaffold_depth, wrong_streak)
-    phase = _phase_for_state(current_module, recommended_module, messages, correct_count, wrong_count, diagnostic_progress)
+    phase = _phase_for_state(current_module, recommended_module, messages, correct_count, wrong_count, diagnostic_progress, onboarding_status)
     next_step = _next_step(active_skill, scaffold_depth, wrong_streak, correct_streak)
     diagnostic_status = _diagnostic_status(current_module, recommended_module, diagnostic_progress, topics)
     current_week = int((placement or {}).get("week") or state.get("current_week") or 1)
@@ -227,6 +229,7 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
     updated_state = {
         **state,
         "phase": phase,
+        "onboarding_status": onboarding_status,
         "diagnostic_status": diagnostic_status,
         "diagnostic_results": diagnostic_progress,
         "current_module": recommended_module,
@@ -429,7 +432,10 @@ def _phase_for_state(
     correct_count: int,
     wrong_count: int,
     diagnostic_progress: dict[str, Any] | None = None,
+    onboarding_status: str = "complete",
 ) -> str:
+    if current_module == 0 and onboarding_status != "complete":
+        return "onboarding"
     if recommended_module != 0 and current_module == 0:
         return "first_mini_lesson" if correct_count + wrong_count <= 1 else "guided_practice"
     if diagnostic_progress:

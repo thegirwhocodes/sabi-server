@@ -377,11 +377,23 @@ def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | N
     name = _clean_name(student.get("name") or "")
     module = int(state.get("current_module") or student.get("current_module") or 0)
     diagnostic_status = state.get("diagnostic_status") or student.get("baseline_status") or "not_started"
+    onboarding_status = state.get("onboarding_status") or "needs_school"
 
     if not name:
         return "Hello! I'm Sabi, your learning friend. Sabi means to know, and together, we're going to know so much! What is your name?"
 
     if module == 0 or diagnostic_status != "done":
+        if onboarding_status == "needs_name":
+            return "Hello! I'm Sabi, your learning friend. Sabi means to know, and together, we're going to know so much! What is your name?"
+        if onboarding_status == "needs_market":
+            return f"Welcome back, {name}! I remember you. Do you help your family at the market, or do you sell anything?"
+        if onboarding_status == "complete":
+            progress = state.get("diagnostic_results") if isinstance(state.get("diagnostic_results"), dict) else None
+            next_item = progress.get("next_item") if progress else None
+            if isinstance(next_item, dict) and next_item.get("prompt"):
+                return f"Welcome back, {name}! Let's continue our number game. {next_item['prompt']}"
+            first_item = NUMERACY_DIAGNOSTIC_ITEMS[0]
+            return f"Welcome back, {name}! Let's play a quick number game. {first_item.prompt}"
         return f"Welcome back, {name}! Sabi here. Before we start learning, tell me, do you go to school?"
 
     warmups = {
@@ -710,6 +722,17 @@ def _has_child_name(messages: list[dict[str, str]]) -> bool:
         if 1 <= len(text.split()) <= 3 and not re.search(r"\d|\b(yes|no|okay|hello|hi|ready)\b", text, re.I):
             return True
     return False
+
+
+def onboarding_status_from_messages(messages: list[dict[str, str]]) -> str:
+    """Return the next first-call onboarding step implied by this transcript."""
+    if not _has_child_name(messages):
+        return "needs_name"
+    if not _has_answer_after_assistant(messages, r"\bdo you go to school\b"):
+        return "needs_school"
+    if not _has_answer_after_assistant(messages, r"\b(help.*family.*market|sell anything|help.*market)\b"):
+        return "needs_market"
+    return "complete"
 
 
 def _first_call_onboarding_prompt(messages: list[dict[str, str]]) -> str:

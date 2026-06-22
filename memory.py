@@ -304,6 +304,26 @@ class StudentMemory:
             if sessions:
                 last_session = sessions[0]
                 time_since = self._time_since(last_session.get("created_at", ""))
+                diagnostic_status = effective_state.get("diagnostic_status", "not_started")
+                onboarding_status = effective_state.get("onboarding_status", "needs_name")
+
+                if effective_module == 0 and diagnostic_status != "done":
+                    return f"""
+
+## STUDENT CONTEXT: RETURNING STUDENT — RESUME ONBOARDING/BASELINE
+- Name: {student.get('name', 'Student')}
+- Sessions completed: {student.get('total_sessions', 0)}
+- Last session ({time_since}): {last_session.get('summary', 'No summary')}
+- Current module: 0 (baseline not complete)
+- Onboarding status: {onboarding_status}
+- Diagnostic status: {diagnostic_status}
+
+## INSTRUCTIONS FOR THIS SESSION:
+- Do NOT restart from the beginning.
+- Do NOT ask their name if a name is already known.
+- Resume the exact next pending step: school question, market/family question, or the next baseline diagnostic game item.
+- Keep it warm and low-pressure: this is a game, not a test.
+{learning_prompt}"""
 
                 skills = student.get("skills", {})
                 skills_str = "\n".join(

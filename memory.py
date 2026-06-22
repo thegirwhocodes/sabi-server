@@ -434,6 +434,18 @@ class StudentMemory:
 
         normalized_phone = normalize_phone_number(phone_number)
         variants = phone_lookup_variants(phone_number)
+        existing_named_row = self._lookup_student_by_phone_and_name(
+            normalized_phone,
+            variants,
+            spoken_child_name,
+        )
+        if existing_named_row:
+            return {
+                **existing_named_row,
+                "is_new": False,
+                "spoken_child_name": spoken_child_name,
+            }
+
         resolved = self._resolve_student_for_session(
             current_student=current_student,
             normalized_phone=normalized_phone,

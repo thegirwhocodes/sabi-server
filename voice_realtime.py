@@ -102,10 +102,10 @@ FEEDBACK_WAIT_SECONDS = int(os.getenv("SABI_FEEDBACK_WAIT_SECONDS", "8"))
 FEEDBACK_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_PROMPT_TEXT",
     (
-        "Before you go, you can leave a short recorded note about anything from this call. "
-        "This is optional. You can complain, tell us what felt confusing or broken, "
-        "or say what worked well. If you do not want to leave a note, you can hang up now. "
-        "If you want to leave one, start talking after this."
+        "Before you go, you can tell us anything you want us to know about this call. "
+        "You can complain, report something strange, confusing, or uncomfortable, "
+        "or tell us what worked well. This is optional. If you do not want to leave a note, "
+        "you can hang up now. If you want to leave one, start talking after this."
     ),
 )
 

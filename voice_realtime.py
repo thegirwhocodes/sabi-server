@@ -90,6 +90,23 @@ FAST_GREETING_TEXT = os.getenv(
 )
 USE_CACHED_GREETING = os.getenv("SABI_USE_CACHED_GREETING", "false").strip().lower() in {"1", "true", "yes"}
 MAX_CALL_SECONDS = int(os.getenv("SABI_MAX_CALL_SECONDS", "480"))
+FEEDBACK_MODE = os.getenv("SABI_FEEDBACK_MODE", "off").strip().lower()
+FEEDBACK_TEST_NUMBERS = {
+    "".join(ch for ch in value if ch.isdigit())
+    for value in os.getenv("SABI_FEEDBACK_TEST_NUMBERS", "").split(",")
+    if value.strip()
+}
+FEEDBACK_MAX_SECONDS = int(os.getenv("SABI_FEEDBACK_MAX_SECONDS", "45"))
+FEEDBACK_WAIT_SECONDS = int(os.getenv("SABI_FEEDBACK_WAIT_SECONDS", "8"))
+FEEDBACK_PROMPT_TEXT = os.getenv(
+    "SABI_FEEDBACK_PROMPT_TEXT",
+    (
+        "Before you go, you can leave a short recorded note about anything from this call. "
+        "This is optional. You can complain, tell us what felt confusing or broken, "
+        "or say what worked well. If you do not want to leave a note, you can hang up now. "
+        "If you want to leave one, start talking after this."
+    ),
+)
 
 CALL_REGISTRY: dict[str, dict[str, str]] = {}
 HANGUP_EVENTS: dict[str, dict[str, str]] = {}
@@ -247,6 +264,21 @@ def _normalize_transcript_for_lesson(text: str, messages: list[dict[str, str]]) 
     return result.text
 
 
+def _phone_digits(phone: str) -> str:
+    return "".join(ch for ch in (phone or "") if ch.isdigit())
+
+
+def _feedback_enabled_for_phone(phone: str) -> bool:
+    if FEEDBACK_MODE in {"", "0", "false", "no", "off"}:
+        return False
+    if FEEDBACK_MODE in {"1", "true", "yes", "all"}:
+        return True
+    if FEEDBACK_MODE == "testers":
+        digits = _phone_digits(phone)
+        return bool(digits and digits in FEEDBACK_TEST_NUMBERS)
+    return False
+
+
 async def _read_packet(reader: asyncio.StreamReader) -> tuple[int, bytes]:
     header = await reader.readexactly(3)
     packet_type = header[0]
@@ -337,6 +369,22 @@ class RealtimeCall:
         logger.info("%s TTS ready in %.2fs (%d bytes)", label, time.monotonic() - start, len(pcm))
         return pcm
 
+    async def play_pcm(self, pcm: bytes) -> None:
+        """Play a short prompt without barge-in collection."""
+        self.drain_audio()
+        if self.hungup:
+            self.set_end_reason("channel_closed_before_playback")
+            return
+
+        for offset in range(0, len(pcm), FRAME_BYTES):
+            if self.hungup:
+                self.set_end_reason("channel_closed_during_playback")
+                return
+            frame_start = time.monotonic()
+            await _send_packet(self.writer, AUDIO_TYPE_PCM_8K, pcm[offset:offset + FRAME_BYTES])
+            elapsed = time.monotonic() - frame_start
+            await asyncio.sleep(max(0, FRAME_MS / 1000 - elapsed))
+
     async def play_pcm_with_barge(self, pcm: bytes) -> Optional[bytes]:
         """Play audio while watching caller audio. Returns interrupted utterance PCM."""
         # Drop audio that accumulated while LLM/TTS was thinking. Otherwise PSTN
@@ -411,7 +459,7 @@ class RealtimeCall:
         logger.info("Playback complete uuid=%s elapsed=%.2fs", self.call_uuid, time.monotonic() - playback_start)
         return None
 
-    async def wait_for_utterance(self) -> Optional[bytes]:
+    async def wait_for_utterance(self, max_frames: int | None = None) -> Optional[bytes]:
         """Wait until caller starts talking, then return one complete utterance."""
         speech_frames = 0
         while not self.hungup:
@@ -425,15 +473,31 @@ class RealtimeCall:
                 if speech_frames >= START_SPEECH_FRAMES:
                     frames = list(self.pre_roll)
                     frames.append(inbound)
-                    return await self.collect_utterance(frames)
+                    return await self.collect_utterance(frames, max_frames=max_frames)
             else:
                 speech_frames = 0
         return None
 
-    async def collect_utterance(self, initial_frames: list[bytes]) -> bytes:
+    async def wait_for_optional_utterance(
+        self,
+        timeout_seconds: int,
+        max_frames: int | None = None,
+    ) -> Optional[bytes]:
+        if timeout_seconds <= 0:
+            return None
+        try:
+            return await asyncio.wait_for(
+                self.wait_for_utterance(max_frames=max_frames),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return None
+
+    async def collect_utterance(self, initial_frames: list[bytes], max_frames: int | None = None) -> bytes:
         frames = list(initial_frames)
         silent_frames = 0
-        while len(frames) < MAX_UTTERANCE_FRAMES and not self.hungup:
+        max_frame_count = max_frames or MAX_UTTERANCE_FRAMES
+        while len(frames) < max_frame_count and not self.hungup:
             try:
                 inbound = await asyncio.wait_for(self.audio_queue.get(), timeout=COLLECT_TIMEOUT_MS / 1000)
             except asyncio.TimeoutError:
@@ -476,6 +540,60 @@ class RealtimeCall:
                 path.unlink()
             except OSError:
                 pass
+
+    async def record_feedback_note(self, student_id: str | None, learning_state: dict | None) -> None:
+        """Ask for one optional, open-ended tester note after the lesson."""
+        if not _feedback_enabled_for_phone(self.phone) or self.hungup:
+            return
+
+        prompt_pcm = await self.synthesize_pcm(FEEDBACK_PROMPT_TEXT, "rt_feedback_prompt")
+        await self.play_pcm(prompt_pcm)
+        if self.hungup:
+            return
+
+        max_frames = max(1, int(FEEDBACK_MAX_SECONDS * 1000 / FRAME_MS))
+        feedback_pcm = await self.wait_for_optional_utterance(
+            FEEDBACK_WAIT_SECONDS,
+            max_frames=max_frames,
+        )
+        if not feedback_pcm or self.hungup:
+            logger.info("No optional feedback left uuid=%s", self.call_uuid)
+            return
+
+        duration_seconds = int(len(feedback_pcm) / (SAMPLE_RATE * SAMPLE_WIDTH))
+        if duration_seconds <= 0:
+            return
+
+        feedback_path = SHARED_AUDIO_DIR / f"feedback_{self.call_uuid}.wav"
+        _write_wav(feedback_path, feedback_pcm)
+
+        transcript_text = ""
+        try:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self.stt.transcribe, str(feedback_path))
+            transcript_text = (result.get("text") or "").strip()
+        except Exception as exc:
+            logger.warning("Feedback transcription failed uuid=%s: %s", self.call_uuid, exc)
+
+        await self.memory.save_call_feedback(
+            student_id=student_id,
+            phone_number=self.phone,
+            call_id=self.call_id,
+            channel="asterisk_audiosocket",
+            participant_type="tester",
+            recording_path=str(feedback_path),
+            transcript=transcript_text,
+            duration_seconds=duration_seconds,
+            metadata={
+                "mode": self.mode,
+                "attempt": self.attempt,
+                "feedback_mode": FEEDBACK_MODE,
+                "learning_state": learning_state or {},
+            },
+            tags=["open_voice_note"],
+            consent_recorded=True,
+            assent_recorded=False,
+        )
 
     async def request_callback_retry(self, reason: str) -> None:
         if self.mode != "callback" or not self.phone or self.phone == "unknown":
@@ -521,6 +639,8 @@ class RealtimeCall:
         messages: list[dict[str, str]] = []
         retry_streak = 0
         student_id: Optional[str] = None
+        effective_state: dict | None = None
+        starting_learning_state: dict | None = None
 
         try:
             student = await self.memory.find_or_create_student(self.phone)
@@ -665,6 +785,8 @@ class RealtimeCall:
                     memory=self.memory,
                     course=str(effective_state.get("course") or "numeracy"),
                     learning_state=effective_state,
+                    call_id=self.call_id,
+                    channel="asterisk_audiosocket",
                 )
                 if is_premature_wrap_response(response, user_turns, elapsed_seconds, MAX_CALL_SECONDS):
                     logger.warning(
@@ -691,6 +813,8 @@ class RealtimeCall:
                         memory=self.memory,
                         course=str(effective_state.get("course") or "numeracy"),
                         learning_state=effective_state,
+                        call_id=self.call_id,
+                        channel="asterisk_audiosocket",
                     )
                 logger.info("Realtime turn %s llm=%.2fs response=%s", turn, time.monotonic() - llm_start, response)
                 messages.append({"role": "assistant", "content": response})
@@ -708,6 +832,16 @@ class RealtimeCall:
         finally:
             if self.end_reason == "unknown":
                 self.end_reason = "channel_closed" if self.hungup else "normal_loop_complete"
+            if (
+                student_id
+                and messages
+                and not self.hungup
+                and self.end_reason in {"sabi_wrap_up", "max_call_seconds", "normal_loop_complete"}
+            ):
+                try:
+                    await self.record_feedback_note(student_id, effective_state)
+                except Exception as exc:
+                    logger.warning("Optional feedback capture failed uuid=%s: %s", self.call_uuid, exc)
             duration_seconds = int(time.monotonic() - call_started_at)
             self.hungup = True
             reader_task.cancel()

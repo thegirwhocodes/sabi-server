@@ -57,6 +57,24 @@ OPTIONAL_SESSION_COLUMNS = {
     "channel",
 }
 
+OPTIONAL_FEEDBACK_COLUMNS = {
+    "student_id",
+    "phone_number",
+    "call_sid",
+    "channel",
+    "participant_type",
+    "consent_recorded",
+    "assent_recorded",
+    "recording_path",
+    "transcript",
+    "redacted_transcript",
+    "tags",
+    "metadata",
+    "duration_seconds",
+    "network",
+    "review_status",
+}
+
 
 class StudentMemory:
     def __init__(self):
@@ -258,6 +276,56 @@ class StudentMemory:
             )
         except Exception as e:
             logger.error("Failed to save phone session call_id=%s: %s", call_id, e)
+
+    async def save_call_feedback(
+        self,
+        *,
+        student_id: str | None,
+        phone_number: str,
+        call_id: str,
+        channel: str,
+        participant_type: str,
+        recording_path: str,
+        transcript: str,
+        duration_seconds: int,
+        metadata: dict | None = None,
+        tags: list[str] | None = None,
+        consent_recorded: bool = True,
+        assent_recorded: bool = False,
+    ) -> None:
+        """Persist an optional end-of-call open feedback voice note."""
+        if not self.client:
+            return
+        if not call_id or not recording_path:
+            return
+
+        payload = {
+            "student_id": student_id,
+            "phone_number": normalize_phone_number(phone_number),
+            "call_sid": call_id,
+            "channel": channel,
+            "participant_type": participant_type,
+            "consent_recorded": consent_recorded,
+            "assent_recorded": assent_recorded,
+            "recording_path": recording_path,
+            "transcript": transcript,
+            "redacted_transcript": _redact_feedback_text(transcript),
+            "tags": tags or [],
+            "metadata": metadata or {},
+            "duration_seconds": duration_seconds,
+            "review_status": "new",
+        }
+        payload = {key: value for key, value in payload.items() if value is not None}
+
+        try:
+            self._insert_with_optional_fallback(
+                "sabi_call_feedback",
+                payload,
+                OPTIONAL_FEEDBACK_COLUMNS,
+            )
+            logger.info("Saved call feedback call_id=%s duration=%ss", call_id, duration_seconds)
+        except Exception as exc:
+            logger.warning("Could not save call feedback call_id=%s: %s", call_id, exc)
 
     async def find_or_create_student(self, phone_number: str, child_name: str | None = None) -> dict:
         """Find existing student by phone/name identity or create new one."""
@@ -842,6 +910,12 @@ def _mentioned_columns(error: Exception, columns: set[str]) -> set[str]:
 def _is_duplicate_key_error(error: Exception) -> bool:
     text = _error_text(error).lower()
     return "23505" in text or "duplicate key" in text or "unique constraint" in text
+
+
+def _redact_feedback_text(text: str) -> str:
+    redacted = re.sub(r"\+?\d[\d\s().-]{6,}\d", "[phone]", text or "")
+    redacted = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", "[email]", redacted)
+    return redacted[:2000]
 
 
 def _choose_canonical_student(rows: list[dict]) -> dict:

@@ -459,6 +459,8 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
                 memory=memory,
                 course=str(effective_state.get("course") or "numeracy"),
                 learning_state=effective_state,
+                call_id=call_id,
+                channel="asterisk_fastagi",
             )
             if is_premature_wrap_response(response, user_turns, elapsed_seconds):
                 logger.warning(
@@ -484,6 +486,8 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
                     memory=memory,
                     course=str(effective_state.get("course") or "numeracy"),
                     learning_state=effective_state,
+                    call_id=call_id,
+                    channel="asterisk_fastagi",
                 )
             logger.info(f"Turn {turn}: llm={time.monotonic() - llm_start:.2f}s")
             messages.append({"role": "assistant", "content": response})

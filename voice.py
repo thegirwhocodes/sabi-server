@@ -58,6 +58,8 @@ async def incoming_call(request: Request):
         student_id=student["id"],
         current_module=student.get("current_module", 0),
         memory=memory,
+        call_id=session_id,
+        channel="africas_talking_xml",
     )
 
     memory.set_call_messages(session_id, [
@@ -170,7 +172,15 @@ async def handle_recording(request: Request):
 
     try:
         response_text = await _stream_llm_to_tts(
-            request.app, llm, messages, student_id, current_module, memory, response_path
+            request.app,
+            llm,
+            messages,
+            student_id,
+            current_module,
+            memory,
+            response_path,
+            call_id=session_id,
+            channel="africas_talking_xml",
         )
     except Exception as e:
         logger.warning(f"Streaming pipeline failed ({e}), falling back to sequential")
@@ -180,6 +190,8 @@ async def handle_recording(request: Request):
             student_id=student_id,
             current_module=current_module,
             memory=memory,
+            call_id=session_id,
+            channel="africas_talking_xml",
         )
         if not await _synthesize_chatterbox(request.app, response_text, response_path):
             request.app.state.tts.synthesize(response_text, response_path)
@@ -260,6 +272,8 @@ async def _stream_llm_to_tts(
     current_module: int,
     memory,
     final_output_path: str,
+    call_id: str | None = None,
+    channel: str = "africas_talking_xml",
 ) -> str:
     """
     Stream LLM output sentence by sentence → TTS each sentence immediately.
@@ -277,6 +291,8 @@ async def _stream_llm_to_tts(
         student_id=student_id,
         current_module=current_module,
         memory=memory,
+        call_id=call_id,
+        channel=channel,
     ):
         sentences.append(sentence)
         chunk_id = uuid.uuid4().hex

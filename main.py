@@ -320,6 +320,8 @@ async def llm_response(request: Request):
     messages = data.get("messages", [])
     student_id = data.get("student_id")
     current_module = data.get("current_module", 0)
+    call_id = data.get("call_id")
+    channel = data.get("channel") or "api"
 
     start = time.time()
     response = await app.state.llm.generate(
@@ -327,6 +329,8 @@ async def llm_response(request: Request):
         student_id=student_id,
         current_module=current_module,
         memory=app.state.memory,
+        call_id=call_id,
+        channel=channel,
     )
     elapsed = time.time() - start
     logger.info(f"LLM: {len(response)} chars ({elapsed:.1f}s)")
@@ -376,6 +380,8 @@ async def process_turn(request: Request):
             student_id=student_id,
             current_module=current_module,
             memory=app.state.memory,
+            call_id=call_id,
+            channel="process_turn",
         )
 
         # Save messages

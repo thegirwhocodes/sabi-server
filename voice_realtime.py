@@ -7,6 +7,7 @@ send the same format back while listening for caller speech at the same time.
 """
 
 import asyncio
+import json
 import logging
 import os
 import struct
@@ -275,7 +276,15 @@ def _feedback_enabled_for_phone(phone: str) -> bool:
         return True
     if FEEDBACK_MODE == "testers":
         digits = _phone_digits(phone)
-        return bool(digits and digits in FEEDBACK_TEST_NUMBERS)
+        return bool(
+            digits
+            and any(
+                digits == tester_digits
+                or digits.endswith(tester_digits)
+                or tester_digits.endswith(digits)
+                for tester_digits in FEEDBACK_TEST_NUMBERS
+            )
+        )
     return False
 
 
@@ -574,6 +583,30 @@ class RealtimeCall:
             transcript_text = (result.get("text") or "").strip()
         except Exception as exc:
             logger.warning("Feedback transcription failed uuid=%s: %s", self.call_uuid, exc)
+
+        feedback_metadata = {
+            "call_uuid": self.call_uuid,
+            "call_id": self.call_id,
+            "phone_number": self.phone,
+            "student_id": student_id,
+            "channel": "asterisk_audiosocket",
+            "participant_type": "tester",
+            "recording_path": str(feedback_path),
+            "transcript": transcript_text,
+            "duration_seconds": duration_seconds,
+            "tags": ["open_voice_note"],
+            "feedback_mode": FEEDBACK_MODE,
+            "mode": self.mode,
+            "attempt": self.attempt,
+            "learning_state": learning_state or {},
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        try:
+            feedback_path.with_suffix(".json").write_text(
+                json.dumps(feedback_metadata, ensure_ascii=True, indent=2, default=str)
+            )
+        except Exception as exc:
+            logger.warning("Could not write feedback sidecar uuid=%s: %s", self.call_uuid, exc)
 
         await self.memory.save_call_feedback(
             student_id=student_id,

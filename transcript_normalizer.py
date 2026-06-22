@@ -25,6 +25,13 @@ NUMERIC_CONTEXT_WORDS = {
     "total", "answer", "how", "much", "cost", "costs", "pay", "paid",
     "buy", "bought", "share", "shared", "divide", "divided", "groups",
     "oranges", "mangoes", "groundnuts", "biscuits", "books", "market",
+    "pure", "water", "garri", "tomatoes", "peppers", "rice", "oil",
+    "bread", "eggs",
+}
+
+MARKET_CONTEXT_WORDS = NUMERIC_CONTEXT_WORDS | {
+    "sell", "selling", "sold", "customer", "customers", "price", "prices",
+    "item", "items", "food", "stall", "shop",
 }
 
 UNCONDITIONAL_MISHEARS = {
@@ -44,6 +51,12 @@ CONDITIONAL_MISHEARS = {
 }
 
 PUNCT = re.compile(r"[^\w\s]")
+
+MARKET_TERM_MISHEARS = (
+    (re.compile(r"\b(granotes|granuts|gronuts|ground\s+notes|ground\s+nuts?|grand\s+nuts?|grandnuts?)\b", re.I), "groundnuts"),
+    (re.compile(r"\b(piota|pyo\s+water|pure\s+wata|purewater|p\s+water|pew\s+water|pita\s+water)\b", re.I), "pure water"),
+    (re.compile(r"\b(gary|gari)\b", re.I), "garri"),
+)
 
 
 @dataclass(frozen=True)
@@ -66,6 +79,26 @@ def _has_numeric_context(text: str) -> bool:
     if any(_is_number_like(token) for token in tokens):
         return True
     return any(token in NUMERIC_CONTEXT_WORDS for token in tokens)
+
+
+def _has_market_context(text: str) -> bool:
+    return any(token in MARKET_CONTEXT_WORDS for token in _tokens(text))
+
+
+def _is_price_preposition(tokens: list[str], index: int) -> bool:
+    if tokens[index] != "for":
+        return False
+    next_token = tokens[index + 1] if index + 1 < len(tokens) else ""
+    next_next = tokens[index + 2] if index + 2 < len(tokens) else ""
+    previous = tokens[index - 1] if index > 0 else ""
+    return (
+        _is_number_like(next_token)
+        and (
+            next_next in {"naira", "kobo"}
+            or previous in MARKET_CONTEXT_WORDS
+            or len(tokens) > 3
+        )
+    )
 
 
 def _is_numeric_context(tokens: list[str], index: int, force_numeric_context: bool) -> bool:
@@ -100,6 +133,9 @@ def normalize_number_mishears(raw: str, *, force_numeric_context: bool = False) 
 
         if token in CONDITIONAL_MISHEARS:
             replacement = CONDITIONAL_MISHEARS[token]
+            if token == "for" and _is_price_preposition(tokens, index):
+                out.append(token)
+                continue
             if token == "oh":
                 prev_token = tokens[index - 1] if index > 0 else ""
                 next_token = tokens[index + 1] if index + 1 < len(tokens) else ""
@@ -143,6 +179,16 @@ def normalize_lesson_transcript(text: str, messages: list[dict[str, str]]) -> No
             for bad in re.findall(r"\b(bugs|bucks)\b", normalized, flags=re.I):
                 substitutions.append((bad.lower(), "bags"))
             normalized = bag_fixed
+
+    if _has_market_context(recent_assistant) or _has_market_context(normalized):
+        for pattern, replacement in MARKET_TERM_MISHEARS:
+            matches = pattern.findall(normalized)
+            if not matches:
+                continue
+            normalized = pattern.sub(replacement, normalized)
+            for bad in matches:
+                source = bad if isinstance(bad, str) else " ".join(bad)
+                substitutions.append((source.lower(), replacement))
 
     return NormalizeResult(
         text=normalized,

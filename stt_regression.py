@@ -98,6 +98,27 @@ BUILT_IN_CASES: list[dict[str, Any]] = [
         "expected_text": "Oh yeah I am using a glo line to call it",
         "expected_numbers": [],
     },
+    {
+        "id": "price_phrase_keeps_for",
+        "transcript": "I sell ground nuts for fifteen naira",
+        "assistant_context": "Do you help your family at the market, or do you sell anything?",
+        "expected_text": "I sell groundnuts for fifteen naira",
+        "expected_numbers": [15],
+    },
+    {
+        "id": "market_item_mishears_normalized",
+        "transcript": "granotes for fifteen naira and piota for thirty naira",
+        "assistant_context": "Groundnuts for fifteen naira and pure water for thirty naira. How much do you spend?",
+        "expected_text": "groundnuts for fifteen naira and pure water for thirty naira",
+        "expected_numbers": [15, 30],
+    },
+    {
+        "id": "name_peter_not_pure_water",
+        "transcript": "Peter",
+        "assistant_context": "What is your name?",
+        "expected_text": "Peter",
+        "expected_numbers": [],
+    },
 ]
 
 

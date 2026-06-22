@@ -32,7 +32,7 @@ from curriculum_path import (
     resolve_literacy_lesson,
 )
 from learning_state import analyze_session, extract_child_name
-from memory import StudentMemory, _learning_state_snapshot_message
+from memory import StudentMemory, _learning_state_snapshot_message, learner_key_for
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from voice_asterisk import (
     MIN_LESSON_SECONDS,
@@ -97,6 +97,8 @@ class FakeQuery:
             for op, column, value in self.filters:
                 if column == "phone_number_normalized" and not self.client.has_normalized_column:
                     raise FakeSupabaseError("column sabi_students.phone_number_normalized does not exist", "42703")
+                if column in self.client.missing_columns:
+                    raise FakeSupabaseError(f"column sabi_students.{column} does not exist", "42703")
                 if op == "eq":
                     rows = [row for row in rows if row.get(column) == value]
                 elif op == "in":
@@ -132,7 +134,10 @@ class FakeQuery:
                 self.client.race_duplicate_row = None
                 raise FakeSupabaseError("duplicate key value violates unique constraint idx_sabi_students_phone", "23505")
             phone = payload.get("phone_number")
-            if phone and any(row.get("phone_number") == phone for row in self.client.rows):
+            learner_key = payload.get("learner_key")
+            if learner_key and any(row.get("learner_key") == learner_key for row in self.client.rows):
+                raise FakeSupabaseError("duplicate key value violates unique constraint idx_sabi_students_learner_key", "23505")
+            if self.client.unique_phone and phone and any(row.get("phone_number") == phone for row in self.client.rows):
                 raise FakeSupabaseError("duplicate key value violates unique constraint idx_sabi_students_phone", "23505")
             payload.setdefault("id", f"fake-{len(self.client.rows) + 1}")
             self.client.rows.append(payload)
@@ -141,11 +146,19 @@ class FakeQuery:
 
 
 class FakeSupabaseClient:
-    def __init__(self, rows=None, has_normalized_column=False, missing_columns=None, race_duplicate_row=None):
+    def __init__(
+        self,
+        rows=None,
+        has_normalized_column=False,
+        missing_columns=None,
+        race_duplicate_row=None,
+        unique_phone=True,
+    ):
         self.rows = list(rows or [])
         self.has_normalized_column = has_normalized_column
         self.missing_columns = set(missing_columns or [])
         self.race_duplicate_row = race_duplicate_row
+        self.unique_phone = unique_phone
 
     def table(self, table_name: str):
         return FakeQuery(self, table_name)
@@ -236,6 +249,90 @@ def main() -> int:
         and race_lookup["is_new"] is False
         and len(race_memory.client.rows) == 1,
         f"{race_lookup} rows={race_memory.client.rows}",
+    )
+
+    shared_phone_memory = StudentMemory.__new__(StudentMemory)
+    shared_phone_memory.client = FakeSupabaseClient(
+        rows=[
+            {
+                "id": "remi-row",
+                "phone_number": "+2348033374126",
+                "phone_number_normalized": "+2348033374126",
+                "name": "Remi",
+                "child_name_normalized": "remi",
+                "learner_key": learner_key_for("+2348033374126", "Remi"),
+                "total_sessions": 4,
+                "created_at": "2026-06-01T00:00:00+00:00",
+            },
+            {
+                "id": "amara-row",
+                "phone_number": "+2348033374126",
+                "phone_number_normalized": "+2348033374126",
+                "name": "Amara",
+                "child_name_normalized": "amara",
+                "learner_key": learner_key_for("+2348033374126", "Amara"),
+                "total_sessions": 1,
+                "created_at": "2026-06-02T00:00:00+00:00",
+            },
+        ],
+        has_normalized_column=True,
+        unique_phone=False,
+    )
+    shared_lookup = asyncio.run(shared_phone_memory.find_or_create_student("+2348033374126"))
+    ok &= check(
+        "shared_phone_prompts_for_child_identity",
+        shared_lookup["id"] == "remi-row"
+        and shared_lookup.get("needs_identity_confirmation") is True
+        and set(shared_lookup.get("shared_phone_profiles") or []) == {"Remi", "Amara"},
+        f"{shared_lookup}",
+    )
+    remi_lookup = asyncio.run(shared_phone_memory.find_or_create_student("+2348033374126", child_name="Remi"))
+    ok &= check(
+        "shared_phone_same_child_reuses_named_profile",
+        remi_lookup["id"] == "remi-row" and remi_lookup["is_new"] is False,
+        f"{remi_lookup}",
+    )
+    tola_lookup = asyncio.run(shared_phone_memory.find_or_create_student("+2348033374126", child_name="Tola"))
+    ok &= check(
+        "shared_phone_direct_child_name_creates_missing_profile",
+        tola_lookup["id"] not in {"remi-row", "amara-row"}
+        and tola_lookup["name"] == "Tola"
+        and tola_lookup["is_new"] is True
+        and tola_lookup["learner_key"] == learner_key_for("+2348033374126", "Tola"),
+        f"{tola_lookup}",
+    )
+
+    split_memory = StudentMemory.__new__(StudentMemory)
+    split_memory.client = FakeSupabaseClient(
+        rows=[
+            {
+                "id": "chidi-row",
+                "phone_number": "+2348033374126",
+                "phone_number_normalized": "+2348033374126",
+                "name": "Chidi",
+                "child_name_normalized": "chidi",
+                "learner_key": learner_key_for("+2348033374126", "Chidi"),
+                "total_sessions": 3,
+                "created_at": "2026-06-01T00:00:00+00:00",
+            },
+        ],
+        has_normalized_column=True,
+        unique_phone=False,
+    )
+    amara_row = split_memory._resolve_student_for_session(
+        current_student=split_memory.client.rows[0],
+        normalized_phone="+2348033374126",
+        variants=phone_lookup_variants("+2348033374126"),
+        child_name="Amara",
+    )
+    ok &= check(
+        "shared_phone_different_child_creates_separate_profile",
+        amara_row["id"] != "chidi-row"
+        and amara_row["name"] == "Amara"
+        and amara_row["learner_key"] == learner_key_for("+2348033374126", "Amara")
+        and split_memory.client.rows[0]["name"] == "Chidi"
+        and len(split_memory.client.rows) == 2,
+        f"amara={amara_row} rows={split_memory.client.rows}",
     )
 
     snapshot_memory = StudentMemory.__new__(StudentMemory)
@@ -418,6 +515,22 @@ def main() -> int:
     )
     ok &= check("returning_opening_uses_name", "Welcome back, Remi" in opening, opening)
     ok &= check("returning_opening_no_name_request", "your name" not in opening.lower(), opening)
+
+    shared_phone_opening = build_opening_turn(
+        {
+            "name": "Remi",
+            "current_module": 2,
+            "needs_identity_confirmation": True,
+            "shared_phone_profiles": ["Remi", "Amara"],
+        },
+        {"current_module": 2, "active_skill": "addition", "diagnostic_status": "done"},
+    )
+    ok &= check(
+        "shared_phone_opening_asks_identity",
+        "your name" in shared_phone_opening.lower()
+        and "more than one learner" in shared_phone_opening.lower(),
+        shared_phone_opening,
+    )
 
     unplaced_opening = build_opening_turn(
         {"name": "Remi", "current_module": 0},

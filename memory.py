@@ -6,13 +6,14 @@ Connects to the same Supabase instance as the Next.js app.
 import os
 import logging
 import json
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
 from supabase import create_client
 
 from curriculum_path import advance_learning_state_after_mastery, build_curriculum_path_prompt
-from learning_state import analyze_session, build_learning_state_prompt, default_learning_state, merge_learning_state
+from learning_state import analyze_session, build_learning_state_prompt, default_learning_state, extract_child_name, merge_learning_state
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
 
@@ -42,6 +43,9 @@ OPTIONAL_STUDENT_COLUMNS = {
     "current_week",
     "current_lesson",
     "tarl_level",
+    "phone_household_key",
+    "child_name_normalized",
+    "learner_key",
 }
 
 OPTIONAL_SESSION_COLUMNS = {
@@ -117,6 +121,38 @@ class StudentMemory:
                 "id", student_id
             ).execute()
             student = student_result.data[0] if student_result.data else {}
+            normalized_phone = normalize_phone_number(phone_number)
+            variants = phone_lookup_variants(phone_number)
+            spoken_child_name = extract_child_name(cleaned_messages)
+            original_student_id = student_id
+            if spoken_child_name and student:
+                resolved_student = self._resolve_student_for_session(
+                    current_student=student,
+                    normalized_phone=normalized_phone,
+                    variants=variants,
+                    child_name=spoken_child_name,
+                )
+                if resolved_student:
+                    student = resolved_student
+                    student_id = resolved_student.get("id") or student_id
+                    if resolved_student.get("_identity_conflict_unresolved"):
+                        logger.warning(
+                            "Skipping shared-phone session save because DB still enforces one row per phone. "
+                            "Run supabase-sabi-shared-phone-identity.sql. phone=%s current_student=%s child_name=%s",
+                            normalized_phone,
+                            original_student_id,
+                            spoken_child_name,
+                        )
+                        return
+                    if student_id != original_student_id:
+                        starting_learning_state = None
+                        logger.info(
+                            "Resolved shared-phone learner phone=%s old_student=%s new_student=%s child_name=%s",
+                            normalized_phone,
+                            original_student_id,
+                            student_id,
+                            spoken_child_name,
+                        )
             analysis_student = dict(student or {})
             if isinstance(starting_learning_state, dict) and starting_learning_state:
                 analysis_student["learning_state"] = starting_learning_state
@@ -129,7 +165,6 @@ class StudentMemory:
             module_name = MODULE_NAMES.get(current_module, "diagnostic")
             stats = analyze_session(analysis_student, cleaned_messages)
             summary = stats.summary or summary
-            normalized_phone = normalize_phone_number(phone_number)
             persisted_learning_state = dict(stats.learning_state or {})
             if stats.should_advance:
                 persisted_learning_state = advance_learning_state_after_mastery(persisted_learning_state)
@@ -186,8 +221,10 @@ class StudentMemory:
             for skill, score in (stats.skills or {}).items():
                 merged_skills[skill] = max(float(merged_skills.get(skill, 0) or 0), float(score))
 
+            identity_name = stats.child_name or spoken_child_name or student.get("name")
             update_payload = {
-                "name": stats.child_name or student.get("name"),
+                **_phone_identity_payload(normalized_phone, identity_name),
+                "name": identity_name,
                 "total_sessions": (student.get("total_sessions") or 0) + 1,
                 "total_correct": (student.get("total_correct") or 0) + stats.correct_count,
                 "total_wrong": (student.get("total_wrong") or 0) + stats.wrong_count,
@@ -225,13 +262,32 @@ class StudentMemory:
         except Exception as e:
             logger.error("Failed to save phone session call_id=%s: %s", call_id, e)
 
-    async def find_or_create_student(self, phone_number: str) -> dict:
-        """Find existing student by phone or create new one."""
+    async def find_or_create_student(self, phone_number: str, child_name: str | None = None) -> dict:
+        """Find existing student by phone/name identity or create new one."""
         if not self.client:
             return {"id": "demo", "name": None, "current_module": 0, "is_new": True}
 
         normalized_phone = normalize_phone_number(phone_number)
         variants = phone_lookup_variants(phone_number)
+
+        if child_name:
+            row = self._lookup_student_by_phone_and_name(normalized_phone, variants, child_name)
+            if row:
+                return {**row, "is_new": False}
+            phone_row = self._lookup_student_by_phone(normalized_phone, variants)
+            if phone_row:
+                resolved = self._resolve_student_for_session(
+                    current_student=phone_row,
+                    normalized_phone=normalized_phone,
+                    variants=variants,
+                    child_name=child_name,
+                )
+                if resolved and not resolved.get("_identity_conflict_unresolved"):
+                    return {
+                        **resolved,
+                        "is_new": resolved.get("id") != phone_row.get("id"),
+                    }
+                return {**phone_row, "is_new": False}
 
         row = self._lookup_student_by_phone(normalized_phone, variants)
         if row:
@@ -239,8 +295,8 @@ class StudentMemory:
 
         # Create new student (only columns that exist in the table)
         insert_payload = {
-            "phone_number": normalized_phone,
-            "phone_number_normalized": normalized_phone,
+            **_phone_identity_payload(normalized_phone, child_name),
+            "name": child_name,
             "current_level": "beginner",
             "current_module": 0,
             "current_topic": "diagnostic",
@@ -260,7 +316,11 @@ class StudentMemory:
             # If another call created this learner between our lookup and
             # insert, recover the existing row instead of failing the lesson.
             if _is_duplicate_key_error(exc):
-                row = self._lookup_student_by_phone(normalized_phone, variants)
+                row = (
+                    self._lookup_student_by_phone_and_name(normalized_phone, variants, child_name)
+                    if child_name
+                    else self._lookup_student_by_phone(normalized_phone, variants)
+                )
                 if row:
                     logger.info("Recovered existing student after duplicate phone insert: %s", normalized_phone)
                     return {**row, "is_new": False}
@@ -466,9 +526,9 @@ class StudentMemory:
                 "phone_number_normalized", normalized_phone
             ).execute()
             if result and result.data:
-                row = result.data[0]
+                row = _choose_canonical_student(result.data)
                 self._backfill_phone_identity(row.get("id"), normalized_phone)
-                return row
+                return _annotate_shared_phone_profiles(row, result.data)
         except Exception as exc:
             if not _mentions_any_column(exc, {"phone_number_normalized"}):
                 logger.warning("Phone-normalized lookup failed: %s", exc)
@@ -479,8 +539,124 @@ class StudentMemory:
         if result and result.data and len(result.data) > 0:
             row = _choose_canonical_student(result.data)
             self._backfill_phone_identity(row.get("id"), normalized_phone)
-            return row
+            return _annotate_shared_phone_profiles(row, result.data)
         return None
+
+    def _lookup_student_by_phone_and_name(
+        self,
+        normalized_phone: str,
+        variants: list[str],
+        child_name: str | None,
+    ) -> dict | None:
+        name_key = normalize_child_name_for_identity(child_name)
+        if not name_key:
+            return None
+        learner_key = learner_key_for(normalized_phone, child_name)
+        if learner_key:
+            try:
+                result = self.client.table("sabi_students").select("*").eq(
+                    "learner_key", learner_key
+                ).execute()
+                if result and result.data:
+                    return result.data[0]
+            except Exception as exc:
+                if not _mentions_any_column(exc, {"learner_key"}):
+                    logger.warning("Learner-key lookup failed: %s", exc)
+
+        for row in self._lookup_student_rows_by_phone(normalized_phone, variants):
+            row_name_key = (
+                normalize_child_name_for_identity(row.get("child_name_normalized"))
+                or normalize_child_name_for_identity(row.get("name"))
+            )
+            if row_name_key == name_key:
+                self._backfill_phone_identity(row.get("id"), normalized_phone, child_name)
+                return row
+        return None
+
+    def _lookup_student_rows_by_phone(self, normalized_phone: str, variants: list[str]) -> list[dict]:
+        rows: list[dict] = []
+        try:
+            result = self.client.table("sabi_students").select("*").eq(
+                "phone_number_normalized", normalized_phone
+            ).execute()
+            rows.extend(result.data or [])
+        except Exception as exc:
+            if not _mentions_any_column(exc, {"phone_number_normalized"}):
+                logger.debug("Phone-normalized multi-row lookup failed: %s", exc)
+
+        try:
+            result = self.client.table("sabi_students").select("*").in_(
+                "phone_number", variants
+            ).execute()
+            rows.extend(result.data or [])
+        except Exception as exc:
+            logger.debug("Phone variant multi-row lookup failed: %s", exc)
+
+        deduped: dict[str, dict] = {}
+        for row in rows:
+            key = str(row.get("id") or row.get("learner_key") or len(deduped))
+            deduped[key] = row
+        return list(deduped.values())
+
+    def _resolve_student_for_session(
+        self,
+        current_student: dict,
+        normalized_phone: str,
+        variants: list[str],
+        child_name: str,
+    ) -> dict | None:
+        name_key = normalize_child_name_for_identity(child_name)
+        if not name_key:
+            return current_student
+        current_name_key = (
+            normalize_child_name_for_identity(current_student.get("child_name_normalized"))
+            or normalize_child_name_for_identity(current_student.get("name"))
+        )
+        if not current_name_key or current_name_key == name_key:
+            self._backfill_phone_identity(current_student.get("id"), normalized_phone, child_name)
+            updated = dict(current_student)
+            updated.update(_phone_identity_payload(normalized_phone, child_name))
+            updated["name"] = child_name
+            return updated
+
+        named_row = self._lookup_student_by_phone_and_name(normalized_phone, variants, child_name)
+        if named_row:
+            return named_row
+
+        insert_payload = {
+            **_phone_identity_payload(normalized_phone, child_name),
+            "name": child_name,
+            "current_level": "beginner",
+            "current_module": 0,
+            "current_topic": "diagnostic",
+            "skills": {},
+            "learning_state": default_learning_state(),
+            "baseline_status": "not_started",
+            "current_week": 1,
+            "current_lesson": 1,
+            "tarl_level": 0,
+            "total_sessions": 0,
+            "total_correct": 0,
+            "total_wrong": 0,
+        }
+        try:
+            result = self._insert_student_with_fallback(insert_payload)
+        except Exception as exc:
+            if _is_duplicate_key_error(exc):
+                named_row = self._lookup_student_by_phone_and_name(normalized_phone, variants, child_name)
+                if named_row:
+                    return named_row
+                logger.warning(
+                    "Shared-phone named learner insert blocked by existing unique phone index; "
+                    "run shared-phone identity migration. phone=%s child=%s",
+                    normalized_phone,
+                    child_name,
+                )
+                return {**current_student, "_identity_conflict_unresolved": True}
+            raise
+        if result and result.data:
+            return result.data[0]
+        return current_student
 
     def _update_student_with_fallback(self, student_id: str, payload: dict):
         try:
@@ -494,12 +670,11 @@ class StudentMemory:
             }
             return self.client.table("sabi_students").update(fallback).eq("id", student_id).execute()
 
-    def _backfill_phone_identity(self, student_id: str | None, normalized_phone: str):
+    def _backfill_phone_identity(self, student_id: str | None, normalized_phone: str, child_name: str | None = None):
         if not student_id or normalized_phone == "unknown":
             return
         payload = {
-            "phone_number": normalized_phone,
-            "phone_number_normalized": normalized_phone,
+            **_phone_identity_payload(normalized_phone, child_name),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
@@ -553,6 +728,66 @@ def _choose_canonical_student(rows: list[dict]) -> dict:
         return (total_sessions, has_name, created_at)
 
     return sorted(rows, key=score, reverse=True)[0]
+
+
+def normalize_child_name_for_identity(name: str | None) -> str | None:
+    """Stable child-name key for shared family phone profiles."""
+    if not name:
+        return None
+    cleaned = re.sub(r"[^a-z0-9' ]+", " ", str(name).lower())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" '")
+    if not cleaned:
+        return None
+    ignored = {
+        "yes", "no", "okay", "ok", "hello", "hi", "thanks", "thank you",
+        "i don't know", "i dont know",
+    }
+    return None if cleaned in ignored else cleaned
+
+
+def learner_key_for(normalized_phone: str | None, child_name: str | None) -> str | None:
+    phone_key = (normalized_phone or "").strip()
+    name_key = normalize_child_name_for_identity(child_name)
+    if not phone_key or phone_key == "unknown" or not name_key:
+        return None
+    return f"{phone_key}::{name_key}"
+
+
+def _phone_identity_payload(normalized_phone: str, child_name: str | None = None) -> dict:
+    payload = {
+        "phone_number": normalized_phone,
+        "phone_number_normalized": normalized_phone,
+        "phone_household_key": normalized_phone,
+    }
+    child_name_normalized = normalize_child_name_for_identity(child_name)
+    if child_name_normalized:
+        payload["child_name_normalized"] = child_name_normalized
+    learner_key = learner_key_for(normalized_phone, child_name)
+    if learner_key:
+        payload["learner_key"] = learner_key
+    return payload
+
+
+def _annotate_shared_phone_profiles(row: dict, rows: list[dict]) -> dict:
+    """Mark rows where a phone number already belongs to multiple named learners."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in rows:
+        name = item.get("name")
+        key = (
+            normalize_child_name_for_identity(item.get("child_name_normalized"))
+            or normalize_child_name_for_identity(name)
+        )
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        names.append(str(name or key).strip())
+
+    annotated = dict(row)
+    if len(names) > 1:
+        annotated["shared_phone_profiles"] = names
+        annotated["needs_identity_confirmation"] = True
+    return annotated
 
 
 def _learning_state_snapshot_message(state: dict) -> dict:

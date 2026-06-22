@@ -374,6 +374,9 @@ def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | N
     """Deterministic first turn so returning callers are not asked their name."""
     student = student or {}
     state = state or {}
+    if student.get("needs_identity_confirmation"):
+        return "Hello! I'm Sabi, your learning friend. I remember this phone, but more than one learner may use it. What is your name?"
+
     name = _clean_name(student.get("name") or "")
     module = int(state.get("current_module") or student.get("current_module") or 0)
     diagnostic_status = state.get("diagnostic_status") or student.get("baseline_status") or "not_started"

@@ -205,17 +205,13 @@ class StudentMemory:
             }
 
             try:
-                self.client.table("sabi_sessions").insert(session_payload).execute()
+                self._insert_with_optional_fallback(
+                    "sabi_sessions",
+                    session_payload,
+                    OPTIONAL_SESSION_COLUMNS,
+                )
             except Exception as exc:
-                # Older DBs may not have the pre-pilot monitoring columns yet.
-                if not _mentions_any_column(exc, OPTIONAL_SESSION_COLUMNS):
-                    raise
-                fallback_payload = {
-                    key: value
-                    for key, value in session_payload.items()
-                    if key not in OPTIONAL_SESSION_COLUMNS
-                }
-                self.client.table("sabi_sessions").insert(fallback_payload).execute()
+                raise
 
             existing_skills = student.get("skills") if isinstance(student.get("skills"), dict) else {}
             merged_skills = dict(existing_skills or {})
@@ -508,16 +504,11 @@ class StudentMemory:
         return state
 
     def _insert_student_with_fallback(self, payload: dict):
-        try:
-            return self.client.table("sabi_students").insert(payload).execute()
-        except Exception as exc:
-            if not _mentions_any_column(exc, OPTIONAL_STUDENT_COLUMNS):
-                raise
-            fallback = {
-                key: value for key, value in payload.items()
-                if key not in OPTIONAL_STUDENT_COLUMNS
-            }
-            return self.client.table("sabi_students").insert(fallback).execute()
+        return self._insert_with_optional_fallback(
+            "sabi_students",
+            payload,
+            OPTIONAL_STUDENT_COLUMNS,
+        )
 
     def _lookup_student_by_phone(self, normalized_phone: str, variants: list[str]) -> dict | None:
         # Look up existing by normalized column when available, then historic
@@ -741,16 +732,64 @@ class StudentMemory:
         return None
 
     def _update_student_with_fallback(self, student_id: str, payload: dict):
-        try:
-            return self.client.table("sabi_students").update(payload).eq("id", student_id).execute()
-        except Exception as exc:
-            if not _mentions_any_column(exc, OPTIONAL_STUDENT_COLUMNS):
-                raise
-            fallback = {
-                key: value for key, value in payload.items()
-                if key not in OPTIONAL_STUDENT_COLUMNS
-            }
-            return self.client.table("sabi_students").update(fallback).eq("id", student_id).execute()
+        return self._update_with_optional_fallback(
+            "sabi_students",
+            payload,
+            OPTIONAL_STUDENT_COLUMNS,
+            "id",
+            student_id,
+        )
+
+    def _insert_with_optional_fallback(self, table: str, payload: dict, optional_columns: set[str]):
+        remaining_payload = dict(payload)
+        removed_columns: set[str] = set()
+        while True:
+            try:
+                return self.client.table(table).insert(remaining_payload).execute()
+            except Exception as exc:
+                missing = _mentioned_columns(exc, optional_columns) - removed_columns
+                if not missing:
+                    raise
+                removed_columns.update(missing)
+                remaining_payload = {
+                    key: value
+                    for key, value in remaining_payload.items()
+                    if key not in missing
+                }
+                logger.debug(
+                    "Retrying %s insert without missing optional columns: %s",
+                    table,
+                    sorted(missing),
+                )
+
+    def _update_with_optional_fallback(
+        self,
+        table: str,
+        payload: dict,
+        optional_columns: set[str],
+        key_column: str,
+        key_value: str,
+    ):
+        remaining_payload = dict(payload)
+        removed_columns: set[str] = set()
+        while True:
+            try:
+                return self.client.table(table).update(remaining_payload).eq(key_column, key_value).execute()
+            except Exception as exc:
+                missing = _mentioned_columns(exc, optional_columns) - removed_columns
+                if not missing:
+                    raise
+                removed_columns.update(missing)
+                remaining_payload = {
+                    key: value
+                    for key, value in remaining_payload.items()
+                    if key not in missing
+                }
+                logger.debug(
+                    "Retrying %s update without missing optional columns: %s",
+                    table,
+                    sorted(missing),
+                )
 
     def _backfill_phone_identity(self, student_id: str | None, normalized_phone: str, child_name: str | None = None):
         if not student_id or normalized_phone == "unknown":
@@ -792,8 +831,12 @@ def _error_text(error: Exception) -> str:
 
 
 def _mentions_any_column(error: Exception, columns: set[str]) -> bool:
+    return bool(_mentioned_columns(error, columns))
+
+
+def _mentioned_columns(error: Exception, columns: set[str]) -> set[str]:
     text = _error_text(error).lower()
-    return any(column.lower() in text for column in columns)
+    return {column for column in columns if column.lower() in text}
 
 
 def _is_duplicate_key_error(error: Exception) -> bool:

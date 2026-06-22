@@ -20,6 +20,7 @@ sys.modules.setdefault(
 )
 
 from diagnostic_flow import (
+    NUMERACY_DIAGNOSTIC_ITEMS,
     analyze_diagnostic_progress,
     analyze_literacy_diagnostic_progress,
     build_instructional_route_prompt,
@@ -30,6 +31,7 @@ from curriculum_path import (
     advance_numeracy_state_after_mastery,
     build_curriculum_path_prompt,
     resolve_literacy_lesson,
+    resolve_numeracy_lesson,
 )
 from learning_state import analyze_session, build_learning_state_prompt, extract_child_name, scaffold_ladder_for
 from memory import StudentMemory, _learning_state_snapshot_message, compatibility_learner_key_for, learner_key_for
@@ -646,6 +648,83 @@ def main() -> int:
         and "Think addition for subtraction" in path_prompt
         and "Do not jump to the next module" in path_prompt,
         path_prompt,
+    )
+
+    advanced_diagnostic_messages = []
+    for item in NUMERACY_DIAGNOSTIC_ITEMS:
+        advanced_diagnostic_messages.append({"role": "assistant", "content": item.prompt})
+        if item.id == "divide_sharing":
+            advanced_diagnostic_messages.append({"role": "user", "content": "three"})
+            break
+        advanced_diagnostic_messages.append({"role": "user", "content": str(item.expected[0])})
+    division_progress = analyze_diagnostic_progress(advanced_diagnostic_messages)
+    ok &= check(
+        "division_diagnostic_places_at_module5_start",
+        division_progress["status"] == "placed"
+        and division_progress["placement"]["module"] == 5
+        and division_progress["placement"]["week"] == 17
+        and division_progress["placement"]["lesson"] == 1,
+        str(division_progress),
+    )
+
+    division_lesson = resolve_numeracy_lesson(
+        {"current_module": 5, "current_week": 19, "current_lesson": 4},
+        5,
+    )
+    division_prompt = build_curriculum_path_prompt(
+        {
+            "current_module": 5,
+            "current_week": 19,
+            "current_lesson": 4,
+            "active_skill": "division",
+            "diagnostic_status": "done",
+        },
+        5,
+    )
+    ok &= check(
+        "module5_curriculum_path_pins_exact_division_lesson",
+        division_lesson["global_lesson"] == 76
+        and division_lesson["title"] == "Market Division: Price Per Item"
+        and "Global Lesson 76" in division_prompt
+        and "Market Division: Price Per Item" in division_prompt
+        and "fair sharing and equal grouping" in division_prompt,
+        division_prompt,
+    )
+
+    module6_start = advance_numeracy_state_after_mastery(
+        {
+            "current_module": 5,
+            "current_week": 20,
+            "current_lesson": 4,
+            "active_skill": "division",
+            "diagnostic_status": "done",
+        }
+    )
+    ok &= check(
+        "module5_mastery_advances_to_word_problems",
+        module6_start["current_module"] == 6
+        and module6_start["current_week"] == 21
+        and module6_start["current_lesson"] == 1
+        and "Choosing the Right Operation" in module6_start["next_step"],
+        str(module6_start),
+    )
+
+    grade4_bridge = advance_numeracy_state_after_mastery(
+        {
+            "current_module": 6,
+            "current_week": 24,
+            "current_lesson": 4,
+            "active_skill": "word_problems",
+            "diagnostic_status": "done",
+        }
+    )
+    ok &= check(
+        "module6_mastery_advances_to_grade4_bridge",
+        grade4_bridge["current_module"] == 7
+        and grade4_bridge["current_week"] == 25
+        and grade4_bridge["current_lesson"] == 1
+        and "Grade 4 bridge" in grade4_bridge["next_step"],
+        str(grade4_bridge),
     )
 
     literacy_state = {

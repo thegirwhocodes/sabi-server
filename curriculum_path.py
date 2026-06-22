@@ -36,6 +36,8 @@ MODULE_START = {
     2: {"week": 4, "global": 13, "weeks": 4},
     3: {"week": 8, "global": 29, "weeks": 4},
     4: {"week": 12, "global": 45, "weeks": 5},
+    5: {"week": 17, "global": 65, "weeks": 4},
+    6: {"week": 21, "global": 81, "weeks": 4},
 }
 
 LESSON_TITLES = {
@@ -103,6 +105,38 @@ LESSON_TITLES = {
     62: "Multiplication word problems in Nigerian context",
     63: "Multiplication and division: inverse relationship",
     64: "Module 4 comprehensive assessment",
+    65: "Sharing Equally",
+    66: "What Division Means",
+    67: "Dividing by 2: Halving",
+    68: "Dividing by 3",
+    69: "Dividing by 5",
+    70: "Dividing by 10",
+    71: "Division and Multiplication are Related",
+    72: "Dividing Naira Among Friends",
+    73: "Division with Remainders",
+    74: "Dividing Larger Numbers",
+    75: "Fair Sharing Word Problems",
+    76: "Market Division: Price Per Item",
+    77: "Division Word Problems: Grouping",
+    78: "Division Practice: Sharing Money",
+    79: "Division Review and Challenge",
+    80: "Division mastery check and word-problem bridge",
+    81: "Choosing the Right Operation",
+    82: "Key Words in Word Problems",
+    83: "Addition or Subtraction?",
+    84: "Multiplication or Division?",
+    85: "Two-Step Problems: Buy and Get Change",
+    86: "Two-Step Problems: Earn and Share",
+    87: "Market Day: Shopping with a Budget",
+    88: "Market Day: Running a Stall",
+    89: "Money Problems: Saving and Spending",
+    90: "Money Problems: Comparing Prices",
+    91: "Real Life: Bus Fare and Transport",
+    92: "Real Life: School Supplies Shopping",
+    93: "Multi-Step Challenge Problems",
+    94: "Problem-Solving Strategies",
+    95: "Final Review: All Operations",
+    96: "Final Challenge: Lagos Market Master",
 }
 
 MODULE_PRINCIPLES = {
@@ -110,6 +144,8 @@ MODULE_PRINCIPLES = {
     2: "Teach addition as putting groups together to find the total. Start with fingers or market items, then name plus, altogether, and total.",
     3: "Teach subtraction as taking away and finding what is left. Tie it to change at the market so the child feels in control.",
     4: "Teach multiplication as equal groups and repeated addition. Use packs, trays, children, notebooks, mangoes, and Naira prices.",
+    5: "Teach division as fair sharing and equal grouping first. Use oranges, snacks, friends, trays, and Naira shared equally; connect back to known multiplication facts.",
+    6: "Teach word problems as sense-making, not keyword hunting. Have the child identify what is known, what is being asked, choose the operation, solve one step, and check the answer.",
 }
 
 FALLBACK_MODULE_PROMPTS = {

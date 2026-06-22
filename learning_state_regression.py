@@ -31,7 +31,7 @@ from curriculum_path import (
     build_curriculum_path_prompt,
     resolve_literacy_lesson,
 )
-from learning_state import analyze_session, extract_child_name
+from learning_state import analyze_session, build_learning_state_prompt, extract_child_name, scaffold_ladder_for
 from memory import StudentMemory, _learning_state_snapshot_message, compatibility_learner_key_for, learner_key_for
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from voice_asterisk import (
@@ -463,8 +463,128 @@ def main() -> int:
     )
     ok &= check(
         "module_not_advanced_on_wrong",
-        stats.recommended_module <= 2,
+        stats.recommended_module == 2,
         f"module={stats.recommended_module}",
+    )
+    addition_ladder = stats.learning_state.get("scaffold_ladder") or {}
+    addition_ladder_text = " ".join(str(value) for value in addition_ladder.values()).lower()
+    ok &= check(
+        "addition_deep_scaffold_ladder_uses_one_plus_one",
+        addition_ladder.get("skill") == "addition"
+        and "one plus one" in addition_ladder_text
+        and "finger" in addition_ladder_text,
+        str(addition_ladder),
+    )
+    addition_prompt = build_learning_state_prompt(
+        {"current_module": stats.recommended_module, "learning_state": stats.learning_state}
+    )
+    ok &= check(
+        "learning_prompt_includes_required_bump_down_ladder",
+        "REQUIRED BUMP-DOWN LADDER" in addition_prompt
+        and "Ask this style of easier question next" in addition_prompt
+        and "one plus one" in addition_prompt.lower(),
+        addition_prompt,
+    )
+    addition_level2_ladder = scaffold_ladder_for("addition", scaffold_depth=2, wrong_streak=2) or {}
+    addition_level2_text = " ".join(str(value) for value in addition_level2_ladder.values()).lower()
+    ok &= check(
+        "addition_level2_scaffold_ladder_uses_sums_to_five",
+        addition_level2_ladder.get("skill") == "addition"
+        and "sums to five" in addition_level2_text
+        and "finger" in addition_level2_text,
+        str(addition_level2_ladder),
+    )
+
+    subtraction_stats = analyze_session(
+        {
+            "current_module": 3,
+            "learning_state": {
+                "current_module": 3,
+                "active_skill": "subtraction",
+                "correct_streak": 0,
+                "wrong_streak": 1,
+                "scaffold_depth": 0,
+            },
+        },
+        [
+            {"role": "assistant", "content": "You have ten naira and spend four naira. How much is left?"},
+            {"role": "user", "content": "two naira"},
+            {"role": "assistant", "content": "Try smaller. Five take away two. What is left?"},
+            {"role": "user", "content": "four"},
+        ],
+    )
+    subtraction_ladder = subtraction_stats.learning_state.get("scaffold_ladder") or {}
+    subtraction_text = " ".join(str(value) for value in subtraction_ladder.values()).lower()
+    ok &= check(
+        "subtraction_scaffold_ladder_preserves_take_away",
+        subtraction_ladder.get("skill") == "subtraction"
+        and "take away" in subtraction_text
+        and "do not ask one plus one" in subtraction_text,
+        str(subtraction_ladder),
+    )
+    ok &= check(
+        "subtraction_scaffold_keeps_current_lesson_module",
+        subtraction_stats.recommended_module == 3,
+        str(subtraction_stats.learning_state),
+    )
+
+    multiplication_stats = analyze_session(
+        {
+            "current_module": 4,
+            "learning_state": {
+                "current_module": 4,
+                "active_skill": "multiplication",
+                "correct_streak": 0,
+                "wrong_streak": 1,
+                "scaffold_depth": 0,
+            },
+        },
+        [
+            {
+                "role": "assistant",
+                "content": "Each pack has four biscuits and you buy three packs. How many biscuits altogether?",
+            },
+            {"role": "user", "content": "ten"},
+            {
+                "role": "assistant",
+                "content": "Each bag has two mangoes and you buy two bags. How many mangoes altogether?",
+            },
+            {"role": "user", "content": "five"},
+        ],
+    )
+    multiplication_ladder = multiplication_stats.learning_state.get("scaffold_ladder") or {}
+    multiplication_text = " ".join(str(value) for value in multiplication_ladder.values()).lower()
+    ok &= check(
+        "multiplication_scaffold_ladder_uses_equal_groups",
+        multiplication_ladder.get("skill") == "multiplication"
+        and "groups" in multiplication_text
+        and ("equal-groups" in multiplication_text or "two groups" in multiplication_text),
+        str(multiplication_ladder),
+    )
+    ok &= check(
+        "multiplication_scaffold_keeps_current_lesson_module",
+        multiplication_stats.recommended_module == 4,
+        str(multiplication_stats.learning_state),
+    )
+
+    word_ladder = scaffold_ladder_for("word_problems", scaffold_depth=2, wrong_streak=2) or {}
+    word_ladder_text = " ".join(str(value) for value in word_ladder.values()).lower()
+    ok &= check(
+        "word_problem_ladder_reduces_to_operation_choice",
+        word_ladder.get("skill") == "word_problems"
+        and "what do we know" in word_ladder_text
+        and "two-step" not in word_ladder.get("example_prompt", "").lower(),
+        str(word_ladder),
+    )
+
+    literacy_ladder = scaffold_ladder_for("phonemic_awareness_beginning", scaffold_depth=2, wrong_streak=2) or {}
+    literacy_ladder_text = " ".join(str(value) for value in literacy_ladder.values()).lower()
+    ok &= check(
+        "literacy_ladder_uses_smaller_oral_unit",
+        literacy_ladder.get("skill") == "phonemic_awareness_beginning"
+        and "mmm" in literacy_ladder_text
+        and "same sound" in literacy_ladder_text,
+        str(literacy_ladder),
     )
 
     messages_correct = [

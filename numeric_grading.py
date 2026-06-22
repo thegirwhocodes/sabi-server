@@ -113,20 +113,19 @@ def _infer_expected_number(question: str) -> int | None:
         others.remove(max_value)
         return max_value - sum(others)
 
-    if re.search(r"\b(altogether|total|together|plus|add|more|in all)\b", lower):
-        return sum(numbers)
+    if re.search(r"\b(times|multiply|each|every|groups?\s+of)\b", lower) or (
+        re.search(r"\b(cost|costs|costing)\b", lower)
+        and re.search(r"\b(buy|buys|bought|purchase|purchases|purchased)\b", lower)
+    ):
+        if len(numbers) >= 2:
+            return numbers[-2] * numbers[-1]
 
     if re.search(r"\b(share|shared|equally|divide|divided)\b", lower) and len(numbers) >= 2:
         if numbers[1] and numbers[0] % numbers[1] == 0:
             return numbers[0] // numbers[1]
 
-    if re.search(r"\b(times|multiply|each|every)\b", lower) or (
-        re.search(r"\bbuy\b", lower)
-        or re.search(r"\bbought\b", lower)
-        or re.search(r"\bpurchase\b", lower)
-    ):
-        if len(numbers) >= 2:
-            return numbers[-2] * numbers[-1]
+    if re.search(r"\b(altogether|total|together|plus|add|more|in all)\b", lower):
+        return sum(numbers)
 
     return None
 
@@ -151,7 +150,7 @@ The child's latest answer includes {check.expected}. Treat that answer as correc
 ## LATEST NUMERIC ANSWER CHECK
 For the latest Sabi question, a deterministic math check gives {check.expected} as the expected answer.
 The child's latest answer included {check.child_numbers}, so it appears incorrect.
-Do not say "wrong." Acknowledge the attempt, then bump down one level: use smaller numbers, a simpler market story, or a concrete counting step before trying a fresh similar problem."""
+Do not say "wrong." Acknowledge the attempt, then follow the learner-state bump-down ladder if present; otherwise use smaller numbers, a simpler market story, or a concrete counting step before trying a fresh similar problem."""
 
 
 def analyze_latest_numeric_turn(messages: list[dict]) -> NumericTurnCheck:

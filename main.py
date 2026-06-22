@@ -33,6 +33,7 @@ from memory import StudentMemory
 from voice import router as voice_router
 from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server
+from voice_realtime import record_hangup_event, register_call, start_audiosocket_server
 from secret_loader import get_secret
 
 load_dotenv()
@@ -136,8 +137,14 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Could not generate Asterisk thinking cue {i}: {e}")
     logger.info("Asterisk thinking cues ready (WAV)")
 
-    # Start FastAGI server for Asterisk call handling
+    # Start FastAGI server as a fallback for older dialplans.
     agi_server = await start_agi_server(
+        stt=app.state.stt,
+        llm=app.state.llm,
+        tts=app.state.tts,
+        memory=app.state.memory,
+    )
+    audiosocket_server = await start_audiosocket_server(
         stt=app.state.stt,
         llm=app.state.llm,
         tts=app.state.tts,
@@ -149,6 +156,8 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     logger.info("Shutting down Sabi server...")
+    audiosocket_server.close()
+    await audiosocket_server.wait_closed()
     agi_server.close()
     await agi_server.wait_closed()
 
@@ -403,9 +412,20 @@ AMI_HOST = os.getenv("AMI_HOST", "asterisk")
 AMI_PORT = int(os.getenv("AMI_PORT", "5038"))
 AMI_USER = os.getenv("AMI_USER", "sabi")
 AMI_SECRET = os.getenv("AMI_SECRET", "sabi_ami_secret_change_me")
+SABI_CALLER_ID = os.getenv("SABI_CALLER_ID", "+2342017001459")
+FLASH_CALLBACK_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_DELAY_SECONDS", "0"))
+FLASH_CALLBACK_RETRY_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_RETRY_DELAY_SECONDS", "6"))
+FLASH_CALLBACK_MAX_ATTEMPTS = int(os.getenv("FLASH_CALLBACK_MAX_ATTEMPTS", "3"))
+FLASH_CALLBACK_COOLDOWN_SECONDS = int(os.getenv("FLASH_CALLBACK_COOLDOWN_SECONDS", "20"))
+FLASH_CALLBACK_RETRY_ENABLED = os.getenv("FLASH_CALLBACK_RETRY_ENABLED", "0").lower() in {"1", "true", "yes"}
+_last_flash_callbacks: dict[str, float] = {}
 
 
-async def ami_originate(phone: str):
+def normalize_phone(phone: str) -> str:
+    return re.sub(r"[^\d+]", "", phone or "")
+
+
+async def ami_originate(phone: str, attempt: int = 1, delay_seconds: float | None = None):
     """Send AMI Originate command to Asterisk to call the child back."""
     reader, writer = await asyncio.open_connection(AMI_HOST, AMI_PORT)
 
@@ -427,8 +447,12 @@ async def ami_originate(phone: str):
         if line.strip() == b"":
             break
 
-    # Wait before calling back (so child's phone stops ringing)
-    await asyncio.sleep(2)
+    # Wait before calling back so the child's handset/carrier releases the
+    # original missed call. Calling back too quickly can land in voicemail or
+    # carrier announcements, especially across international test routes.
+    if delay_seconds is None:
+        delay_seconds = FLASH_CALLBACK_DELAY_SECONDS
+    await asyncio.sleep(delay_seconds)
 
     # Originate outbound call
     writer.write(
@@ -437,7 +461,8 @@ async def ami_originate(phone: str):
         f"Context: sabi-callback\r\n"
         f"Exten: {phone}\r\n"
         f"Priority: 1\r\n"
-        f"CallerID: Sabi <{phone}>\r\n"
+        f"CallerID: Sabi <{SABI_CALLER_ID}>\r\n"
+        f"Variable: SABI_CALLBACK_ATTEMPT={attempt}\r\n"
         f"Timeout: 30000\r\n"
         f"Async: true\r\n"
         f"\r\n".encode()
@@ -463,12 +488,180 @@ async def flash_callback(phone: str = Form(...)):
     Initiates outbound call to the child via AMI Originate.
     Child pays ₦0. We pay ₦3/min SIP outgoing.
     """
-    logger.info(f"Flash callback requested for {phone}")
+    normalized_phone = normalize_phone(phone)
+    if not normalized_phone or normalized_phone == "+":
+        logger.warning("Flash callback rejected: missing phone number")
+        return JSONResponse({"status": "rejected", "reason": "missing_phone"}, status_code=400)
+
+    now = time.monotonic()
+    last_requested = _last_flash_callbacks.get(normalized_phone, 0)
+    if now - last_requested < FLASH_CALLBACK_COOLDOWN_SECONDS:
+        logger.info(
+            "Flash callback duplicate suppressed for %s (%.1fs since last request)",
+            normalized_phone,
+            now - last_requested,
+        )
+        return JSONResponse({"status": "duplicate_ignored", "phone": normalized_phone})
+
+    _last_flash_callbacks[normalized_phone] = now
+    for old_phone, timestamp in list(_last_flash_callbacks.items()):
+        if now - timestamp > FLASH_CALLBACK_COOLDOWN_SECONDS * 6:
+            _last_flash_callbacks.pop(old_phone, None)
+
+    logger.info(f"Flash callback requested for {normalized_phone}")
 
     # Fire and forget — don't block Asterisk's curl
-    asyncio.create_task(ami_originate(phone))
+    asyncio.create_task(ami_originate(normalized_phone, attempt=1))
 
-    return JSONResponse({"status": "callback_initiated", "phone": phone})
+    return JSONResponse({"status": "callback_initiated", "phone": normalized_phone, "attempt": 1})
+
+
+@app.post("/asterisk/flash/retry")
+async def retry_flash_callback(
+    phone: str = Form(...),
+    attempt: int = Form(1),
+    reason: str = Form("unknown"),
+):
+    """
+    Retry a callback when the previous outbound leg answered into carrier audio
+    or voicemail instead of a real child. This bypasses the public duplicate
+    suppression because it is only called from the internal realtime handler.
+    """
+    normalized_phone = normalize_phone(phone)
+    if not normalized_phone or normalized_phone == "+":
+        logger.warning("Flash callback retry rejected: missing phone number")
+        return JSONResponse({"status": "rejected", "reason": "missing_phone"}, status_code=400)
+
+    if not FLASH_CALLBACK_RETRY_ENABLED:
+        logger.info(
+            "Flash callback retry disabled for %s after attempt %s reason=%s",
+            normalized_phone,
+            attempt,
+            reason[:160],
+        )
+        return JSONResponse({
+            "status": "retry_disabled",
+            "phone": normalized_phone,
+            "attempt": attempt,
+        })
+
+    next_attempt = attempt + 1
+    if next_attempt > FLASH_CALLBACK_MAX_ATTEMPTS:
+        logger.warning(
+            "Flash callback retry limit reached for %s after attempt %s reason=%s",
+            normalized_phone,
+            attempt,
+            reason[:160],
+        )
+        return JSONResponse({
+            "status": "retry_limit_reached",
+            "phone": normalized_phone,
+            "attempt": attempt,
+            "max_attempts": FLASH_CALLBACK_MAX_ATTEMPTS,
+        })
+
+    logger.info(
+        "Flash callback retry scheduled for %s attempt=%s/%s reason=%s",
+        normalized_phone,
+        next_attempt,
+        FLASH_CALLBACK_MAX_ATTEMPTS,
+        reason[:160],
+    )
+    _last_flash_callbacks[normalized_phone] = time.monotonic()
+    asyncio.create_task(
+        ami_originate(
+            normalized_phone,
+            attempt=next_attempt,
+            delay_seconds=FLASH_CALLBACK_RETRY_DELAY_SECONDS,
+        )
+    )
+    return JSONResponse({
+        "status": "retry_scheduled",
+        "phone": normalized_phone,
+        "attempt": next_attempt,
+        "delay_seconds": FLASH_CALLBACK_RETRY_DELAY_SECONDS,
+    })
+
+
+@app.post("/admin/asterisk/direct-call")
+async def direct_sabi_call(
+    phone: str = Form(...),
+    attempt: int = Form(1),
+    delay_seconds: float = Form(0),
+):
+    """
+    Protected direct test hook for calling a known phone number into the Sabi
+    AudioSocket lesson flow without waiting for the AT inbound/flash leg.
+    """
+    normalized_phone = normalize_phone(phone)
+    if not normalized_phone or normalized_phone == "+":
+        logger.warning("Direct Sabi call rejected: missing phone number")
+        return JSONResponse({"status": "rejected", "reason": "missing_phone"}, status_code=400)
+
+    safe_attempt = max(1, attempt)
+    safe_delay = max(0, delay_seconds)
+    logger.info(
+        "Direct Sabi call requested for %s attempt=%s delay=%.1fs",
+        normalized_phone,
+        safe_attempt,
+        safe_delay,
+    )
+    asyncio.create_task(
+        ami_originate(
+            normalized_phone,
+            attempt=safe_attempt,
+            delay_seconds=safe_delay,
+        )
+    )
+    return JSONResponse({
+        "status": "direct_call_initiated",
+        "phone": normalized_phone,
+        "attempt": safe_attempt,
+        "delay_seconds": safe_delay,
+    })
+
+
+@app.post("/asterisk/audiosocket/register")
+async def register_audiosocket_call(
+    uuid: str = Form(...),
+    phone: str = Form("unknown"),
+    mode: str = Form("inbound"),
+    attempt: str = Form("1"),
+):
+    """Called by Asterisk immediately before AudioSocket() connects."""
+    register_call(uuid, phone, mode, attempt)
+    return JSONResponse({"status": "registered", "uuid": uuid, "phone": phone, "mode": mode, "attempt": attempt})
+
+
+@app.post("/asterisk/hangup")
+async def asterisk_hangup(
+    uuid: str = Form("unknown"),
+    phone: str = Form("unknown"),
+    mode: str = Form("unknown"),
+    attempt: str = Form(""),
+    hangup_cause: str = Form(""),
+    dialstatus: str = Form(""),
+    duration: str = Form(""),
+    billsec: str = Form(""),
+    channel: str = Form(""),
+    recording: str = Form(""),
+    uniqueid: str = Form(""),
+):
+    """Called from Asterisk's h extension after a call leg hangs up."""
+    record_hangup_event(
+        uuid,
+        phone=phone,
+        mode=mode,
+        attempt=attempt,
+        hangup_cause=hangup_cause,
+        dialstatus=dialstatus,
+        duration=duration,
+        billsec=billsec,
+        channel=channel,
+        recording=recording,
+        uniqueid=uniqueid,
+    )
+    return JSONResponse({"status": "recorded", "uuid": uuid})
 
 
 if __name__ == "__main__":

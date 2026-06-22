@@ -7,9 +7,13 @@ services:
     container_name: sabi-asterisk
     ports:
       - "5060:5060/udp"
-      - "5060:5060/tcp"
       - "10000-10100:10000-10100/udp"
     volumes:
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/manager.conf:/etc/asterisk/manager.conf:ro
+      - ./asterisk/modules.conf:/etc/asterisk/modules.conf:ro
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
       - shared_audio:/shared/audio
     restart: unless-stopped
 
@@ -39,13 +43,16 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
       - "127.0.0.1:4573:4573"
+      - "127.0.0.1:9019:9019"
     env_file:
       - .env
     environment:
       - OLLAMA_URL=http://ollama:11434
       - AMI_HOST=asterisk
+      - CHATTERBOX_URL=http://sabi-chatterbox:8001
     secrets:
       - ANTHROPIC_API_KEY
+      - GROQ_API_KEY
       - YARNGPT_API_KEY
       - SUPABASE_SERVICE_ROLE_KEY
       - SABI_API_KEY
@@ -120,6 +127,8 @@ services:
 secrets:
   ANTHROPIC_API_KEY:
     file: ./secrets/ANTHROPIC_API_KEY
+  GROQ_API_KEY:
+    file: ./secrets/GROQ_API_KEY
   YARNGPT_API_KEY:
     file: ./secrets/YARNGPT_API_KEY
   SUPABASE_SERVICE_ROLE_KEY:

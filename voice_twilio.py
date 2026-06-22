@@ -243,7 +243,7 @@ async def twilio_recording(request: Request):
     # 3. Low confidence — ask to repeat
     if result["confidence"] < 0.4 or not result["text"].strip():
         repeat_id = uuid.uuid4().hex
-        repeat_text = "I didn't quite catch that. Can you say it again?"
+        repeat_text = "I didn't quite hear that. Can you say it again?"
         repeat_path = f"audio_cache/repeat_{repeat_id}.mp3"
         await synthesize_tts(repeat_text, repeat_path, request)
 

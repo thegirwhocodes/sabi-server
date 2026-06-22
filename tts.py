@@ -4,6 +4,7 @@ Primary TTS for Sabi — 16 Nigerian-accented voices.
 """
 
 import logging
+import os
 
 import httpx
 
@@ -25,7 +26,7 @@ DEFAULT_VOICE = YARNGPT_VOICES["wura"]
 
 
 class TextToSpeech:
-    def __init__(self, voice: str = "wura"):
+    def __init__(self, voice: str | None = None):
         """
         Initialize YarnGPT TTS.
 
@@ -33,8 +34,10 @@ class TextToSpeech:
             voice: Voice key from YARNGPT_VOICES.
         """
         self.api_key = get_secret("YARNGPT_API_KEY")
-        self.voice = YARNGPT_VOICES.get(voice, DEFAULT_VOICE)
-        self.client = httpx.Client(timeout=30.0)
+        voice_key = (voice or os.getenv("SABI_YARNGPT_VOICE", "wura")).strip().lower()
+        self.voice = YARNGPT_VOICES.get(voice_key, DEFAULT_VOICE)
+        timeout_seconds = float(os.getenv("YARNGPT_TIMEOUT_SECONDS", "6.0"))
+        self.client = httpx.Client(timeout=timeout_seconds)
 
         if not self.api_key:
             logger.warning("YARNGPT_API_KEY not set. TTS will fail.")

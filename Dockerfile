@@ -23,7 +23,7 @@ COPY . .
 # Create audio cache directory
 RUN mkdir -p audio_cache
 
-# 8000 = FastAPI, 4573 = FastAGI (Asterisk connects here)
-EXPOSE 8000 4573
+# 8000 = FastAPI, 4573 = FastAGI fallback, 9019 = AudioSocket realtime media
+EXPOSE 8000 4573 9019
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

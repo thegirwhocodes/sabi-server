@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 
@@ -20,6 +21,112 @@ from diagnostic_flow import (
 from learning_state import analyze_session, extract_child_name
 from memory import StudentMemory
 from phone_utils import normalize_phone_number, phone_lookup_variants
+
+
+class FakeSupabaseError(Exception):
+    def __init__(self, message: str, code: str = ""):
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.details = ""
+        self.hint = ""
+
+
+class FakeResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class FakeQuery:
+    def __init__(self, client, table_name: str):
+        self.client = client
+        self.table_name = table_name
+        self.operation = "select"
+        self.payload = None
+        self.filters: list[tuple[str, str, object]] = []
+
+    def select(self, *_args, **_kwargs):
+        self.operation = "select"
+        return self
+
+    def eq(self, column, value):
+        self.filters.append(("eq", column, value))
+        return self
+
+    def in_(self, column, values):
+        self.filters.append(("in", column, values))
+        return self
+
+    def insert(self, payload):
+        self.operation = "insert"
+        self.payload = payload
+        return self
+
+    def update(self, payload):
+        self.operation = "update"
+        self.payload = payload
+        return self
+
+    def execute(self):
+        if self.table_name != "sabi_students":
+            return FakeResult([])
+        if self.operation == "select":
+            rows = self.client.rows
+            for op, column, value in self.filters:
+                if column == "phone_number_normalized" and not self.client.has_normalized_column:
+                    raise FakeSupabaseError("column sabi_students.phone_number_normalized does not exist", "42703")
+                if op == "eq":
+                    rows = [row for row in rows if row.get(column) == value]
+                elif op == "in":
+                    rows = [row for row in rows if row.get(column) in value]
+            return FakeResult([dict(row) for row in rows])
+        if self.operation == "update":
+            for op, column, value in self.filters:
+                if column == "phone_number_normalized" and not self.client.has_normalized_column:
+                    raise FakeSupabaseError("column sabi_students.phone_number_normalized does not exist", "42703")
+                if column in self.client.missing_columns:
+                    raise FakeSupabaseError(f"column sabi_students.{column} does not exist", "42703")
+            for key in self.payload or {}:
+                if key == "phone_number_normalized" and not self.client.has_normalized_column:
+                    raise FakeSupabaseError("column sabi_students.phone_number_normalized does not exist", "42703")
+                if key in self.client.missing_columns:
+                    raise FakeSupabaseError(f"column sabi_students.{key} does not exist", "42703")
+            updated = []
+            for row in self.client.rows:
+                match = all(row.get(column) == value for _, column, value in self.filters)
+                if match:
+                    row.update(self.payload or {})
+                    updated.append(dict(row))
+            return FakeResult(updated)
+        if self.operation == "insert":
+            payload = dict(self.payload or {})
+            for key in payload:
+                if key == "phone_number_normalized" and not self.client.has_normalized_column:
+                    raise FakeSupabaseError("column sabi_students.phone_number_normalized does not exist", "42703")
+                if key in self.client.missing_columns:
+                    raise FakeSupabaseError(f"column sabi_students.{key} does not exist", "42703")
+            if self.client.race_duplicate_row is not None:
+                self.client.rows.append(dict(self.client.race_duplicate_row))
+                self.client.race_duplicate_row = None
+                raise FakeSupabaseError("duplicate key value violates unique constraint idx_sabi_students_phone", "23505")
+            phone = payload.get("phone_number")
+            if phone and any(row.get("phone_number") == phone for row in self.client.rows):
+                raise FakeSupabaseError("duplicate key value violates unique constraint idx_sabi_students_phone", "23505")
+            payload.setdefault("id", f"fake-{len(self.client.rows) + 1}")
+            self.client.rows.append(payload)
+            return FakeResult([dict(payload)])
+        return FakeResult([])
+
+
+class FakeSupabaseClient:
+    def __init__(self, rows=None, has_normalized_column=False, missing_columns=None, race_duplicate_row=None):
+        self.rows = list(rows or [])
+        self.has_normalized_column = has_normalized_column
+        self.missing_columns = set(missing_columns or [])
+        self.race_duplicate_row = race_duplicate_row
+
+    def table(self, table_name: str):
+        return FakeQuery(self, table_name)
 
 
 def check(name: str, condition: bool, detail: str = "") -> bool:
@@ -42,6 +149,71 @@ def main() -> int:
     ok &= check(
         "lookup_variants",
         "08033374126" in phone_lookup_variants("+2348033374126"),
+    )
+
+    thin_memory = StudentMemory.__new__(StudentMemory)
+    thin_memory.client = FakeSupabaseClient(
+        rows=[
+            {
+                "id": "existing-phone",
+                "phone_number": "08033374126",
+                "name": "Remi",
+                "total_sessions": 2,
+                "created_at": "2026-06-01T00:00:00+00:00",
+            }
+        ],
+        has_normalized_column=False,
+        missing_columns={
+            "current_module",
+            "current_topic",
+            "skills",
+            "learning_state",
+            "baseline_status",
+            "diagnostic_results",
+            "current_week",
+            "current_lesson",
+            "tarl_level",
+        },
+    )
+    thin_lookup = asyncio.run(thin_memory.find_or_create_student("+2348033374126"))
+    ok &= check(
+        "thin_schema_lookup_reuses_existing_phone",
+        thin_lookup["id"] == "existing-phone"
+        and thin_lookup["is_new"] is False
+        and thin_memory.client.rows[0]["phone_number"] == "+2348033374126",
+        f"{thin_lookup} rows={thin_memory.client.rows}",
+    )
+
+    race_memory = StudentMemory.__new__(StudentMemory)
+    race_memory.client = FakeSupabaseClient(
+        rows=[],
+        has_normalized_column=False,
+        missing_columns={
+            "current_module",
+            "current_topic",
+            "skills",
+            "learning_state",
+            "baseline_status",
+            "diagnostic_results",
+            "current_week",
+            "current_lesson",
+            "tarl_level",
+        },
+        race_duplicate_row={
+            "id": "race-winner",
+            "phone_number": "+2348033374126",
+            "name": None,
+            "total_sessions": 0,
+            "created_at": "2026-06-01T00:00:00+00:00",
+        },
+    )
+    race_lookup = asyncio.run(race_memory.find_or_create_student("08033374126"))
+    ok &= check(
+        "duplicate_insert_recovers_existing_student",
+        race_lookup["id"] == "race-winner"
+        and race_lookup["is_new"] is False
+        and len(race_memory.client.rows) == 1,
+        f"{race_lookup} rows={race_memory.client.rows}",
     )
 
     student = {

@@ -197,27 +197,8 @@ class StudentMemory:
         normalized_phone = normalize_phone_number(phone_number)
         variants = phone_lookup_variants(phone_number)
 
-        # Look up existing by normalized column when available, then historic
-        # raw variants for rows created before this migration.
-        try:
-            result = self.client.table("sabi_students").select("*").eq(
-                "phone_number_normalized", normalized_phone
-            ).execute()
-            if result and result.data:
-                row = result.data[0]
-                self._backfill_phone_identity(row.get("id"), normalized_phone)
-                return {**row, "is_new": False}
-        except Exception as exc:
-            if not _mentions_any_column(exc, {"phone_number_normalized"}):
-                logger.warning("Phone-normalized lookup failed: %s", exc)
-
-        result = self.client.table("sabi_students").select("*").in_(
-            "phone_number", variants
-        ).execute()
-
-        if result and result.data and len(result.data) > 0:
-            row = _choose_canonical_student(result.data)
-            self._backfill_phone_identity(row.get("id"), normalized_phone)
+        row = self._lookup_student_by_phone(normalized_phone, variants)
+        if row:
             return {**row, "is_new": False}
 
         # Create new student (only columns that exist in the table)
@@ -237,10 +218,23 @@ class StudentMemory:
             "total_correct": 0,
             "total_wrong": 0,
         }
-        result = self._insert_student_with_fallback(insert_payload)
+        try:
+            result = self._insert_student_with_fallback(insert_payload)
+        except Exception as exc:
+            # If another call created this learner between our lookup and
+            # insert, recover the existing row instead of failing the lesson.
+            if _is_duplicate_key_error(exc):
+                row = self._lookup_student_by_phone(normalized_phone, variants)
+                if row:
+                    logger.info("Recovered existing student after duplicate phone insert: %s", normalized_phone)
+                    return {**row, "is_new": False}
+            raise
 
         if result and result.data and len(result.data) > 0:
             return {**result.data[0], "is_new": True}
+        row = self._lookup_student_by_phone(normalized_phone, variants)
+        if row:
+            return {**row, "is_new": False}
         return {"id": "new", "name": None, "current_module": 0, "is_new": True}
 
     async def get_student_context(self, student_id: str) -> str:
@@ -416,6 +410,30 @@ class StudentMemory:
             }
             return self.client.table("sabi_students").insert(fallback).execute()
 
+    def _lookup_student_by_phone(self, normalized_phone: str, variants: list[str]) -> dict | None:
+        # Look up existing by normalized column when available, then historic
+        # raw variants for rows created before this migration.
+        try:
+            result = self.client.table("sabi_students").select("*").eq(
+                "phone_number_normalized", normalized_phone
+            ).execute()
+            if result and result.data:
+                row = result.data[0]
+                self._backfill_phone_identity(row.get("id"), normalized_phone)
+                return row
+        except Exception as exc:
+            if not _mentions_any_column(exc, {"phone_number_normalized"}):
+                logger.warning("Phone-normalized lookup failed: %s", exc)
+
+        result = self.client.table("sabi_students").select("*").in_(
+            "phone_number", variants
+        ).execute()
+        if result and result.data and len(result.data) > 0:
+            row = _choose_canonical_student(result.data)
+            self._backfill_phone_identity(row.get("id"), normalized_phone)
+            return row
+        return None
+
     def _update_student_with_fallback(self, student_id: str, payload: dict):
         try:
             return self.client.table("sabi_students").update(payload).eq("id", student_id).execute()
@@ -471,6 +489,11 @@ def _error_text(error: Exception) -> str:
 def _mentions_any_column(error: Exception, columns: set[str]) -> bool:
     text = _error_text(error).lower()
     return any(column.lower() in text for column in columns)
+
+
+def _is_duplicate_key_error(error: Exception) -> bool:
+    text = _error_text(error).lower()
+    return "23505" in text or "duplicate key" in text or "unique constraint" in text
 
 
 def _choose_canonical_student(rows: list[dict]) -> dict:

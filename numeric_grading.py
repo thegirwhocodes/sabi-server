@@ -109,6 +109,10 @@ def _infer_expected_number(question: str) -> int | None:
     if unit_price_change is not None:
         return unit_price_change
 
+    total_spend = _infer_total_spend(lower, numbers)
+    if total_spend is not None:
+        return total_spend
+
     if re.search(r"\b(change|left|remain|remaining)\b", lower):
         if len(numbers) == 2:
             return abs(numbers[1] - numbers[0])
@@ -158,6 +162,75 @@ def _infer_unit_price_change(question_lower: str, numbers: list[int]) -> int | N
         total_cost += cost_numbers[index]
 
     return payment - total_cost
+
+
+def _infer_total_spend(question_lower: str, numbers: list[int]) -> int | None:
+    """Infer total cost for market stories asking what was spent or paid."""
+    if not _has_total_cost_intent(question_lower):
+        return None
+    if re.search(r"\b(change|left|remain|remaining)\b", question_lower):
+        return None
+
+    if re.search(r"\b(each|every|per)\b", question_lower):
+        return _sum_unit_price_pairs(numbers)
+
+    marked_prices = _extract_marked_prices(question_lower)
+    if len(marked_prices) >= 2:
+        return sum(marked_prices)
+    if len(marked_prices) == 1 and len(numbers) == 1:
+        return marked_prices[0]
+    if (
+        len(marked_prices) == 1
+        and len(numbers) >= 2
+        and re.search(r"\b(buy|buys|bought|purchase|purchases|purchased)\b", question_lower)
+    ):
+        return None
+
+    has_budget_number = re.search(r"\b(have|has|had|with|pay with|paid with|give|gives|gave)\b", question_lower)
+    if (
+        not has_budget_number
+        and not re.search(r"\b(buy|buys|bought|purchase|purchases|purchased|costs?|costing)\b", question_lower)
+        and re.search(r"\b(spend|spent|pay|paid)\b", question_lower)
+        and len(numbers) >= 2
+    ):
+        return sum(numbers)
+    return None
+
+
+def _has_total_cost_intent(question_lower: str) -> bool:
+    return bool(
+        re.search(r"\b(how much (?:do|did|will|would)?\s*(?:you|they|we|she|he)?\s*(?:spend|pay)|total cost|cost in all|spend in all|paid in all|altogether|in total|in all)\b", question_lower)
+        or (
+            re.search(r"\b(spend|spent|pay|paid)\b", question_lower)
+            and re.search(r"\b(costs?|costing|for|at)\b", question_lower)
+        )
+    )
+
+
+def _extract_marked_prices(question_lower: str) -> list[int]:
+    prices: list[int] = []
+    pattern = re.compile(
+        r"\b(?:for|costs?|costing|at)\s+"
+        r"((?:\d+(?:,\d{3})*|[a-z]+)(?:[\s-]+(?:\d+(?:,\d{3})*|[a-z]+)){0,6})\s+naira\b"
+    )
+    for match in pattern.finditer(question_lower):
+        parsed = extract_numbers(match.group(1))
+        if parsed:
+            prices.append(parsed[-1])
+    return prices
+
+
+def _sum_unit_price_pairs(numbers: list[int]) -> int | None:
+    if len(numbers) < 2:
+        return None
+    total = 0
+    index = 0
+    while index + 1 < len(numbers):
+        total += numbers[index] * numbers[index + 1]
+        index += 2
+    if index < len(numbers):
+        total += numbers[index]
+    return total
 
 
 def build_numeric_grading_hint(messages: list[dict]) -> str:

@@ -462,6 +462,8 @@ def infer_skill_from_question(question: str, fallback_module: int = 0) -> str:
         return "multiplication"
     if re.search(r"\b(share|shared|divide|divided|equally|groups)\b", lower):
         return "division"
+    if _looks_like_total_spend_question(lower):
+        return "addition"
     if re.search(r"\b(change|left|remain|minus|subtract|take away|took away|spent|spend)\b", lower):
         return "subtraction"
     if re.search(r"\b(enough|both|how much did you make|keep half)\b", lower):
@@ -474,6 +476,15 @@ def infer_skill_from_question(question: str, fallback_module: int = 0) -> str:
     ):
         return "counting"
     return MODULE_SKILLS.get(fallback_module, "diagnostic")
+
+
+def _looks_like_total_spend_question(question_lower: str) -> bool:
+    if re.search(r"\b(change|left|remain|remaining|minus|subtract|take away)\b", question_lower):
+        return False
+    return bool(
+        re.search(r"\b(how much (?:do|did|will|would)?\s*(?:you|they|we|she|he)?\s*(?:spend|pay)|total cost|cost in all|spend in all|paid in all|altogether|in total|in all)\b", question_lower)
+        and re.search(r"\b(spend|spent|pay|paid|costs?|costing|for|at)\b", question_lower)
+    )
 
 
 def extract_child_name(messages: list[dict[str, str]]) -> str | None:

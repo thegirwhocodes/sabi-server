@@ -37,6 +37,7 @@ from learning_state import (
     analyze_session,
     build_learning_state_prompt,
     extract_child_name,
+    infer_skill_from_question,
     route_next_course_after_session,
     scaffold_ladder_for,
 )
@@ -522,6 +523,33 @@ def main() -> int:
         and "sums to five" in addition_level2_text
         and "finger" in addition_level2_text,
         str(addition_level2_ladder),
+    )
+    spend_total_question = "Groundnuts for fifteen naira and pure water for thirty naira. How much do you spend?"
+    ok &= check(
+        "spend_total_routes_to_addition",
+        infer_skill_from_question(spend_total_question, fallback_module=2) == "addition",
+        infer_skill_from_question(spend_total_question, fallback_module=2),
+    )
+    spend_total_stats = analyze_session(
+        {
+            "current_module": 2,
+            "learning_state": {
+                "current_module": 2,
+                "active_skill": "addition",
+                "correct_streak": 0,
+                "wrong_streak": 0,
+                "scaffold_depth": 0,
+            },
+        },
+        [
+            {"role": "assistant", "content": spend_total_question},
+            {"role": "user", "content": "forty naira"},
+        ],
+    )
+    ok &= check(
+        "spend_total_wrong_uses_addition_ladder",
+        spend_total_stats.learning_state.get("repair_skill") == "addition",
+        str(spend_total_stats.learning_state),
     )
 
     subtraction_stats = analyze_session(

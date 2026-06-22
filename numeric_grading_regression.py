@@ -54,6 +54,56 @@ def main() -> int:
         multi_item_change,
     )
 
+    total_spend = _turn(
+        "Groundnuts for fifteen naira and pure water for thirty naira. How much do you spend?",
+        "forty five naira",
+    )
+    ok &= check(
+        "total_spend_accepts_45",
+        total_spend.expected == 45 and total_spend.is_correct is True,
+        total_spend,
+    )
+
+    total_spend_with_budget = _turn(
+        "You have five hundred naira. You buy groundnuts for one hundred and fifty naira and pure water for thirty naira. How much did you spend?",
+        "one hundred and eighty naira",
+    )
+    ok &= check(
+        "total_spend_ignores_budget_cash",
+        total_spend_with_budget.expected == 180 and total_spend_with_budget.is_correct is True,
+        total_spend_with_budget,
+    )
+
+    unit_price_total = _turn(
+        "You buy two notebooks at fifty naira each and three pens at twenty naira each. How much do you pay?",
+        "one hundred and sixty naira",
+    )
+    ok &= check(
+        "unit_price_total_accepts_160",
+        unit_price_total.expected == 160 and unit_price_total.is_correct is True,
+        unit_price_total,
+    )
+
+    implied_unit_price_total = _turn(
+        "A mango costs three naira. You buy four mangoes. How much do you pay?",
+        "twelve naira",
+    )
+    ok &= check(
+        "implied_unit_price_total_accepts_12",
+        implied_unit_price_total.expected == 12 and implied_unit_price_total.is_correct is True,
+        implied_unit_price_total,
+    )
+
+    left_after_spending = _turn(
+        "You have five hundred naira. You buy groundnuts for one hundred and fifty naira and pure water for thirty naira. How much is left?",
+        "three hundred and twenty naira",
+    )
+    ok &= check(
+        "left_after_spending_still_subtracts",
+        left_after_spending.expected == 320 and left_after_spending.is_correct is True,
+        left_after_spending,
+    )
+
     wrong_answer = _turn(
         "You buy four mangoes at thirty naira each. You pay with two hundred naira. How much change do you get?",
         "seventy naira",

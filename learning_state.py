@@ -315,8 +315,11 @@ def _analyze_literacy_session(
     messages: list[dict[str, str]],
     state: dict[str, Any],
 ) -> SessionStats:
-    progress = analyze_literacy_diagnostic_progress(messages)
     literacy = dict(state.get("literacy") or {})
+    if literacy.get("diagnostic_status") == "done":
+        return _analyze_literacy_lesson_session(student, messages, state, literacy)
+
+    progress = analyze_literacy_diagnostic_progress(messages)
     placement = progress.get("placement") or {}
     results = progress.get("results") or []
     correct_count = sum(1 for result in results if result.get("correct"))
@@ -393,6 +396,65 @@ def _analyze_literacy_session(
         current_level="beginner" if wrong_count else "intermediate" if correct_count else "beginner",
         should_advance=False,
         skills=skills,
+        learning_state=updated_state,
+        child_name=extract_child_name(messages),
+    )
+
+
+def _analyze_literacy_lesson_session(
+    student: dict[str, Any] | None,
+    messages: list[dict[str, str]],
+    state: dict[str, Any],
+    literacy: dict[str, Any],
+) -> SessionStats:
+    user_turns = sum(1 for message in messages if message.get("role") == "user")
+    assistant_text = " ".join(
+        str(message.get("content") or "").lower()
+        for message in messages
+        if message.get("role") == "assistant"
+    )
+    completed = user_turns >= 2 and bool(
+        re.search(
+            r"\b(today you learned|next time|call me back|you did great|well done.*today|we will continue)\b",
+            assistant_text,
+        )
+    )
+    active_skill = literacy.get("active_skill") or "oral_literacy"
+    literacy.update(
+        {
+            "phase": "recall" if completed else "teaching",
+            "diagnostic_status": "done",
+            "next_step": (
+                "Save the next literacy lesson for the next call."
+                if completed
+                else "Continue the exact current literacy lesson with one guided example and one independent check."
+            ),
+        }
+    )
+    updated_state = {
+        **state,
+        "course": "literacy",
+        "phase": literacy.get("phase", "teaching"),
+        "literacy": literacy,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    module = int(literacy.get("current_module") or 1)
+    week = int(literacy.get("current_week") or 1)
+    lesson = int(literacy.get("current_lesson") or 1)
+    summary = (
+        f"Child completed Literacy Module {module}, Week {week}, Lesson {lesson}."
+        if completed
+        else f"Child practiced Literacy Module {module}, Week {week}, Lesson {lesson}; continue this exact lesson."
+    )
+    return SessionStats(
+        summary=summary,
+        correct_count=0,
+        wrong_count=0,
+        topics_covered=[f"literacy:{active_skill}"],
+        recommended_module=int(state.get("current_module") or 0),
+        current_level="intermediate" if user_turns >= 3 else "beginner",
+        should_advance=completed,
+        skills={},
         learning_state=updated_state,
         child_name=extract_child_name(messages),
     )

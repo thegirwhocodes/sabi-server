@@ -25,7 +25,12 @@ from diagnostic_flow import (
     build_instructional_route_prompt,
     build_opening_turn,
 )
-from curriculum_path import advance_numeracy_state_after_mastery, build_curriculum_path_prompt
+from curriculum_path import (
+    advance_learning_state_after_mastery,
+    advance_numeracy_state_after_mastery,
+    build_curriculum_path_prompt,
+    resolve_literacy_lesson,
+)
 from learning_state import analyze_session, extract_child_name
 from memory import StudentMemory, _learning_state_snapshot_message
 from phone_utils import normalize_phone_number, phone_lookup_variants
@@ -358,6 +363,53 @@ def main() -> int:
         and "Think addition for subtraction" in path_prompt
         and "Do not jump to the next module" in path_prompt,
         path_prompt,
+    )
+
+    literacy_state = {
+        "course": "literacy",
+        "literacy": {
+            "diagnostic_status": "done",
+            "current_phase": 1,
+            "current_module": 5,
+            "current_week": 11,
+            "current_lesson": 2,
+            "active_skill": "advanced_phonemic_awareness",
+        },
+    }
+    literacy_lesson = resolve_literacy_lesson(literacy_state)
+    literacy_prompt = build_curriculum_path_prompt(literacy_state, course="literacy")
+    ok &= check(
+        "literacy_path_pins_exact_script_lesson",
+        literacy_lesson["lesson_code"] == "42b"
+        and "Changing the Last Sound" in literacy_prompt
+        and "pure sounds" in literacy_prompt
+        and "Do not claim print reading mastery" in literacy_prompt,
+        literacy_prompt,
+    )
+    advanced_literacy = advance_learning_state_after_mastery(literacy_state)
+    ok &= check(
+        "literacy_mastery_advances_next_lesson_for_next_call",
+        advanced_literacy["literacy"]["current_module"] == 5
+        and advanced_literacy["literacy"]["current_week"] == 11
+        and advanced_literacy["literacy"]["current_lesson"] == 3
+        and "Lesson 3" in advanced_literacy["literacy"]["next_step"],
+        str(advanced_literacy),
+    )
+    literacy_completed_stats = analyze_session(
+        {"learning_state": literacy_state},
+        [
+            {"role": "assistant", "content": "Today we are changing the last sound in cat. Say cat."},
+            {"role": "user", "content": "cat"},
+            {"role": "assistant", "content": "Good. Change the last sound to d. What word?"},
+            {"role": "user", "content": "cad"},
+            {"role": "assistant", "content": "Today you learned to listen for the last sound. Next time we will change the middle sound."},
+        ],
+    )
+    ok &= check(
+        "completed_literacy_lesson_marks_advance",
+        literacy_completed_stats.should_advance
+        and literacy_completed_stats.learning_state["literacy"]["current_lesson"] == 2,
+        str(literacy_completed_stats),
     )
 
     opening = build_opening_turn(

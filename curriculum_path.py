@@ -130,6 +130,133 @@ FALLBACK_MODULE_PROMPTS = {
     },
 }
 
+LITERACY_MODULE_NAMES = {
+    1: "Phonemic Awareness",
+    2: "Oral Vocabulary Building",
+    3: "Listening Comprehension",
+    4: "Oral English and Grammar",
+    5: "Advanced Phonemic Awareness",
+    6: "Print Bridge",
+}
+
+LITERACY_MODULE_START = {
+    1: {"phase": 1, "week": 1, "global": 1, "weeks": 4, "suffix": ""},
+    2: {"phase": 1, "week": 5, "global": 17, "weeks": 4, "suffix": ""},
+    3: {"phase": 1, "week": 5, "global": 17, "weeks": 4, "suffix": "b"},
+    4: {"phase": 1, "week": 9, "global": 33, "weeks": 4, "suffix": ""},
+    5: {"phase": 1, "week": 9, "global": 33, "weeks": 4, "suffix": "b"},
+}
+
+LITERACY_MODULE_SKILLS = {
+    1: "phonemic_awareness",
+    2: "oral_vocabulary",
+    3: "listening_comprehension",
+    4: "oral_grammar",
+    5: "advanced_phonemic_awareness",
+    6: "print_bridge",
+}
+
+LITERACY_LESSON_TITLES = {
+    1: {
+        1: "Environmental Sounds vs. Speech Sounds: Hearing Differences",
+        2: "Beginning Sounds: Identifying the First Sound in a Word",
+        3: "Beginning Sounds Practice: Sorting Words by First Sound",
+        4: "Ending Sounds: Identifying the Last Sound in a Word",
+        5: "What Is Rhyming? Recognizing Rhyming Pairs",
+        6: "Rhyming Practice: Identifying Which Words Rhyme",
+        7: "Producing Rhymes: Making Up Rhyming Words",
+        8: "Odd One Out: Which Word Does Not Rhyme?",
+        9: "What Are Syllables? Clapping Word Parts",
+        10: "Counting Syllables in 1-4 Syllable Words",
+        11: "Blending Syllables: Putting Word Parts Together",
+        12: "Segmenting Syllables: Breaking Words Into Parts",
+        13: "Blending 2 Sounds Into Words",
+        14: "Blending 3 Sounds: CVC Words",
+        15: "Blending 3-4 Sounds: Harder Words",
+        16: "Week 4 Review and Module Assessment",
+    },
+    2: {
+        17: "Body Parts We Can See: The Touch Your Body Game",
+        18: "Body Parts Inside: What They Do",
+        19: "Health Words: Visiting the Clinic",
+        20: "Action Verbs With the Body: Move and Learn",
+        21: "Family Roles: Adaeze's Family Tree",
+        22: "Household Items: Describing a Nigerian Home",
+        23: "Describing Words for Home: Opposites",
+        24: "Daily Routines: Sequencing Funke's Day",
+        25: "Places in the Community: Where Do You Go?",
+        26: "People and Jobs: What Do They Do?",
+        27: "Market Words: Buying and Selling",
+        28: "Transport and Direction Words: Giving Directions",
+        29: "Common Animals: Animals Around Us",
+        30: "Wild Animals of Africa: Our Amazing Continent",
+        31: "Weather and Nature: Sun, Rain, and Harmattan",
+        32: "Plants, Food, and Module Review: Vocabulary Assessment",
+    },
+    3: {
+        17: "Amina Goes to the Market",
+        18: "Emeka's Morning",
+        19: "The Lost Goat",
+        20: "Kemi's Birthday",
+        21: "The Broken Bucket",
+        22: "Tunde and the Homework",
+        23: "The Market Fire",
+        24: "Ngozi's Garden",
+        25: "Bola's Bad Day",
+        26: "The New Student",
+        27: "Adaeze's Secret",
+        28: "Two Brothers",
+        29: "Lagos: The Big City",
+        30: "How Cocoa Becomes Chocolate",
+        31: "Nigerian Animals in Danger",
+        32: "Module 3 Assessment: The School Garden",
+    },
+    4: {
+        33: "What Is a Sentence?",
+        34: "Expanding Sentences",
+        35: "Statements vs. Questions",
+        36: "Commands and Exclamations",
+        37: "Present Tense",
+        38: "Past Tense: Regular",
+        39: "Past Tense: Irregular",
+        40: "Future Tense",
+        41: "Question Words: Who, What, Where",
+        42: "Question Words: When, Why, How",
+        43: "Answering in Full Sentences",
+        44: "Asking Questions About a Story",
+        45: "Adjectives: Words That Describe",
+        46: "Comparatives: Comparing Two Things",
+        47: "Superlatives: The Best of All",
+        48: "Module 4 Review and Assessment",
+    },
+    5: {
+        33: "Segmenting 3-Sound Words",
+        34: "Segmenting 4-Sound Words",
+        35: "Segmenting Words with Digraphs",
+        36: "Segmentation Speed Drill",
+        37: "Deleting the First Sound",
+        38: "Deleting the Last Sound",
+        39: "Deleting Middle Sounds in Blends",
+        40: "Mixed Deletion Practice",
+        41: "Changing the First Sound",
+        42: "Changing the Last Sound",
+        43: "Changing the Middle Sound",
+        44: "Mixed Substitution Practice",
+        45: "First Letter-Sound Pairs: S, A, T, I, P, N",
+        46: "More Letter-Sound Pairs: C/K, E, H, R, M, D",
+        47: "Building Words from Letter Sounds: Oral",
+        48: "Module 5 Assessment and Phase 1 Exit Assessment",
+    },
+}
+
+LITERACY_MODULE_PRINCIPLES = {
+    1: "Teach oral sound awareness only: environmental sounds, beginning/ending sounds, rhyme, syllables, and oral blending. Say pure sounds, not letter names.",
+    2: "Use the vocabulary cycle: say the word twice, give a child-friendly definition, use a Nigerian-context sentence, ask the child to repeat and use it.",
+    3: "Tell one short Nigerian story, then ask who/what/where/when first before why/how. Support retelling, sequence, problem-solution, inference, and main idea.",
+    4: "Teach oral grammar through complete spoken sentences: model, repeat, adapt. Keep grammar alive inside stories and daily-life speech.",
+    5: "Teach advanced sound play: segmenting, deleting, substituting, and oral letter-sound links. Use pure sounds and do not claim print mastery from voice-only evidence.",
+}
+
 
 def resolve_numeracy_lesson(state: dict[str, Any] | None, current_module: int | None = None) -> dict[str, Any] | None:
     """Resolve module/week/local lesson into a concrete lesson record."""
@@ -181,6 +308,54 @@ def resolve_numeracy_lesson(state: dict[str, Any] | None, current_module: int | 
     }
 
 
+def resolve_literacy_lesson(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Resolve saved literacy phase/module/week/lesson into a script lesson."""
+    state = state or {}
+    literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else state
+    literacy = literacy or {}
+    module = int(literacy.get("current_module") or 1)
+    if module not in LITERACY_MODULE_START:
+        return {
+            "phase": int(literacy.get("current_phase") or 2),
+            "module": module,
+            "module_name": LITERACY_MODULE_NAMES.get(module, "Literacy Bridge"),
+            "week": int(literacy.get("current_week") or 13),
+            "lesson": int(literacy.get("current_lesson") or 1),
+            "script_lesson": None,
+            "lesson_code": None,
+            "title": "Print bridge readiness check",
+            "focus": "Use oral review first; only ask print tasks when the child has a card, book, or screen.",
+            "next_title": "the next print bridge lesson",
+        }
+
+    meta = LITERACY_MODULE_START[module]
+    start_week = int(meta["week"])
+    week_count = int(meta["weeks"])
+    week = int(literacy.get("current_week") or start_week)
+    lesson = int(literacy.get("current_lesson") or 1)
+
+    if week < start_week or week >= start_week + week_count:
+        week = start_week
+    if lesson < 1 or lesson > 4:
+        lesson = 1
+
+    script_lesson = int(meta["global"]) + (week - start_week) * 4 + (lesson - 1)
+    suffix = str(meta.get("suffix") or "")
+    next_record = _next_literacy_lesson_record(module, week, lesson)
+    return {
+        "phase": int(meta["phase"]),
+        "module": module,
+        "module_name": LITERACY_MODULE_NAMES.get(module, "Foundational Literacy"),
+        "week": week,
+        "lesson": lesson,
+        "script_lesson": script_lesson,
+        "lesson_code": f"{script_lesson}{suffix}",
+        "title": LITERACY_LESSON_TITLES.get(module, {}).get(script_lesson, "Foundational literacy practice"),
+        "focus": LITERACY_MODULE_PRINCIPLES.get(module, "Teach one voice-friendly literacy skill at a time."),
+        "next_title": next_record.get("title") if next_record else "the next literacy lesson",
+    }
+
+
 def build_curriculum_path_prompt(
     state: dict[str, Any] | None,
     current_module: int | None = None,
@@ -189,13 +364,30 @@ def build_curriculum_path_prompt(
     """Prompt block that pins Sabi to the current lesson sequence."""
     state = state or {}
     if course == "literacy" or state.get("course") == "literacy":
-        literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
+        lesson = resolve_literacy_lesson(state)
+        if not lesson:
+            return ""
         return f"""
 
-## CURRENT LITERACY PATH - HACKATHON LESSON DISCIPLINE
-The child is in literacy Phase {literacy.get('current_phase', 1)}, Module {literacy.get('current_module', 1)}, Week {literacy.get('current_week', 1)}, Lesson {literacy.get('current_lesson', 1)}.
-Teach one tiny oral literacy skill per call. Follow: warm recall, today's sound/story skill, guided practice, independent check, warm wrap-up.
-Do not claim print reading mastery from voice-only evidence."""
+## CURRENT LITERACY CURRICULUM PATH - HACKATHON LESSON DISCIPLINE
+Sabi is following the fixed Phase 1 literacy sequence, not choosing random sound games.
+Today: Phase {lesson['phase']}, Module {lesson['module']} ({lesson['module_name']}), Week {lesson['week']}, Script Lesson {lesson['lesson_code'] or lesson['script_lesson']}, Local Lesson {lesson['lesson']}: {lesson['title']}.
+Teaching focus: {lesson['focus']}
+
+Follow the original hackathon lesson rhythm for this exact literacy lesson:
+1. Warm greeting plus one recall question from the previous lesson.
+2. Today's skill: model one sound, word, story, or sentence skill.
+3. Guided practice: do one example together.
+4. Independent check: ask one fresh example and wait.
+5. Planned wrap-up only near the end: summarize the skill and preview "{lesson['next_title']}".
+
+Rules:
+- Stay on this literacy lesson for the whole call unless the caller explicitly ends.
+- If the child is right, acknowledge the exact answer and move to the next step in THIS lesson.
+- If the child is wrong twice, bump down to a smaller oral unit in THIS lesson, then rebuild.
+- For phonemic work, pronounce pure sounds, not letter names, unless the lesson is specifically a letter-sound bridge.
+- Do not claim print reading mastery from voice-only evidence.
+- Do not output bracketed performance tags like [laugh] or [chuckle]."""
 
     lesson = resolve_numeracy_lesson(state, current_module)
     if not lesson:
@@ -266,6 +458,55 @@ def advance_numeracy_state_after_mastery(state: dict[str, Any]) -> dict[str, Any
     return state
 
 
+def advance_literacy_state_after_mastery(state: dict[str, Any]) -> dict[str, Any]:
+    """Move persisted literacy state to the next lesson after mastery evidence."""
+    state = dict(state or {})
+    literacy = dict(state.get("literacy") or {})
+    lesson = resolve_literacy_lesson({"literacy": literacy})
+    if not lesson:
+        return state
+
+    next_record = _next_literacy_lesson_record(
+        int(lesson["module"]),
+        int(lesson["week"]),
+        int(lesson["lesson"]),
+    )
+    if not next_record:
+        return state
+
+    literacy.update(
+        {
+            "phase": "recall",
+            "diagnostic_status": "done",
+            "current_phase": next_record["phase"],
+            "current_module": next_record["module"],
+            "current_week": next_record["week"],
+            "current_lesson": next_record["lesson"],
+            "active_skill": LITERACY_MODULE_SKILLS.get(next_record["module"], literacy.get("active_skill", "literacy")),
+            "next_step": (
+                f"Start Phase {next_record['phase']}, Module {next_record['module']}, Week {next_record['week']}, "
+                f"Lesson {next_record['lesson']}: {next_record['title']}. Begin with one recall question."
+            ),
+        }
+    )
+    state.update(
+        {
+            "course": "literacy",
+            "phase": "recall",
+            "literacy": literacy,
+        }
+    )
+    return state
+
+
+def advance_learning_state_after_mastery(state: dict[str, Any]) -> dict[str, Any]:
+    """Advance the active course without letting numeracy and literacy collide."""
+    state = dict(state or {})
+    if state.get("course") == "literacy":
+        return advance_literacy_state_after_mastery(state)
+    return advance_numeracy_state_after_mastery(state)
+
+
 def _next_lesson_record(module: int, week: int, lesson: int) -> dict[str, Any] | None:
     if module not in MODULE_START:
         if module in (5, 6):
@@ -312,3 +553,50 @@ def _next_lesson_record(module: int, week: int, lesson: int) -> dict[str, Any] |
             "title": FALLBACK_MODULE_PROMPTS[next_module]["title"],
         }
     return None
+
+
+def _next_literacy_lesson_record(module: int, week: int, lesson: int) -> dict[str, Any] | None:
+    if module not in LITERACY_MODULE_START:
+        return None
+
+    meta = LITERACY_MODULE_START[module]
+    start_week = int(meta["week"])
+    week_count = int(meta["weeks"])
+    script_lesson = int(meta["global"]) + (week - start_week) * 4 + (lesson - 1)
+    module_last = int(meta["global"]) + week_count * 4 - 1
+
+    if script_lesson < module_last:
+        next_script = script_lesson + 1
+        offset = next_script - int(meta["global"])
+        next_week = start_week + offset // 4
+        next_lesson = offset % 4 + 1
+        return {
+            "phase": int(meta["phase"]),
+            "module": module,
+            "week": next_week,
+            "lesson": next_lesson,
+            "script_lesson": next_script,
+            "title": LITERACY_LESSON_TITLES.get(module, {}).get(next_script, "the next literacy lesson"),
+        }
+
+    next_module = module + 1
+    if next_module in LITERACY_MODULE_START:
+        next_meta = LITERACY_MODULE_START[next_module]
+        next_script = int(next_meta["global"])
+        return {
+            "phase": int(next_meta["phase"]),
+            "module": next_module,
+            "week": int(next_meta["week"]),
+            "lesson": 1,
+            "script_lesson": next_script,
+            "title": LITERACY_LESSON_TITLES.get(next_module, {}).get(next_script, LITERACY_MODULE_NAMES.get(next_module, "the next literacy module")),
+        }
+
+    return {
+        "phase": 2,
+        "module": 6,
+        "week": 13,
+        "lesson": 1,
+        "script_lesson": None,
+        "title": "Print bridge readiness check",
+    }

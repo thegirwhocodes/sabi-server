@@ -11,7 +11,7 @@ from typing import Optional
 
 from supabase import create_client
 
-from curriculum_path import advance_numeracy_state_after_mastery, build_curriculum_path_prompt
+from curriculum_path import advance_learning_state_after_mastery, build_curriculum_path_prompt
 from learning_state import analyze_session, build_learning_state_prompt, default_learning_state, merge_learning_state
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
@@ -132,13 +132,22 @@ class StudentMemory:
             normalized_phone = normalize_phone_number(phone_number)
             persisted_learning_state = dict(stats.learning_state or {})
             if stats.should_advance:
-                persisted_learning_state = advance_numeracy_state_after_mastery(persisted_learning_state)
-                summary = (
-                    f"{summary} Next call should continue at Module "
-                    f"{persisted_learning_state.get('current_module')}, Week "
-                    f"{persisted_learning_state.get('current_week')}, Lesson "
-                    f"{persisted_learning_state.get('current_lesson')}."
-                )
+                persisted_learning_state = advance_learning_state_after_mastery(persisted_learning_state)
+                if persisted_learning_state.get("course") == "literacy":
+                    literacy_state = persisted_learning_state.get("literacy") or {}
+                    summary = (
+                        f"{summary} Next call should continue at Literacy Module "
+                        f"{literacy_state.get('current_module')}, Week "
+                        f"{literacy_state.get('current_week')}, Lesson "
+                        f"{literacy_state.get('current_lesson')}."
+                    )
+                else:
+                    summary = (
+                        f"{summary} Next call should continue at Module "
+                        f"{persisted_learning_state.get('current_module')}, Week "
+                        f"{persisted_learning_state.get('current_week')}, Lesson "
+                        f"{persisted_learning_state.get('current_lesson')}."
+                    )
             persisted_module = int(persisted_learning_state.get("current_module") or stats.recommended_module or 0)
             persisted_messages = [
                 *cleaned_messages,

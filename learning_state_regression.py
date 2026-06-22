@@ -4,12 +4,19 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import types
+
+os.environ.setdefault("SABI_SHARED_AUDIO_DIR", "/tmp/sabi-shared-audio")
 
 sys.modules.setdefault(
     "supabase",
     types.SimpleNamespace(create_client=lambda *args, **kwargs: None),
+)
+sys.modules.setdefault(
+    "httpx",
+    types.SimpleNamespace(AsyncClient=lambda *args, **kwargs: None, Client=lambda *args, **kwargs: None),
 )
 
 from diagnostic_flow import (
@@ -21,6 +28,15 @@ from diagnostic_flow import (
 from learning_state import analyze_session, extract_child_name
 from memory import StudentMemory
 from phone_utils import normalize_phone_number, phone_lookup_variants
+from voice_asterisk import (
+    MIN_LESSON_SECONDS,
+    MIN_WRAP_USER_TURNS,
+    TARGET_WRAP_SECONDS,
+    build_call_control_messages,
+    is_premature_wrap_response,
+    should_prompt_wrap_up,
+    should_wrap_up,
+)
 
 
 class FakeSupabaseError(Exception):
@@ -528,6 +544,49 @@ def main() -> int:
         and literacy_state["current_module"] == 1
         and literacy_state["current_week"] == 1,
         str(literacy_stats.learning_state),
+    )
+
+    early_wrap_messages = [{"role": "assistant", "content": "Hi."}]
+    for index in range(7):
+        early_wrap_messages.append({"role": "user", "content": f"answer {index}"})
+        early_wrap_messages.append({"role": "assistant", "content": f"question {index}"})
+    early_wrap_response = "You have done really well today. Next time we will try bigger numbers."
+    ok &= check(
+        "early_wrap_language_does_not_end_call",
+        is_premature_wrap_response(early_wrap_response, 7, MIN_LESSON_SECONDS - 30)
+        and not should_wrap_up(early_wrap_messages, early_wrap_response, elapsed_seconds=MIN_LESSON_SECONDS - 30),
+        early_wrap_response,
+    )
+
+    planned_wrap_messages = [{"role": "assistant", "content": "Hi."}]
+    for index in range(MIN_WRAP_USER_TURNS):
+        planned_wrap_messages.append({"role": "user", "content": f"answer {index}"})
+        planned_wrap_messages.append({"role": "assistant", "content": f"question {index}"})
+    planned_wrap_response = "Well done today. Next time we will try bigger numbers."
+    ok &= check(
+        "planned_wrap_window_can_end_call",
+        should_prompt_wrap_up(MIN_WRAP_USER_TURNS, TARGET_WRAP_SECONDS)
+        and should_wrap_up(planned_wrap_messages, planned_wrap_response, elapsed_seconds=TARGET_WRAP_SECONDS),
+        planned_wrap_response,
+    )
+
+    continue_instruction = build_call_control_messages(7, MIN_LESSON_SECONDS - 30)
+    ok &= check(
+        "continue_instruction_before_minimum_lesson_length",
+        bool(continue_instruction)
+        and continue_instruction[0]["role"] == "system"
+        and "Do not wrap up" in continue_instruction[0]["content"],
+        str(continue_instruction),
+    )
+
+    goodbye_messages = [
+        {"role": "assistant", "content": "Try one more."},
+        {"role": "user", "content": "bye Sabi"},
+    ]
+    ok &= check(
+        "caller_goodbye_still_ends_immediately",
+        should_wrap_up(goodbye_messages, "Okay, bye!", elapsed_seconds=30),
+        str(goodbye_messages),
     )
 
     return 0 if ok else 1

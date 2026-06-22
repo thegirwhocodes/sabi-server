@@ -177,6 +177,14 @@ class SabiLLM:
         if rag_context:
             system_prompt += rag_context
 
+        call_control_context = "\n".join(
+            f"- {m['content'].strip()}"
+            for m in messages
+            if m.get("role") == "system" and m.get("content", "").strip()
+        )
+        if call_control_context:
+            system_prompt += "\n\n## LIVE CALL CONTROL\n" + call_control_context
+
         system_prompt += build_instructional_route_prompt(messages, current_module, course)
         system_prompt += build_numeric_grading_hint(messages)
 

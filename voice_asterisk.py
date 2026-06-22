@@ -30,7 +30,7 @@ from secret_loader import get_secret
 
 logger = logging.getLogger("sabi.asterisk")
 
-SHARED_AUDIO_DIR = Path("/shared/audio")
+SHARED_AUDIO_DIR = Path(os.getenv("SABI_SHARED_AUDIO_DIR", "/shared/audio"))
 SHARED_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 CHATTERBOX_URL = os.getenv("CHATTERBOX_URL", "http://sabi-chatterbox:8001")
 ELEVENLABS_API_KEY = get_secret("ELEVENLABS_API_KEY")
@@ -41,6 +41,8 @@ TTS_PRIMARY = os.getenv("SABI_TTS_PRIMARY", "elevenlabs").strip().lower()
 MAX_TURNS = int(os.getenv("SABI_MAX_TURNS", "40"))
 WRAP_UP_AFTER_TURNS = int(os.getenv("SABI_WRAP_UP_AFTER_TURNS", "34"))
 MIN_WRAP_USER_TURNS = int(os.getenv("SABI_MIN_WRAP_USER_TURNS", "10"))
+MIN_LESSON_SECONDS = int(os.getenv("SABI_MIN_LESSON_SECONDS", "300"))
+TARGET_WRAP_SECONDS = int(os.getenv("SABI_TARGET_WRAP_SECONDS", "360"))
 RECORD_MAX_MS = 10000  # 10 seconds max recording
 RECORD_SILENCE_S = 2   # Stop recording after 2s silence
 # SIP/PSTN audio is narrowband and short child answers often score around 0.35
@@ -51,6 +53,9 @@ WRAP_UP_PHRASES = [
     "call me back", "bye", "well done today",
     "great job today", "see you next time",
     "talk to you", "until next time",
+    "next time", "today you learned", "we learned today",
+    "you have done really well", "you've done really well",
+    "we'll try", "we will try", "finished for today",
 ]
 
 CALLER_END_PHRASES = [
@@ -216,21 +221,82 @@ async def tts_and_convert(tts, text: str, label: str = "resp") -> str:
     return wav_path.rsplit(".", 1)[0]
 
 
-def should_wrap_up(messages: list[dict], response: str) -> bool:
+def _latest_user_message(messages: list[dict]) -> str:
+    return next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+
+
+def _caller_asked_to_end(messages: list[dict]) -> bool:
+    latest_user_lower = _latest_user_message(messages).lower()
+    return any(phrase in latest_user_lower for phrase in CALLER_END_PHRASES)
+
+
+def _response_wants_wrap(response: str) -> bool:
+    response_lower = response.lower()
+    return any(phrase in response_lower for phrase in WRAP_UP_PHRASES)
+
+
+def should_prompt_wrap_up(user_turns: int, elapsed_seconds: float, max_call_seconds: int | None = None) -> bool:
+    """Return true when Sabi should start closing the current lesson."""
+    if max_call_seconds is not None and elapsed_seconds >= max_call_seconds - 60:
+        return True
+    if elapsed_seconds >= TARGET_WRAP_SECONDS and user_turns >= MIN_WRAP_USER_TURNS:
+        return True
+    return user_turns >= WRAP_UP_AFTER_TURNS
+
+
+def build_call_control_messages(
+    user_turns: int,
+    elapsed_seconds: float,
+    max_call_seconds: int | None = None,
+) -> list[dict[str, str]]:
+    """Transient system instructions for the current turn."""
+    if should_prompt_wrap_up(user_turns, elapsed_seconds, max_call_seconds):
+        return [{
+            "role": "system",
+            "content": (
+                "The call is now in the planned wrap-up window. Finish the current idea, "
+                "summarize the skill the child practiced, give encouragement, and end warmly."
+            ),
+        }]
+
+    if elapsed_seconds < MIN_LESSON_SECONDS or user_turns < MIN_WRAP_USER_TURNS:
+        return [{
+            "role": "system",
+            "content": (
+                "Do not wrap up or end the lesson yet. This call is still too short "
+                f"({int(elapsed_seconds)} seconds, {user_turns} user turns). Continue teaching "
+                "one small step and ask the next clear question. Do not say 'next time', "
+                "'today you learned', 'well done today', 'bye', or any closing phrase."
+            ),
+        }]
+
+    return []
+
+
+def is_premature_wrap_response(response: str, user_turns: int, elapsed_seconds: float) -> bool:
+    """Detect an early closing draft before the 5-7 minute lesson window."""
+    if not _response_wants_wrap(response):
+        return False
+    return elapsed_seconds < MIN_LESSON_SECONDS or user_turns < MIN_WRAP_USER_TURNS
+
+
+def should_wrap_up(messages: list[dict], response: str, elapsed_seconds: float | None = None) -> bool:
     """Check if the lesson should end."""
     user_turns = sum(1 for m in messages if m["role"] == "user")
     if user_turns >= MAX_TURNS:
         return True
-    latest_user = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
-    latest_user_lower = latest_user.lower()
-    if any(phrase in latest_user_lower for phrase in CALLER_END_PHRASES):
+    if _caller_asked_to_end(messages):
         return True
     # In the original hackathon-style flow, Sabi did not cut the child off just
     # because she used a closing-sounding encouragement. Keep the line open
     # until the planned wrap-up band unless the caller explicitly ends.
-    if user_turns < WRAP_UP_AFTER_TURNS:
+    if not _response_wants_wrap(response):
         return False
-    return any(phrase in response.lower() for phrase in WRAP_UP_PHRASES)
+    if elapsed_seconds is not None and elapsed_seconds < MIN_LESSON_SECONDS:
+        return False
+    if user_turns < MIN_WRAP_USER_TURNS:
+        return False
+    return True
 
 
 async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
@@ -242,6 +308,7 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
     The child has already answered the phone.
     """
     call_id = uuid.uuid4().hex
+    call_started_at = time.monotonic()
     peer_info = writer.get_extra_info("peername")
     logger.info(f"AGI connection from {peer_info} (call_id={call_id})")
 
@@ -360,23 +427,46 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
             except Exception as exc:
                 logger.debug("Could not update AGI learning state: %s", exc)
 
-            # Check if we should start wrapping up
             user_turns = sum(1 for m in messages if m["role"] == "user")
-            if user_turns >= WRAP_UP_AFTER_TURNS:
-                messages.append({
-                    "role": "system",
-                    "content": "The call has been going for a while. Please wrap up the lesson with a summary and encouragement."
-                })
+            elapsed_seconds = time.monotonic() - call_started_at
+            llm_messages = [
+                *messages,
+                *build_call_control_messages(user_turns, elapsed_seconds),
+            ]
 
             # LLM response
             llm_start = time.monotonic()
             response = await llm.generate(
-                messages=messages,
+                messages=llm_messages,
                 student_id=student_id,
                 current_module=module,
                 memory=memory,
                 course=str(effective_state.get("course") or "numeracy"),
             )
+            if is_premature_wrap_response(response, user_turns, elapsed_seconds):
+                logger.warning(
+                    "AGI turn %s produced premature wrap at %.0fs/%s turns; regenerating",
+                    turn,
+                    elapsed_seconds,
+                    user_turns,
+                )
+                response = await llm.generate(
+                    messages=[
+                        *messages,
+                        {
+                            "role": "system",
+                            "content": (
+                                "Your previous draft ended the lesson too early. Rewrite it as an "
+                                "active teaching turn: acknowledge the child, continue the same skill, "
+                                "and ask one next question. Do not summarize or mention next time."
+                            ),
+                        },
+                    ],
+                    student_id=student_id,
+                    current_module=module,
+                    memory=memory,
+                    course=str(effective_state.get("course") or "numeracy"),
+                )
             logger.info(f"Turn {turn}: llm={time.monotonic() - llm_start:.2f}s")
             messages.append({"role": "assistant", "content": response})
             logger.info(f"Sabi turn {turn}: {response}")
@@ -388,7 +478,7 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
             await agi_command(f'STREAM FILE "{resp_path}" "#"')
 
             # Check wrap-up
-            if should_wrap_up(messages, response):
+            if should_wrap_up(messages, response, elapsed_seconds=time.monotonic() - call_started_at):
                 logger.info(f"Wrapping up call after {user_turns} turns")
                 break
 

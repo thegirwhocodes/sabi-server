@@ -27,14 +27,15 @@ from transcript_normalizer import normalize_lesson_transcript
 from voice_asterisk import (
     CONFIDENCE_THRESHOLD,
     MAX_TURNS,
-    WRAP_UP_AFTER_TURNS,
+    build_call_control_messages,
+    is_premature_wrap_response,
     should_wrap_up,
     tts_and_convert,
 )
 
 logger = logging.getLogger("sabi.realtime")
 
-SHARED_AUDIO_DIR = Path("/shared/audio")
+SHARED_AUDIO_DIR = Path(os.getenv("SABI_SHARED_AUDIO_DIR", "/shared/audio"))
 SHARED_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 AUDIO_TYPE_HANGUP = 0x00
@@ -649,27 +650,52 @@ class RealtimeCall:
                 except Exception as exc:
                     logger.debug("Could not update in-call learning state: %s", exc)
                 user_turns = sum(1 for message in messages if message["role"] == "user")
-                if user_turns >= WRAP_UP_AFTER_TURNS or time.monotonic() - call_started_at >= MAX_CALL_SECONDS - 60:
-                    messages.append({
-                        "role": "system",
-                        "content": "The call has been going for a while. Please wrap up the lesson with a summary and encouragement.",
-                    })
+                elapsed_seconds = time.monotonic() - call_started_at
+                llm_messages = [
+                    *messages,
+                    *build_call_control_messages(user_turns, elapsed_seconds, MAX_CALL_SECONDS),
+                ]
 
                 llm_start = time.monotonic()
                 response = await self.llm.generate(
-                    messages=messages,
+                    messages=llm_messages,
                     student_id=student_id,
                     current_module=module,
                     memory=self.memory,
                     course=str(effective_state.get("course") or "numeracy"),
                 )
+                if is_premature_wrap_response(response, user_turns, elapsed_seconds):
+                    logger.warning(
+                        "Realtime turn %s produced premature wrap at %.0fs/%s turns; regenerating",
+                        turn,
+                        elapsed_seconds,
+                        user_turns,
+                    )
+                    repair_messages = [
+                        *messages,
+                        {
+                            "role": "system",
+                            "content": (
+                                "Your previous draft ended the lesson too early. Rewrite it as an "
+                                "active teaching turn: acknowledge the child, continue the same skill, "
+                                "and ask one next question. Do not summarize or mention next time."
+                            ),
+                        },
+                    ]
+                    response = await self.llm.generate(
+                        messages=repair_messages,
+                        student_id=student_id,
+                        current_module=module,
+                        memory=self.memory,
+                        course=str(effective_state.get("course") or "numeracy"),
+                    )
                 logger.info("Realtime turn %s llm=%.2fs response=%s", turn, time.monotonic() - llm_start, response)
                 messages.append({"role": "assistant", "content": response})
 
                 response_pcm = await self.synthesize_pcm(response, "rt_resp")
                 logger.info("Realtime turn %s response pipeline=%.2fs", turn, time.monotonic() - turn_start)
                 interrupted = await self.play_pcm_with_barge(response_pcm)
-                if should_wrap_up(messages, response):
+                if should_wrap_up(messages, response, elapsed_seconds=time.monotonic() - call_started_at):
                     self.set_end_reason("sabi_wrap_up")
                     logger.info("Realtime wrapping up uuid=%s after %s user turns", self.call_uuid, user_turns)
                     break

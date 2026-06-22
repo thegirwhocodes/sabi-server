@@ -327,6 +327,10 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
     call_started_at = time.monotonic()
     peer_info = writer.get_extra_info("peername")
     logger.info(f"AGI connection from {peer_info} (call_id={call_id})")
+    phone = "unknown"
+    student_id = None
+    starting_learning_state = None
+    messages: list[dict[str, str]] = []
 
     # --- Parse AGI environment variables ---
     env = {}
@@ -359,6 +363,7 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
         student = await memory.find_or_create_student(phone)
         student_id = student["id"]
         effective_state = await memory.get_effective_learning_state(student)
+        starting_learning_state = dict(effective_state)
         module = int(effective_state.get("current_module") or student.get("current_module") or 0)
         logger.info(
             "Student: %s, module=%s, skill=%s, scaffold=%s, new=%s",
@@ -515,6 +520,17 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
         except Exception:
             pass
     finally:
+        duration_seconds = int(time.monotonic() - call_started_at)
+        if student_id and messages:
+            await memory.save_phone_session(
+                student_id=student_id,
+                phone_number=phone,
+                call_id=call_id,
+                messages=messages,
+                duration_seconds=duration_seconds,
+                channel="asterisk_fastagi",
+                starting_learning_state=starting_learning_state,
+            )
         writer.close()
         # Clean up call state
         memory.clear_call(call_id)

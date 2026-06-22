@@ -105,6 +105,10 @@ def _infer_expected_number(question: str) -> int | None:
         if parsed:
             return parsed[0] - 1
 
+    unit_price_change = _infer_unit_price_change(lower, numbers)
+    if unit_price_change is not None:
+        return unit_price_change
+
     if re.search(r"\b(change|left|remain|remaining)\b", lower):
         if len(numbers) == 2:
             return abs(numbers[1] - numbers[0])
@@ -128,6 +132,32 @@ def _infer_expected_number(question: str) -> int | None:
         return sum(numbers)
 
     return None
+
+
+def _infer_unit_price_change(question_lower: str, numbers: list[int]) -> int | None:
+    """Handle voice-friendly two-step price stories: quantity * unit price, then change."""
+    if len(numbers) < 3:
+        return None
+    if not re.search(r"\b(change|left|remain|remaining)\b", question_lower):
+        return None
+    if not re.search(r"\b(each|every|per|costs?|costing|at)\b", question_lower):
+        return None
+
+    payment = max(numbers)
+    cost_numbers = list(numbers)
+    cost_numbers.remove(payment)
+    if len(cost_numbers) < 2:
+        return None
+
+    total_cost = 0
+    index = 0
+    while index + 1 < len(cost_numbers):
+        total_cost += cost_numbers[index] * cost_numbers[index + 1]
+        index += 2
+    if index < len(cost_numbers):
+        total_cost += cost_numbers[index]
+
+    return payment - total_cost
 
 
 def build_numeric_grading_hint(messages: list[dict]) -> str:

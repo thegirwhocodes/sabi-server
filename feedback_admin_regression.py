@@ -18,7 +18,7 @@ from feedback_admin import (
 
 def check(name: str, condition: bool, detail: object = "") -> bool:
     status = "PASS" if condition else "FAIL"
-    print(f"{status} {name}" + (f" - {detail}" if detail else ""))
+    print(f"{status} {name}" + (f" - {detail}" if detail and not condition else ""))
     return condition
 
 

@@ -98,15 +98,16 @@ FEEDBACK_TEST_NUMBERS = {
     for value in os.getenv("SABI_FEEDBACK_TEST_NUMBERS", "").split(",")
     if value.strip()
 }
-FEEDBACK_MAX_SECONDS = int(os.getenv("SABI_FEEDBACK_MAX_SECONDS", "45"))
+FEEDBACK_MAX_SECONDS = int(os.getenv("SABI_FEEDBACK_MAX_SECONDS", "90"))
 FEEDBACK_WAIT_SECONDS = int(os.getenv("SABI_FEEDBACK_WAIT_SECONDS", "8"))
 FEEDBACK_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_PROMPT_TEXT",
     (
-        "Before you go, you can tell us anything you want us to know about this call. "
-        "You can complain, report something strange, confusing, or uncomfortable, "
-        "or tell us what worked well. This is optional. If you do not want to leave a note, "
-        "you can hang up now. If you want to leave one, start talking after this."
+        "Before you go, this is an open space. You can leave any voice note about the call. "
+        "Tell us what felt good, what went wrong, if something was confusing or uncomfortable, "
+        "or if you want to complain about anything that happened. This is optional. "
+        "If you do not want to leave a note, you can hang up now. "
+        "If you do, just start talking after this."
     ),
 )
 

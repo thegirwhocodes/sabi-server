@@ -1222,7 +1222,7 @@ def _preview_text(text: str | None, limit: int = 180) -> str:
     cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(cleaned) <= limit:
         return cleaned
-    return cleaned[: limit - 1].rstrip() + "…"
+    return cleaned[: limit - 3].rstrip() + "..."
 
 
 def _learning_state_snapshot_message(state: dict) -> dict:

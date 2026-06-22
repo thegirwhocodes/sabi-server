@@ -30,6 +30,7 @@ from stt import SpeechToText
 from tts import TextToSpeech
 from llm import SabiLLM
 from memory import StudentMemory
+from call_admin import call_sidecar_path, list_call_records, load_call_record
 from feedback_admin import (
     feedback_audio_path,
     feedback_sidecar_path,
@@ -486,6 +487,40 @@ async def admin_feedback_audio(call_uuid: str):
         media_type="audio/wav",
         filename=audio_path.name,
     )
+
+
+@app.get("/admin/calls")
+async def admin_call_index(
+    limit: int = 25,
+    offset: int = 0,
+    phone: str = "",
+    call_id: str = "",
+    flag: str = "",
+    q: str = "",
+):
+    """Protected phone-call QA index for pre-pilot monitoring."""
+    return JSONResponse(
+        list_call_records(
+            limit=limit,
+            offset=offset,
+            phone=phone,
+            call_id=call_id,
+            flag=flag,
+            q=q,
+        )
+    )
+
+
+@app.get("/admin/calls/{call_uuid}")
+async def admin_call_detail(call_uuid: str):
+    """Return one phone-call QA sidecar."""
+    sidecar = call_sidecar_path(call_uuid)
+    if not sidecar or not sidecar.exists():
+        return JSONResponse({"error": "call_not_found"}, status_code=404)
+    record = load_call_record(sidecar)
+    if not record:
+        return JSONResponse({"error": "call_unreadable"}, status_code=422)
+    return JSONResponse(record)
 
 
 async def ami_originate(phone: str, attempt: int = 1, delay_seconds: float | None = None):

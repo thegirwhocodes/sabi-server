@@ -22,6 +22,7 @@ from typing import Optional
 import httpx
 
 from answer_matcher import extract_number
+from call_admin import merge_call_hangup_event, write_call_review_record
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
 from transcript_normalizer import normalize_lesson_transcript
@@ -134,6 +135,7 @@ def record_hangup_event(call_uuid: str, **event: str) -> None:
     clean_event = {key: str(value or "") for key, value in event.items()}
     clean_event["received_at"] = str(int(time.time()))
     HANGUP_EVENTS[call_uuid] = clean_event
+    merge_call_hangup_event(call_uuid, clean_event, SHARED_AUDIO_DIR)
     while len(HANGUP_EVENTS) > 200:
         oldest_key = next(iter(HANGUP_EVENTS))
         HANGUP_EVENTS.pop(oldest_key, None)
@@ -919,6 +921,22 @@ class RealtimeCall:
                     channel="asterisk_audiosocket",
                     starting_learning_state=starting_learning_state,
                 )
+            user_turns = sum(1 for message in messages if message.get("role") == "user")
+            assistant_turns = sum(1 for message in messages if message.get("role") == "assistant")
+            write_call_review_record(
+                call_uuid=self.call_uuid,
+                call_id=self.call_id,
+                phone_number=self.phone,
+                mode=self.mode,
+                attempt=self.attempt,
+                student_id=student_id,
+                end_reason=self.end_reason,
+                duration_seconds=duration_seconds,
+                user_turns=user_turns,
+                assistant_turns=assistant_turns,
+                hangup_event=HANGUP_EVENTS.get(self.call_uuid),
+                directory=SHARED_AUDIO_DIR,
+            )
             self.memory.clear_call(self.call_id)
             logger.warning(
                 "Realtime call complete uuid=%s phone=%s mode=%s attempt=%s end_reason=%s duration=%ss user_turns=%s assistant_turns=%s",
@@ -928,8 +946,8 @@ class RealtimeCall:
                 self.attempt,
                 self.end_reason,
                 duration_seconds,
-                sum(1 for message in messages if message.get("role") == "user"),
-                sum(1 for message in messages if message.get("role") == "assistant"),
+                user_turns,
+                assistant_turns,
             )
 
 

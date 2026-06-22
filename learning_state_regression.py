@@ -33,7 +33,13 @@ from curriculum_path import (
     resolve_literacy_lesson,
     resolve_numeracy_lesson,
 )
-from learning_state import analyze_session, build_learning_state_prompt, extract_child_name, scaffold_ladder_for
+from learning_state import (
+    analyze_session,
+    build_learning_state_prompt,
+    extract_child_name,
+    route_next_course_after_session,
+    scaffold_ladder_for,
+)
 from memory import StudentMemory, _learning_state_snapshot_message, compatibility_learner_key_for, learner_key_for
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from voice_asterisk import (
@@ -772,6 +778,105 @@ def main() -> int:
         literacy_completed_stats.should_advance
         and literacy_completed_stats.learning_state["literacy"]["current_lesson"] == 2,
         str(literacy_completed_stats),
+    )
+
+    numeracy_ready_state = {
+        "course": "numeracy",
+        "phase": "first_mini_lesson",
+        "onboarding_status": "complete",
+        "diagnostic_status": "done",
+        "current_module": 1,
+        "current_week": 1,
+        "current_lesson": 1,
+        "active_skill": "counting",
+        "literacy": {
+            "phase": "diagnostic",
+            "diagnostic_status": "not_started",
+            "current_phase": 1,
+            "current_module": 1,
+            "current_week": 1,
+            "current_lesson": 1,
+            "active_skill": "phonemic_awareness_beginning",
+        },
+    }
+    next_literacy_state = route_next_course_after_session(numeracy_ready_state, user_turns=3)
+    ok &= check(
+        "numeracy_completion_routes_next_call_to_literacy",
+        next_literacy_state["course"] == "literacy"
+        and next_literacy_state["phase"] == "diagnostic"
+        and next_literacy_state["literacy"]["diagnostic_status"] == "not_started",
+        str(next_literacy_state),
+    )
+    no_voice_state = route_next_course_after_session(numeracy_ready_state, user_turns=0)
+    ok &= check(
+        "no_child_voice_does_not_flip_course",
+        no_voice_state["course"] == "numeracy",
+        str(no_voice_state),
+    )
+
+    literacy_opening = build_opening_turn(
+        {"name": "Remi", "current_module": 1, "current_topic": "counting"},
+        next_literacy_state,
+    )
+    ok &= check(
+        "literacy_next_call_opening_starts_sound_game",
+        "sound game" in literacy_opening.lower()
+        and "what sound" in literacy_opening.lower()
+        and "number game" not in literacy_opening.lower()
+        and "twenty-nine" not in literacy_opening.lower(),
+        literacy_opening,
+    )
+
+    literacy_in_progress_state = route_next_course_after_session(
+        {
+            **next_literacy_state,
+            "literacy": {
+                **next_literacy_state["literacy"],
+                "diagnostic_status": "in_progress",
+                "diagnostic_results": {
+                    "next_item": {
+                        "prompt": "Tell me two words that rhyme with cat.",
+                    }
+                },
+            },
+        },
+        user_turns=2,
+    )
+    ok &= check(
+        "unfinished_literacy_diagnostic_stays_literacy",
+        literacy_in_progress_state["course"] == "literacy",
+        str(literacy_in_progress_state),
+    )
+    literacy_continue_opening = build_opening_turn(
+        {"name": "Remi", "current_module": 1},
+        literacy_in_progress_state,
+    )
+    ok &= check(
+        "literacy_opening_continues_next_diagnostic_item",
+        "rhyme with cat" in literacy_continue_opening.lower(),
+        literacy_continue_opening,
+    )
+
+    next_numeracy_state = route_next_course_after_session(
+        {
+            **next_literacy_state,
+            "course": "literacy",
+            "literacy": {
+                **next_literacy_state["literacy"],
+                "diagnostic_status": "done",
+                "current_module": 1,
+                "current_week": 1,
+                "current_lesson": 1,
+            },
+        },
+        user_turns=2,
+    )
+    ok &= check(
+        "literacy_completion_routes_next_call_to_numeracy",
+        next_numeracy_state["course"] == "numeracy"
+        and next_numeracy_state["phase"] == "recall"
+        and next_numeracy_state["current_module"] == 1,
+        str(next_numeracy_state),
     )
 
     opening = build_opening_turn(

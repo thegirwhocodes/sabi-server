@@ -333,6 +333,69 @@ def merge_learning_state(student: dict[str, Any] | None) -> dict[str, Any]:
     return state
 
 
+def route_next_course_after_session(state: dict[str, Any], user_turns: int = 0) -> dict[str, Any]:
+    """Select the course for the next call while preserving each course's state.
+
+    Pilot docs call for alternating literacy/numeracy. This only changes the
+    saved next-call route after the child has actually spoken; it never switches
+    the active lesson mid-call.
+    """
+    routed = dict(state or {})
+    if user_turns <= 0:
+        return routed
+
+    now = datetime.now(timezone.utc).isoformat()
+    course = str(routed.get("course") or "numeracy")
+    literacy = dict(routed.get("literacy") or {})
+    numeracy_done = routed.get("diagnostic_status") == "done" and int(routed.get("current_module") or 0) > 0
+    literacy_done = literacy.get("diagnostic_status") == "done"
+
+    if course == "numeracy" and numeracy_done:
+        literacy_phase = "recall" if literacy_done else "diagnostic"
+        literacy.setdefault("phase", literacy_phase)
+        if not literacy_done:
+            literacy["phase"] = "diagnostic"
+            literacy.setdefault("next_step", "Run the warm sound-and-story diagnostic disguised as a game.")
+        routed.update(
+            {
+                "course": "literacy",
+                "phase": literacy.get("phase") or literacy_phase,
+                "literacy": literacy,
+                "next_step": "Next call should switch to foundational literacy while preserving numeracy progress.",
+                "course_rotation": {
+                    "last_completed_course": "numeracy",
+                    "next_course": "literacy",
+                    "updated_at": now,
+                },
+                "updated_at": now,
+            }
+        )
+        return routed
+
+    if course == "literacy" and literacy_done:
+        routed.update(
+            {
+                "course": "numeracy",
+                "phase": "recall" if numeracy_done else "diagnostic",
+                "next_step": (
+                    "Next call should return to the saved numeracy lesson."
+                    if numeracy_done
+                    else "Next call should run the numeracy diagnostic game."
+                ),
+                "course_rotation": {
+                    "last_completed_course": "literacy",
+                    "next_course": "numeracy",
+                    "updated_at": now,
+                },
+                "updated_at": now,
+            }
+        )
+        return routed
+
+    routed["updated_at"] = now
+    return routed
+
+
 def scaffold_ladder_for(active_skill: str, scaffold_depth: int, wrong_streak: int) -> dict[str, Any] | None:
     level = _scaffold_level(scaffold_depth, wrong_streak)
     if level <= 0:

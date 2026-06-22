@@ -378,12 +378,16 @@ def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | N
         return "Hello! I'm Sabi, your learning friend. I remember this phone, but more than one learner may use it. What is your name?"
 
     name = _clean_name(student.get("name") or "")
+    course = str(state.get("course") or student.get("course") or "numeracy")
     module = int(state.get("current_module") or student.get("current_module") or 0)
     diagnostic_status = state.get("diagnostic_status") or student.get("baseline_status") or "not_started"
     onboarding_status = state.get("onboarding_status") or "needs_school"
 
     if not name:
         return "Hello! I'm Sabi, your learning friend. Sabi means to know, and together, we're going to know so much! What is your name?"
+
+    if course == "literacy":
+        return _build_literacy_opening_turn(name, student, state, onboarding_status)
 
     if module == 0 or diagnostic_status != "done":
         if onboarding_status == "needs_name":
@@ -410,6 +414,45 @@ def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | N
     warmup = warmups.get(module, "Tell me one thing you remember from our last lesson.")
     topic = state.get("active_skill") or student.get("current_topic") or "numbers"
     return f"Welcome back, {name}! Last time we worked on {topic}. Quick warm-up: {warmup}"
+
+
+def _build_literacy_opening_turn(
+    name: str,
+    student: dict[str, Any],
+    state: dict[str, Any],
+    onboarding_status: str,
+) -> str:
+    literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
+    literacy = literacy or {}
+    diagnostic_status = literacy.get("diagnostic_status", "not_started")
+
+    if diagnostic_status != "done":
+        if onboarding_status == "needs_name":
+            return "Hello! I'm Sabi, your learning friend. Sabi means to know, and together, we're going to know so much! What is your name?"
+        if onboarding_status == "needs_market":
+            return f"Welcome back, {name}! I remember you. Before our sound game, do you help your family at the market, or do you sell anything?"
+        if onboarding_status != "complete":
+            return f"Welcome back, {name}! Sabi here. Before our sound game, tell me, do you go to school?"
+
+        progress = literacy.get("diagnostic_results") if isinstance(literacy.get("diagnostic_results"), dict) else None
+        next_item = progress.get("next_item") if progress else None
+        if isinstance(next_item, dict) and next_item.get("prompt"):
+            return f"Welcome back, {name}! Let's continue our sound game. {next_item['prompt']}"
+        first_item = LITERACY_DIAGNOSTIC_ITEMS[0]
+        return f"Welcome back, {name}! {first_item.prompt}"
+
+    module = int(literacy.get("current_module") or 1)
+    warmups = {
+        1: "What sound do you hear at the beginning of ball?",
+        2: "Tell me two words that rhyme with cat.",
+        3: "Listen: the goat ran home. Who ran home?",
+        4: "Say this sentence again: I bought rice.",
+        5: "Say the first sound in sun.",
+        6: "I will say three sounds: s, a, t. What word do they make?",
+    }
+    warmup = warmups.get(module, "Tell me one sound, word, or story part you remember from our last lesson.")
+    topic = literacy.get("active_skill") or student.get("current_topic") or "sounds"
+    return f"Welcome back, {name}! Last time we worked on {topic}. Quick sound warm-up: {warmup}"
 
 
 def build_instructional_route_prompt(messages: list[dict[str, str]], current_module: int = 0, course: str = "numeracy") -> str:

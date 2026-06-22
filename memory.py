@@ -13,7 +13,14 @@ from typing import Optional
 from supabase import create_client
 
 from curriculum_path import advance_learning_state_after_mastery, build_curriculum_path_prompt
-from learning_state import analyze_session, build_learning_state_prompt, default_learning_state, extract_child_name, merge_learning_state
+from learning_state import (
+    analyze_session,
+    build_learning_state_prompt,
+    default_learning_state,
+    extract_child_name,
+    merge_learning_state,
+    route_next_course_after_session,
+)
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
 
@@ -202,6 +209,14 @@ class StudentMemory:
                         f"{persisted_learning_state.get('current_week')}, Lesson "
                         f"{persisted_learning_state.get('current_lesson')}."
                     )
+            previous_course = str(persisted_learning_state.get("course") or "numeracy")
+            persisted_learning_state = route_next_course_after_session(
+                persisted_learning_state,
+                user_turns=user_turns,
+            )
+            next_course = str(persisted_learning_state.get("course") or "numeracy")
+            if next_course != previous_course:
+                summary = f"{summary} Next call will continue with {next_course}."
             persisted_module = int(persisted_learning_state.get("current_module") or stats.recommended_module or 0)
             persisted_messages = [
                 *cleaned_messages,
@@ -438,7 +453,7 @@ class StudentMemory:
             curriculum_prompt = build_curriculum_path_prompt(
                 effective_state,
                 effective_module,
-                student_for_prompt.get("course", "numeracy"),
+                str(effective_state.get("course") or "numeracy"),
             )
 
             # New student

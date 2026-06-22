@@ -5,6 +5,7 @@ Cerebras and Groq use OpenAI-compatible APIs.
 """
 
 import os
+import asyncio
 import logging
 from typing import Optional, AsyncIterator
 
@@ -13,6 +14,12 @@ import httpx
 from curriculum_path import build_curriculum_path_prompt
 from diagnostic_flow import build_instructional_route_prompt
 from numeric_grading import build_numeric_grading_hint
+from guardrails import (
+    SABI_SAFETY_PREAMBLE,
+    guard_input,
+    guard_output,
+    raise_safeguarding_incident,
+)
 from secret_loader import get_secret
 
 logger = logging.getLogger("sabi.llm")
@@ -23,6 +30,10 @@ CEREBRAS_API_KEY = get_secret("CEREBRAS_API_KEY")
 GROQ_API_KEY = get_secret("GROQ_API_KEY")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
+CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+CEREBRAS_DISABLED = os.getenv("CEREBRAS_DISABLED", "0").lower() in {"1", "true", "yes", "on"}
 
 # Core teaching prompt (personality + rules, WITHOUT full curriculum)
 # The curriculum modules are injected via RAG per-call
@@ -134,19 +145,109 @@ class SabiLLM:
     def __init__(self):
         """Initialize LLM client — picks fastest available provider."""
         self.client = httpx.AsyncClient(timeout=30.0)
+        self.disabled_providers: set[str] = set()
 
-        if CEREBRAS_API_KEY:
+        if CEREBRAS_DISABLED:
+            self.disabled_providers.add("cerebras")
+
+        if CEREBRAS_API_KEY and "cerebras" not in self.disabled_providers:
             self.primary = "cerebras"
-            logger.info("LLM primary: Cerebras (llama-3.3-70b, ~2100 tok/s)")
+            logger.info("LLM primary: Cerebras (%s, ~2100 tok/s)", CEREBRAS_MODEL)
         elif ANTHROPIC_API_KEY:
             self.primary = "claude"
-            logger.info("LLM primary: Claude Haiku")
+            logger.info("LLM primary: Claude %s", ANTHROPIC_MODEL)
         elif GROQ_API_KEY:
             self.primary = "groq"
-            logger.info("LLM primary: Groq (llama-3.3-70b-versatile)")
+            logger.info("LLM primary: Groq (%s)", GROQ_MODEL)
         else:
             self.primary = "ollama"
             logger.info(f"LLM primary: Ollama {OLLAMA_MODEL}")
+
+    async def _build_system_prompt(
+        self,
+        messages: list[dict],
+        student_id: Optional[str] = None,
+        current_module: int = 0,
+        memory=None,
+        course: str = "numeracy",
+        learning_state: Optional[dict] = None,
+    ) -> str:
+        system_prompt = SABI_CORE_PROMPT + SABI_SAFETY_PREAMBLE
+
+        if memory and student_id:
+            memory_context = await memory.get_student_context(student_id)
+            if memory_context:
+                system_prompt += memory_context
+
+        rag_context = await self._get_course_context(current_module, course)
+        if rag_context:
+            system_prompt += rag_context
+
+        curriculum_context = build_curriculum_path_prompt(learning_state, current_module, course)
+        if curriculum_context:
+            system_prompt += curriculum_context
+
+        call_control_context = "\n".join(
+            f"- {m['content'].strip()}"
+            for m in messages
+            if m.get("role") == "system" and m.get("content", "").strip()
+        )
+        if call_control_context:
+            system_prompt += "\n\n## LIVE CALL CONTROL\n" + call_control_context
+
+        system_prompt += build_instructional_route_prompt(messages, current_module, course)
+        system_prompt += build_numeric_grading_hint(messages)
+
+        return system_prompt
+
+    def _latest_user_text(self, messages: list[dict]) -> str:
+        for message in reversed(messages):
+            if message.get("role") == "user":
+                return str(message.get("content") or "")
+        return ""
+
+    def _record_safeguarding_incident(
+        self,
+        guard,
+        utterance: str,
+        student_id: Optional[str],
+        channel: Optional[str],
+        call_id: Optional[str],
+    ) -> None:
+        async def _run() -> None:
+            await asyncio.to_thread(
+                raise_safeguarding_incident,
+                student_id=student_id,
+                category=guard.category,
+                risk_level=guard.risk_level,
+                reason=guard.reason,
+                utterance=utterance,
+                channel=channel,
+                call_id=call_id,
+            )
+
+        try:
+            asyncio.get_running_loop().create_task(_run())
+        except RuntimeError:
+            logger.exception("Could not schedule safeguarding incident")
+
+    def _disable_provider_if_terminal(self, provider: str, exc: Exception) -> None:
+        terminal_statuses = {400, 401, 403, 404}
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        message = str(exc).lower()
+        terminal_model_error = (
+            status in terminal_statuses
+            or ("model" in message and ("not found" in message or "unsupported" in message))
+        )
+        if terminal_model_error:
+            self.disabled_providers.add(provider)
+            logger.warning("%s disabled for this process after terminal provider error: %s", provider, exc)
+
+    def _guard_provider_output(self, text: str) -> str:
+        guarded = guard_output(text)
+        if guarded.blocked:
+            logger.warning("Sabi output guard blocked model text: %s", guarded.reason)
+        return guarded.text
 
     async def generate(
         self,
@@ -156,6 +257,8 @@ class SabiLLM:
         memory=None,
         course: str = "numeracy",
         learning_state: Optional[dict] = None,
+        call_id: Optional[str] = None,
+        channel: Optional[str] = None,
     ) -> str:
         """
         Generate a teaching response.
@@ -169,69 +272,72 @@ class SabiLLM:
         Returns:
             AI response text
         """
-        system_prompt = SABI_CORE_PROMPT
-
-        if memory and student_id:
-            memory_context = await memory.get_student_context(student_id)
-            if memory_context:
-                system_prompt += memory_context
-
-        rag_context = await self._get_course_context(current_module, course)
-        if rag_context:
-            system_prompt += rag_context
-
-        curriculum_context = build_curriculum_path_prompt(learning_state, current_module, course)
-        if curriculum_context:
-            system_prompt += curriculum_context
-
-        call_control_context = "\n".join(
-            f"- {m['content'].strip()}"
-            for m in messages
-            if m.get("role") == "system" and m.get("content", "").strip()
-        )
-        if call_control_context:
-            system_prompt += "\n\n## LIVE CALL CONTROL\n" + call_control_context
-
-        system_prompt += build_instructional_route_prompt(messages, current_module, course)
-        system_prompt += build_numeric_grading_hint(messages)
-
         if not messages:
             messages = [{"role": "user", "content": "Hi, I want to learn!"}]
 
         chat_messages = [m for m in messages if m["role"] in ("user", "assistant")]
 
+        latest_user = self._latest_user_text(chat_messages)
+        input_guard = guard_input(latest_user, student_id=student_id) if latest_user else None
+        if input_guard and input_guard.short_circuit:
+            logger.warning(
+                "Sabi input guard short-circuited category=%s risk=%s reason=%s student=%s",
+                input_guard.category,
+                input_guard.risk_level,
+                input_guard.reason,
+                student_id or "unknown",
+            )
+            if input_guard.flag_for_safeguarding:
+                self._record_safeguarding_incident(
+                    input_guard,
+                    latest_user,
+                    student_id,
+                    channel or "sabi-phone",
+                    call_id,
+                )
+            return input_guard.safe_response or "Let's keep going with our lesson."
+
+        system_prompt = await self._build_system_prompt(
+            messages, student_id, current_module, memory, course, learning_state
+        )
+
         # Try providers in priority order
-        if self.primary == "cerebras" and CEREBRAS_API_KEY:
+        if self.primary == "cerebras" and CEREBRAS_API_KEY and "cerebras" not in self.disabled_providers:
             try:
-                return await self._generate_openai_compat(
+                text = await self._generate_openai_compat(
                     system_prompt, chat_messages,
                     base_url="https://api.cerebras.ai/v1",
                     api_key=CEREBRAS_API_KEY,
-                    model="llama-3.3-70b",
+                    model=CEREBRAS_MODEL,
                     provider="Cerebras",
                 )
+                return self._guard_provider_output(text)
             except Exception as e:
+                self._disable_provider_if_terminal("cerebras", e)
                 logger.warning(f"Cerebras failed ({e}), falling back to Claude")
 
         if ANTHROPIC_API_KEY:
             try:
-                return await self._generate_claude(system_prompt, chat_messages)
+                text = await self._generate_claude(system_prompt, chat_messages)
+                return self._guard_provider_output(text)
             except Exception as e:
                 logger.warning(f"Claude failed ({e}), falling back to Groq")
 
         if GROQ_API_KEY:
             try:
-                return await self._generate_openai_compat(
+                text = await self._generate_openai_compat(
                     system_prompt, chat_messages,
                     base_url="https://api.groq.com/openai/v1",
                     api_key=GROQ_API_KEY,
-                    model="llama-3.3-70b-versatile",
+                    model=GROQ_MODEL,
                     provider="Groq",
                 )
+                return self._guard_provider_output(text)
             except Exception as e:
                 logger.warning(f"Groq failed ({e}), falling back to Ollama")
 
-        return await self._generate_ollama(system_prompt, messages)
+        text = await self._generate_ollama(system_prompt, chat_messages)
+        return self._guard_provider_output(text)
 
     async def generate_streaming(
         self,
@@ -241,64 +347,29 @@ class SabiLLM:
         memory=None,
         course: str = "numeracy",
         learning_state: Optional[dict] = None,
+        call_id: Optional[str] = None,
+        channel: Optional[str] = None,
     ) -> AsyncIterator[str]:
         """
         Stream LLM response sentence by sentence.
         Yields each complete sentence as soon as it arrives.
         Used for streaming TTS pipeline to cut TTFA.
         """
-        system_prompt = SABI_CORE_PROMPT
-
-        if memory and student_id:
-            memory_context = await memory.get_student_context(student_id)
-            if memory_context:
-                system_prompt += memory_context
-
-        rag_context = await self._get_course_context(current_module, course)
-        if rag_context:
-            system_prompt += rag_context
-
-        curriculum_context = build_curriculum_path_prompt(learning_state, current_module, course)
-        if curriculum_context:
-            system_prompt += curriculum_context
-
-        call_control_context = "\n".join(
-            f"- {m['content'].strip()}"
-            for m in messages
-            if m.get("role") == "system" and m.get("content", "").strip()
+        # Safety note: streamed partial chunks cannot be fully output-filtered
+        # before a child hears them. Buffer through the same guarded path until
+        # sentence-level safe streaming is built. The live AudioSocket phone
+        # route already uses generate(), so this primarily protects old AT XML.
+        full = await self.generate(
+            messages,
+            student_id,
+            current_module,
+            memory,
+            course,
+            learning_state,
+            call_id=call_id,
+            channel=channel,
         )
-        if call_control_context:
-            system_prompt += "\n\n## LIVE CALL CONTROL\n" + call_control_context
-
-        system_prompt += build_instructional_route_prompt(messages, current_module, course)
-        system_prompt += build_numeric_grading_hint(messages)
-
-        if not messages:
-            messages = [{"role": "user", "content": "Hi, I want to learn!"}]
-
-        chat_messages = [m for m in messages if m["role"] in ("user", "assistant")]
-
-        # Pick fastest provider that supports streaming
-        if CEREBRAS_API_KEY:
-            async for sentence in self._stream_openai_compat(
-                system_prompt, chat_messages,
-                base_url="https://api.cerebras.ai/v1",
-                api_key=CEREBRAS_API_KEY,
-                model="llama-3.3-70b",
-            ):
-                yield sentence
-        elif GROQ_API_KEY:
-            async for sentence in self._stream_openai_compat(
-                system_prompt, chat_messages,
-                base_url="https://api.groq.com/openai/v1",
-                api_key=GROQ_API_KEY,
-                model="llama-3.3-70b-versatile",
-            ):
-                yield sentence
-        else:
-            # Fall back to non-streaming for Claude/Ollama
-            full = await self.generate(messages, student_id, current_module, memory, course, learning_state)
-            yield full
+        yield full
 
     async def _get_course_context(self, current_module: int, course: str) -> str:
         if course == "literacy":
@@ -415,7 +486,7 @@ class SabiLLM:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-haiku-4-5-20251001",
+                "model": ANTHROPIC_MODEL,
                 "max_tokens": 200,
                 "system": system_prompt,
                 "messages": messages,

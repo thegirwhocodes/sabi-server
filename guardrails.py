@@ -228,6 +228,21 @@ def raise_safeguarding_incident(*, student_id, category, risk_level, reason,
     log.error("[SAFEGUARDING:%s] category=%s reason=%s student=%s channel=%s",
               "CRITICAL" if risk_level == 3 else "REVIEW", category, reason,
               student_id or "unknown", channel or "?")
+    if risk_level >= 3:
+        try:
+            from emergency_alert import dispatch_emergency_alert_sync
+            dispatch_emergency_alert_sync(
+                student_id=student_id,
+                category=category,
+                risk_level=risk_level,
+                reason=reason,
+                utterance_redacted=safe,
+                channel=channel,
+                call_id=call_id,
+            )
+        except Exception as e:  # noqa: BLE001 — alerting must never break the turn
+            log.error("[SAFEGUARDING] emergency alert failed: %s", e)
+
     url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key):

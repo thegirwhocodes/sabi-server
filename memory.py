@@ -5,6 +5,7 @@ Connects to the same Supabase instance as the Next.js app.
 
 import os
 import logging
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -15,6 +16,8 @@ from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
 
 logger = logging.getLogger("sabi.memory")
+
+LEARNING_STATE_SNAPSHOT_PREFIX = "SABI_LEARNING_STATE_SNAPSHOT:"
 
 MODULE_NAMES = {
     0: "diagnostic",
@@ -83,6 +86,7 @@ class StudentMemory:
         messages: list[dict],
         duration_seconds: int,
         channel: str = "asterisk_audiosocket",
+        starting_learning_state: Optional[dict] = None,
     ):
         """Persist a completed PBX/AudioSocket phone session for monitoring."""
         if not self.client or not student_id or not messages:
@@ -112,15 +116,27 @@ class StudentMemory:
                 "id", student_id
             ).execute()
             student = student_result.data[0] if student_result.data else {}
-            current_module = student.get("current_module", 0) or 0
+            analysis_student = dict(student or {})
+            if isinstance(starting_learning_state, dict) and starting_learning_state:
+                analysis_student["learning_state"] = starting_learning_state
+                analysis_student["current_module"] = int(
+                    starting_learning_state.get("current_module")
+                    or student.get("current_module")
+                    or 0
+                )
+            current_module = analysis_student.get("current_module", 0) or 0
             module_name = MODULE_NAMES.get(current_module, "diagnostic")
-            stats = analyze_session(student, cleaned_messages)
+            stats = analyze_session(analysis_student, cleaned_messages)
             summary = stats.summary or summary
             normalized_phone = normalize_phone_number(phone_number)
+            persisted_messages = [
+                *cleaned_messages,
+                _learning_state_snapshot_message(stats.learning_state),
+            ]
 
             session_payload = {
                 "student_id": student_id,
-                "messages": cleaned_messages,
+                "messages": persisted_messages,
                 "summary": summary,
                 "correct_count": stats.correct_count,
                 "wrong_count": stats.wrong_count,
@@ -387,6 +403,10 @@ class StudentMemory:
 
         for session in sorted(sessions_with_messages, key=lambda row: str(row.get("created_at") or "")):
             try:
+                snapshot = _learning_state_snapshot_from_messages(session.get("messages") or [])
+                if snapshot:
+                    state = _merge_state_snapshot(state, snapshot)
+                    continue
                 student_for_analysis = {
                     **student,
                     "learning_state": state,
@@ -505,3 +525,41 @@ def _choose_canonical_student(rows: list[dict]) -> dict:
         return (total_sessions, has_name, created_at)
 
     return sorted(rows, key=score, reverse=True)[0]
+
+
+def _learning_state_snapshot_message(state: dict) -> dict:
+    return {
+        "role": "system",
+        "content": LEARNING_STATE_SNAPSHOT_PREFIX + json.dumps(
+            state or {},
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+    }
+
+
+def _learning_state_snapshot_from_messages(messages: list[dict]) -> dict | None:
+    for message in reversed(messages or []):
+        if message.get("role") != "system":
+            continue
+        content = str(message.get("content") or "")
+        if not content.startswith(LEARNING_STATE_SNAPSHOT_PREFIX):
+            continue
+        try:
+            snapshot = json.loads(content[len(LEARNING_STATE_SNAPSHOT_PREFIX):])
+        except json.JSONDecodeError:
+            return None
+        return snapshot if isinstance(snapshot, dict) else None
+    return None
+
+
+def _merge_state_snapshot(base: dict, snapshot: dict) -> dict:
+    merged = {**(base or {}), **(snapshot or {})}
+    base_literacy = (base or {}).get("literacy")
+    snapshot_literacy = (snapshot or {}).get("literacy")
+    if isinstance(base_literacy, dict) or isinstance(snapshot_literacy, dict):
+        merged["literacy"] = {
+            **(base_literacy if isinstance(base_literacy, dict) else {}),
+            **(snapshot_literacy if isinstance(snapshot_literacy, dict) else {}),
+        }
+    return merged

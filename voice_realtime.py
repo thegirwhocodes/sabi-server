@@ -526,6 +526,7 @@ class RealtimeCall:
             student = await self.memory.find_or_create_student(self.phone)
             student_id = student["id"]
             effective_state = await self.memory.get_effective_learning_state(student)
+            starting_learning_state = dict(effective_state)
             module = int(effective_state.get("current_module") or student.get("current_module") or 0)
             logger.info(
                 "Realtime student=%s module=%s skill=%s scaffold=%s new=%s",
@@ -725,6 +726,7 @@ class RealtimeCall:
                     messages=messages,
                     duration_seconds=duration_seconds,
                     channel="asterisk_audiosocket",
+                    starting_learning_state=starting_learning_state,
                 )
             self.memory.clear_call(self.call_id)
             logger.warning(

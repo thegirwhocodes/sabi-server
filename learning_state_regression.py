@@ -26,7 +26,7 @@ from diagnostic_flow import (
     build_opening_turn,
 )
 from learning_state import analyze_session, extract_child_name
-from memory import StudentMemory
+from memory import StudentMemory, _learning_state_snapshot_message
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from voice_asterisk import (
     MIN_LESSON_SECONDS,
@@ -230,6 +230,42 @@ def main() -> int:
         and race_lookup["is_new"] is False
         and len(race_memory.client.rows) == 1,
         f"{race_lookup} rows={race_memory.client.rows}",
+    )
+
+    snapshot_memory = StudentMemory.__new__(StudentMemory)
+    snapshot_state = {
+        "course": "numeracy",
+        "phase": "guided_practice",
+        "diagnostic_status": "done",
+        "current_module": 3,
+        "current_week": 9,
+        "current_lesson": 2,
+        "tarl_level": 3,
+        "active_skill": "subtraction",
+        "wrong_streak": 1,
+        "scaffold_depth": 1,
+        "literacy": {"diagnostic_status": "not_started", "current_module": 1},
+    }
+    replayed_snapshot = snapshot_memory._effective_state_from_student_and_sessions(
+        {"id": "thin-student", "name": "Remi"},
+        [
+            {
+                "created_at": "2026-06-22T20:00:00+00:00",
+                "messages": [
+                    {"role": "assistant", "content": "You have fifteen naira and spend eight. How much is left?"},
+                    {"role": "user", "content": "seven"},
+                    _learning_state_snapshot_message(snapshot_state),
+                ],
+            }
+        ],
+    )
+    ok &= check(
+        "session_snapshot_replay_preserves_module",
+        replayed_snapshot["current_module"] == 3
+        and replayed_snapshot["active_skill"] == "subtraction"
+        and replayed_snapshot["scaffold_depth"] == 1
+        and replayed_snapshot["literacy"]["current_module"] == 1,
+        str(replayed_snapshot),
     )
 
     student = {

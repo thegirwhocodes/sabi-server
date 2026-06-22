@@ -666,7 +666,7 @@ class RealtimeCall:
                     course=str(effective_state.get("course") or "numeracy"),
                     learning_state=effective_state,
                 )
-                if is_premature_wrap_response(response, user_turns, elapsed_seconds):
+                if is_premature_wrap_response(response, user_turns, elapsed_seconds, MAX_CALL_SECONDS):
                     logger.warning(
                         "Realtime turn %s produced premature wrap at %.0fs/%s turns; regenerating",
                         turn,

@@ -235,13 +235,24 @@ def _response_wants_wrap(response: str) -> bool:
     return any(phrase in response_lower for phrase in WRAP_UP_PHRASES)
 
 
-def should_prompt_wrap_up(user_turns: int, elapsed_seconds: float, max_call_seconds: int | None = None) -> bool:
-    """Return true when Sabi should start closing the current lesson."""
+def _in_planned_wrap_window(
+    user_turns: int,
+    elapsed_seconds: float,
+    max_call_seconds: int | None = None,
+) -> bool:
+    """Return true when closing the lesson is intentional instead of early."""
     if max_call_seconds is not None and elapsed_seconds >= max_call_seconds - 60:
         return True
     if elapsed_seconds >= TARGET_WRAP_SECONDS and user_turns >= MIN_WRAP_USER_TURNS:
         return True
-    return user_turns >= WRAP_UP_AFTER_TURNS
+    if elapsed_seconds >= MIN_LESSON_SECONDS and user_turns >= WRAP_UP_AFTER_TURNS:
+        return True
+    return False
+
+
+def should_prompt_wrap_up(user_turns: int, elapsed_seconds: float, max_call_seconds: int | None = None) -> bool:
+    """Return true when Sabi should start closing the current lesson."""
+    return _in_planned_wrap_window(user_turns, elapsed_seconds, max_call_seconds)
 
 
 def build_call_control_messages(
@@ -259,11 +270,11 @@ def build_call_control_messages(
             ),
         }]
 
-    if elapsed_seconds < MIN_LESSON_SECONDS or user_turns < MIN_WRAP_USER_TURNS:
+    if elapsed_seconds < TARGET_WRAP_SECONDS or user_turns < MIN_WRAP_USER_TURNS:
         return [{
             "role": "system",
             "content": (
-                "Do not wrap up or end the lesson yet. This call is still too short "
+                "Do not wrap up or end the lesson yet. This call is still before the planned wrap window "
                 f"({int(elapsed_seconds)} seconds, {user_turns} user turns). Continue teaching "
                 "one small step and ask the next clear question. Do not say 'next time', "
                 "'today you learned', 'well done today', 'bye', or any closing phrase."
@@ -273,11 +284,16 @@ def build_call_control_messages(
     return []
 
 
-def is_premature_wrap_response(response: str, user_turns: int, elapsed_seconds: float) -> bool:
+def is_premature_wrap_response(
+    response: str,
+    user_turns: int,
+    elapsed_seconds: float,
+    max_call_seconds: int | None = None,
+) -> bool:
     """Detect an early closing draft before the 5-7 minute lesson window."""
     if not _response_wants_wrap(response):
         return False
-    return elapsed_seconds < MIN_LESSON_SECONDS or user_turns < MIN_WRAP_USER_TURNS
+    return not _in_planned_wrap_window(user_turns, elapsed_seconds, max_call_seconds)
 
 
 def should_wrap_up(messages: list[dict], response: str, elapsed_seconds: float | None = None) -> bool:
@@ -292,9 +308,9 @@ def should_wrap_up(messages: list[dict], response: str, elapsed_seconds: float |
     # until the planned wrap-up band unless the caller explicitly ends.
     if not _response_wants_wrap(response):
         return False
-    if elapsed_seconds is not None and elapsed_seconds < MIN_LESSON_SECONDS:
+    if elapsed_seconds is None:
         return False
-    if user_turns < MIN_WRAP_USER_TURNS:
+    if not _in_planned_wrap_window(user_turns, elapsed_seconds):
         return False
     return True
 

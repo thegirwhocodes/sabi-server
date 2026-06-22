@@ -38,6 +38,7 @@ from voice_asterisk import (
     MIN_LESSON_SECONDS,
     MIN_WRAP_USER_TURNS,
     TARGET_WRAP_SECONDS,
+    WRAP_UP_AFTER_TURNS,
     build_call_control_messages,
     is_premature_wrap_response,
     should_prompt_wrap_up,
@@ -897,6 +898,52 @@ def main() -> int:
         and continue_instruction[0]["role"] == "system"
         and "Do not wrap up" in continue_instruction[0]["content"],
         str(continue_instruction),
+    )
+
+    rapid_turns_before_minimum = [{"role": "assistant", "content": "Hi."}]
+    for index in range(WRAP_UP_AFTER_TURNS):
+        rapid_turns_before_minimum.append({"role": "user", "content": f"quick answer {index}"})
+        rapid_turns_before_minimum.append({"role": "assistant", "content": f"quick question {index}"})
+    ok &= check(
+        "rapid_turn_count_does_not_prompt_early_wrap",
+        not should_prompt_wrap_up(WRAP_UP_AFTER_TURNS, MIN_LESSON_SECONDS - 15)
+        and is_premature_wrap_response(
+            early_wrap_response,
+            WRAP_UP_AFTER_TURNS,
+            MIN_LESSON_SECONDS - 15,
+        )
+        and not should_wrap_up(
+            rapid_turns_before_minimum,
+            early_wrap_response,
+            elapsed_seconds=MIN_LESSON_SECONDS - 15,
+        ),
+        early_wrap_response,
+    )
+
+    soft_middle_instruction = build_call_control_messages(
+        MIN_WRAP_USER_TURNS,
+        TARGET_WRAP_SECONDS - 15,
+    )
+    ok &= check(
+        "soft_middle_before_target_still_continues",
+        bool(soft_middle_instruction)
+        and not should_prompt_wrap_up(MIN_WRAP_USER_TURNS, TARGET_WRAP_SECONDS - 15)
+        and is_premature_wrap_response(planned_wrap_response, MIN_WRAP_USER_TURNS, TARGET_WRAP_SECONDS - 15)
+        and not should_wrap_up(planned_wrap_messages, planned_wrap_response, elapsed_seconds=TARGET_WRAP_SECONDS - 15),
+        str(soft_middle_instruction),
+    )
+
+    ok &= check(
+        "many_turns_after_minimum_can_wrap",
+        should_prompt_wrap_up(WRAP_UP_AFTER_TURNS, MIN_LESSON_SECONDS + 1),
+        f"{WRAP_UP_AFTER_TURNS} turns at {MIN_LESSON_SECONDS + 1}s",
+    )
+
+    ok &= check(
+        "hard_timeout_window_can_wrap_even_with_few_turns",
+        should_prompt_wrap_up(1, 421, max_call_seconds=480)
+        and not is_premature_wrap_response(planned_wrap_response, 1, 421, max_call_seconds=480),
+        "1 turn at 421s with 480s hard cap",
     )
 
     goodbye_messages = [

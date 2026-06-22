@@ -813,6 +813,16 @@ def main() -> int:
         no_voice_state["course"] == "numeracy",
         str(no_voice_state),
     )
+    no_learning_state = route_next_course_after_session(
+        numeracy_ready_state,
+        user_turns=1,
+        has_learning_evidence=False,
+    )
+    ok &= check(
+        "no_learning_evidence_does_not_flip_course",
+        no_learning_state["course"] == "numeracy",
+        str(no_learning_state),
+    )
 
     literacy_opening = build_opening_turn(
         {"name": "Remi", "current_module": 1, "current_topic": "counting"},

@@ -210,9 +210,15 @@ class StudentMemory:
                         f"{persisted_learning_state.get('current_lesson')}."
                     )
             previous_course = str(persisted_learning_state.get("course") or "numeracy")
+            has_learning_evidence = (
+                stats.correct_count > 0
+                or stats.wrong_count > 0
+                or bool(stats.should_advance)
+            )
             persisted_learning_state = route_next_course_after_session(
                 persisted_learning_state,
                 user_turns=user_turns,
+                has_learning_evidence=has_learning_evidence,
             )
             next_course = str(persisted_learning_state.get("course") or "numeracy")
             if next_course != previous_course:

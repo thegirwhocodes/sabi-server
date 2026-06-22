@@ -333,7 +333,11 @@ def merge_learning_state(student: dict[str, Any] | None) -> dict[str, Any]:
     return state
 
 
-def route_next_course_after_session(state: dict[str, Any], user_turns: int = 0) -> dict[str, Any]:
+def route_next_course_after_session(
+    state: dict[str, Any],
+    user_turns: int = 0,
+    has_learning_evidence: bool | None = None,
+) -> dict[str, Any]:
     """Select the course for the next call while preserving each course's state.
 
     Pilot docs call for alternating literacy/numeracy. This only changes the
@@ -341,7 +345,9 @@ def route_next_course_after_session(state: dict[str, Any], user_turns: int = 0) 
     the active lesson mid-call.
     """
     routed = dict(state or {})
-    if user_turns <= 0:
+    if has_learning_evidence is None:
+        has_learning_evidence = user_turns > 0
+    if user_turns <= 0 or not has_learning_evidence:
         return routed
 
     now = datetime.now(timezone.utc).isoformat()

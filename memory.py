@@ -605,6 +605,53 @@ class StudentMemory:
             logger.debug("Could not infer effective learning state: %s", exc)
             return merge_learning_state(student)
 
+    async def review_phone_continuity(self, phone_number: str, limit: int = 5) -> dict:
+        """Read-only admin view of learner identity, state, and recent sessions for one phone."""
+        normalized_phone = normalize_phone_number(phone_number)
+        variants = phone_lookup_variants(phone_number)
+        safe_limit = max(1, min(int(limit or 5), 20))
+        if not self.client:
+            return {
+                "status": "unavailable",
+                "reason": "supabase_not_configured",
+                "phone_number": phone_number,
+                "normalized_phone": normalized_phone,
+                "lookup_variants": variants,
+                "profiles": [],
+                "profile_count": 0,
+            }
+
+        rows = self._lookup_student_rows_by_phone(normalized_phone, variants)
+        profiles = []
+        for row in sorted(rows, key=_student_review_sort_key):
+            sessions = self._recent_sessions_for_student(row.get("id"), safe_limit)
+            effective_state = self._effective_state_from_student_and_sessions(row, sessions)
+            profiles.append(_student_review_record(row, effective_state, sessions))
+
+        return {
+            "status": "ok",
+            "phone_number": phone_number,
+            "normalized_phone": normalized_phone,
+            "lookup_variants": variants,
+            "profile_count": len(profiles),
+            "needs_identity_confirmation": len(profiles) > 1,
+            "profiles": profiles,
+        }
+
+    def _recent_sessions_for_student(self, student_id: str | None, limit: int = 5) -> list[dict]:
+        if not student_id:
+            return []
+        try:
+            result = self.client.table("sabi_sessions").select("*").eq(
+                "student_id", student_id
+            ).order(
+                "created_at", desc=True
+            ).limit(limit).execute()
+            return result.data or []
+        except Exception as exc:
+            logger.debug("Could not load recent sessions for student=%s: %s", student_id, exc)
+            return []
+
     def _effective_state_from_student_and_sessions(self, student: dict, sessions: list[dict]) -> dict:
         state = merge_learning_state(student)
         if student.get("learning_state"):
@@ -1078,6 +1125,104 @@ def _annotate_shared_phone_profiles(row: dict, rows: list[dict]) -> dict:
         annotated["shared_phone_profiles"] = names
         annotated["needs_identity_confirmation"] = True
     return annotated
+
+
+def _student_review_sort_key(row: dict) -> tuple[int, str, str]:
+    return (
+        -int(row.get("total_sessions") or 0),
+        str(row.get("name") or ""),
+        str(row.get("id") or ""),
+    )
+
+
+def _student_review_record(student: dict, effective_state: dict, sessions: list[dict]) -> dict:
+    return {
+        "id": student.get("id"),
+        "name": student.get("name"),
+        "phone_number": student.get("phone_number"),
+        "phone_number_normalized": student.get("phone_number_normalized"),
+        "phone_household_key": student.get("phone_household_key"),
+        "child_name_normalized": student.get("child_name_normalized"),
+        "learner_key": student.get("learner_key"),
+        "browser_id": student.get("browser_id"),
+        "total_sessions": student.get("total_sessions") or 0,
+        "total_correct": student.get("total_correct") or 0,
+        "total_wrong": student.get("total_wrong") or 0,
+        "baseline_status": student.get("baseline_status"),
+        "current_level": student.get("current_level"),
+        "current_module": student.get("current_module"),
+        "current_week": student.get("current_week"),
+        "current_lesson": student.get("current_lesson"),
+        "updated_at": student.get("updated_at"),
+        "created_at": student.get("created_at"),
+        "effective_state": _learning_state_review(effective_state),
+        "recent_sessions": [_session_review_record(session) for session in sessions],
+    }
+
+
+def _learning_state_review(state: dict) -> dict:
+    literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
+    return {
+        "course": state.get("course"),
+        "phase": state.get("phase"),
+        "onboarding_status": state.get("onboarding_status"),
+        "diagnostic_status": state.get("diagnostic_status"),
+        "current_module": state.get("current_module"),
+        "current_week": state.get("current_week"),
+        "current_lesson": state.get("current_lesson"),
+        "tarl_level": state.get("tarl_level"),
+        "active_skill": state.get("active_skill"),
+        "next_step": state.get("next_step"),
+        "last_turn_correct": state.get("last_turn_correct"),
+        "correct_streak": state.get("correct_streak"),
+        "wrong_streak": state.get("wrong_streak"),
+        "scaffold_depth": state.get("scaffold_depth"),
+        "course_rotation": state.get("course_rotation"),
+        "literacy": {
+            "phase": literacy.get("phase"),
+            "diagnostic_status": literacy.get("diagnostic_status"),
+            "current_phase": literacy.get("current_phase"),
+            "current_module": literacy.get("current_module"),
+            "current_week": literacy.get("current_week"),
+            "current_lesson": literacy.get("current_lesson"),
+            "tarl_reading_level": literacy.get("tarl_reading_level"),
+            "active_skill": literacy.get("active_skill"),
+            "next_step": literacy.get("next_step"),
+        },
+    }
+
+
+def _session_review_record(session: dict) -> dict:
+    messages = session.get("messages") if isinstance(session.get("messages"), list) else []
+    child_turns = [message for message in messages if message.get("role") == "user"]
+    sabi_turns = [message for message in messages if message.get("role") == "assistant"]
+    snapshot = _learning_state_snapshot_from_messages(messages)
+    return {
+        "id": session.get("id"),
+        "created_at": session.get("created_at"),
+        "call_sid": session.get("call_sid"),
+        "phone_number": session.get("phone_number"),
+        "channel": session.get("channel"),
+        "duration_seconds": session.get("duration_seconds"),
+        "summary": session.get("summary"),
+        "correct_count": session.get("correct_count") or 0,
+        "wrong_count": session.get("wrong_count") or 0,
+        "recommended_module": session.get("recommended_module"),
+        "message_count": len(messages),
+        "child_turns": len(child_turns),
+        "sabi_turns": len(sabi_turns),
+        "has_learning_state_snapshot": bool(snapshot),
+        "snapshot_state": _learning_state_review(snapshot) if snapshot else None,
+        "last_child_turn_preview": _preview_text(child_turns[-1].get("content")) if child_turns else "",
+        "last_sabi_turn_preview": _preview_text(sabi_turns[-1].get("content")) if sabi_turns else "",
+    }
+
+
+def _preview_text(text: str | None, limit: int = 180) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"
 
 
 def _learning_state_snapshot_message(state: dict) -> dict:

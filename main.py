@@ -523,6 +523,15 @@ async def admin_call_detail(call_uuid: str):
     return JSONResponse(record)
 
 
+@app.get("/admin/learners/by-phone")
+async def admin_learner_by_phone(phone: str, limit: int = 5):
+    """Protected read-only continuity view for all learner profiles on one phone."""
+    if not phone.strip():
+        return JSONResponse({"error": "phone_required"}, status_code=400)
+    result = await app.state.memory.review_phone_continuity(phone, limit=limit)
+    return JSONResponse(result)
+
+
 async def ami_originate(phone: str, attempt: int = 1, delay_seconds: float | None = None):
     """Send AMI Originate command to Asterisk to call the child back."""
     reader, writer = await asyncio.open_connection(AMI_HOST, AMI_PORT)

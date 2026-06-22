@@ -10,6 +10,7 @@ from typing import Optional, AsyncIterator
 
 import httpx
 
+from curriculum_path import build_curriculum_path_prompt
 from diagnostic_flow import build_instructional_route_prompt
 from numeric_grading import build_numeric_grading_hint
 from secret_loader import get_secret
@@ -153,6 +154,7 @@ class SabiLLM:
         current_module: int = 0,
         memory=None,
         course: str = "numeracy",
+        learning_state: Optional[dict] = None,
     ) -> str:
         """
         Generate a teaching response.
@@ -176,6 +178,10 @@ class SabiLLM:
         rag_context = await self._get_course_context(current_module, course)
         if rag_context:
             system_prompt += rag_context
+
+        curriculum_context = build_curriculum_path_prompt(learning_state, current_module, course)
+        if curriculum_context:
+            system_prompt += curriculum_context
 
         call_control_context = "\n".join(
             f"- {m['content'].strip()}"
@@ -233,6 +239,7 @@ class SabiLLM:
         current_module: int = 0,
         memory=None,
         course: str = "numeracy",
+        learning_state: Optional[dict] = None,
     ) -> AsyncIterator[str]:
         """
         Stream LLM response sentence by sentence.
@@ -249,6 +256,18 @@ class SabiLLM:
         rag_context = await self._get_course_context(current_module, course)
         if rag_context:
             system_prompt += rag_context
+
+        curriculum_context = build_curriculum_path_prompt(learning_state, current_module, course)
+        if curriculum_context:
+            system_prompt += curriculum_context
+
+        call_control_context = "\n".join(
+            f"- {m['content'].strip()}"
+            for m in messages
+            if m.get("role") == "system" and m.get("content", "").strip()
+        )
+        if call_control_context:
+            system_prompt += "\n\n## LIVE CALL CONTROL\n" + call_control_context
 
         system_prompt += build_instructional_route_prompt(messages, current_module, course)
         system_prompt += build_numeric_grading_hint(messages)
@@ -277,7 +296,7 @@ class SabiLLM:
                 yield sentence
         else:
             # Fall back to non-streaming for Claude/Ollama
-            full = await self.generate(messages, student_id, current_module, memory, course)
+            full = await self.generate(messages, student_id, current_module, memory, course, learning_state)
             yield full
 
     async def _get_course_context(self, current_module: int, course: str) -> str:

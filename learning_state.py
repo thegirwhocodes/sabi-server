@@ -422,8 +422,6 @@ def _recommended_module(current_module: int, active_skill: str, correct_streak: 
         return max(1, current_module - 1)
     if scaffold_depth >= 2 and active_skill in SKILL_MODULE:
         return max(1, min(current_module or SKILL_MODULE[active_skill], SKILL_MODULE[active_skill]))
-    if correct_streak >= 3 and current_module not in (0, 7):
-        return min(7, current_module + 1)
     return current_module
 
 
@@ -507,7 +505,7 @@ def _next_step(active_skill: str, scaffold_depth: int, wrong_streak: int, correc
     if wrong_streak == 1:
         return f"Repair {active_skill}: acknowledge the attempt and rephrase with a simpler market example."
     if correct_streak >= 3:
-        return f"Increase difficulty slightly in {active_skill} or move to the next module concept."
+        return f"Move to the independent check or a small bonus challenge in the same {active_skill} lesson. Save the next lesson for the next call."
     return f"Continue the current {active_skill} lesson with one guided example and one independent check."
 
 

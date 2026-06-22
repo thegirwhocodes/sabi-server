@@ -11,6 +11,7 @@ from typing import Optional
 
 from supabase import create_client
 
+from curriculum_path import advance_numeracy_state_after_mastery, build_curriculum_path_prompt
 from learning_state import analyze_session, build_learning_state_prompt, default_learning_state, merge_learning_state
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
@@ -129,9 +130,19 @@ class StudentMemory:
             stats = analyze_session(analysis_student, cleaned_messages)
             summary = stats.summary or summary
             normalized_phone = normalize_phone_number(phone_number)
+            persisted_learning_state = dict(stats.learning_state or {})
+            if stats.should_advance:
+                persisted_learning_state = advance_numeracy_state_after_mastery(persisted_learning_state)
+                summary = (
+                    f"{summary} Next call should continue at Module "
+                    f"{persisted_learning_state.get('current_module')}, Week "
+                    f"{persisted_learning_state.get('current_week')}, Lesson "
+                    f"{persisted_learning_state.get('current_lesson')}."
+                )
+            persisted_module = int(persisted_learning_state.get("current_module") or stats.recommended_module or 0)
             persisted_messages = [
                 *cleaned_messages,
-                _learning_state_snapshot_message(stats.learning_state),
+                _learning_state_snapshot_message(persisted_learning_state),
             ]
 
             session_payload = {
@@ -141,8 +152,8 @@ class StudentMemory:
                 "correct_count": stats.correct_count,
                 "wrong_count": stats.wrong_count,
                 "duration_seconds": duration_seconds,
-                "topics_covered": stats.topics_covered or [module_name],
-                "recommended_module": stats.recommended_module,
+                "topics_covered": stats.topics_covered or [MODULE_NAMES.get(persisted_module, module_name)],
+                "recommended_module": persisted_module,
                 "phone_number": normalized_phone,
                 "call_sid": call_id,
                 "channel": channel,
@@ -172,19 +183,19 @@ class StudentMemory:
                 "total_correct": (student.get("total_correct") or 0) + stats.correct_count,
                 "total_wrong": (student.get("total_wrong") or 0) + stats.wrong_count,
                 "current_level": stats.current_level,
-                "current_module": stats.recommended_module,
-                "current_topic": MODULE_NAMES.get(stats.recommended_module, "diagnostic"),
+                "current_module": persisted_module,
+                "current_topic": MODULE_NAMES.get(persisted_module, "diagnostic"),
                 "skills": merged_skills,
-                "learning_state": stats.learning_state,
-                "baseline_status": "done" if stats.learning_state.get("diagnostic_status") == "done" else student.get("baseline_status", "not_started"),
+                "learning_state": persisted_learning_state,
+                "baseline_status": "done" if persisted_learning_state.get("diagnostic_status") == "done" else student.get("baseline_status", "not_started"),
                 "diagnostic_results": (
-                    stats.learning_state.get("diagnostic_results")
+                    persisted_learning_state.get("diagnostic_results")
                     if current_module == 0
                     else student.get("diagnostic_results")
                 ),
-                "current_week": stats.learning_state.get("current_week", 1),
-                "current_lesson": stats.learning_state.get("current_lesson", 1),
-                "tarl_level": stats.learning_state.get("tarl_level", 0),
+                "current_week": persisted_learning_state.get("current_week", 1),
+                "current_lesson": persisted_learning_state.get("current_lesson", 1),
+                "tarl_level": persisted_learning_state.get("tarl_level", 0),
                 "last_session_summary": summary,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -200,7 +211,7 @@ class StudentMemory:
                 user_turns,
                 stats.correct_count,
                 stats.wrong_count,
-                stats.recommended_module,
+                persisted_module,
             )
         except Exception as e:
             logger.error("Failed to save phone session call_id=%s: %s", call_id, e)
@@ -290,6 +301,11 @@ class StudentMemory:
             module_name = MODULE_NAMES.get(effective_module, module_name)
             student_for_prompt = {**student, "learning_state": effective_state, "current_module": effective_module}
             learning_prompt = build_learning_state_prompt(student_for_prompt)
+            curriculum_prompt = build_curriculum_path_prompt(
+                effective_state,
+                effective_module,
+                student_for_prompt.get("course", "numeracy"),
+            )
 
             # New student
             if effective_module == 0 and not sessions:
@@ -303,7 +319,8 @@ class StudentMemory:
 - current_module: 0 (needs diagnostic)
 - Greet them by name. Run the DIAGNOSTIC flow as a game, not a test.
 - Do NOT ask their name — you already know it.
-{learning_prompt}"""
+{learning_prompt}
+{curriculum_prompt}"""
                 return """
 
 ## STUDENT CONTEXT: BRAND NEW
@@ -333,7 +350,8 @@ class StudentMemory:
 - Do NOT ask their name if a name is already known.
 - Resume the exact next pending step: school question, market/family question, or the next baseline diagnostic game item.
 - Keep it warm and low-pressure: this is a game, not a test.
-{learning_prompt}"""
+{learning_prompt}
+{curriculum_prompt}"""
 
                 skills = student.get("skills", {})
                 skills_str = "\n".join(
@@ -364,7 +382,8 @@ class StudentMemory:
 - Start with ONE recall question from last session (spaced repetition).
 - Then teach Module {effective_module} ({module_name}) content.
 - Follow the LESSON STRUCTURE: Greeting+Recall → Lesson → Guided Practice → Independent Check → Wrap-up.
-{learning_prompt}"""
+{learning_prompt}
+{curriculum_prompt}"""
 
             return ""
 

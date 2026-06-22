@@ -25,6 +25,7 @@ from diagnostic_flow import (
     build_instructional_route_prompt,
     build_opening_turn,
 )
+from curriculum_path import advance_numeracy_state_after_mastery, build_curriculum_path_prompt
 from learning_state import analyze_session, extract_child_name
 from memory import StudentMemory, _learning_state_snapshot_message
 from phone_utils import normalize_phone_number, phone_lookup_variants
@@ -305,6 +306,59 @@ def main() -> int:
     stats_correct = analyze_session({"current_module": 2, "current_topic": "addition"}, messages_correct)
     ok &= check("correct_count", stats_correct.correct_count == 1, f"got {stats_correct.correct_count}")
     ok &= check("wrong_zero", stats_correct.wrong_count == 0, f"got {stats_correct.wrong_count}")
+
+    mastery_messages = [
+        {"role": "assistant", "content": "You have ten naira and spend four naira. How much is left?"},
+        {"role": "user", "content": "six naira"},
+        {"role": "assistant", "content": "Good. You have fifteen naira and spend eight naira. How much is left?"},
+        {"role": "user", "content": "seven"},
+        {"role": "assistant", "content": "Sharp. Thirteen minus five. How much is left?"},
+        {"role": "user", "content": "eight"},
+    ]
+    mastery_stats = analyze_session(
+        {
+            "current_module": 3,
+            "learning_state": {
+                "current_module": 3,
+                "current_week": 9,
+                "current_lesson": 2,
+                "active_skill": "subtraction",
+                "diagnostic_status": "done",
+            },
+        },
+        mastery_messages,
+    )
+    ok &= check(
+        "mastery_does_not_jump_module_mid_call",
+        mastery_stats.recommended_module == 3 and mastery_stats.should_advance,
+        str(mastery_stats.learning_state),
+    )
+    advanced_state = advance_numeracy_state_after_mastery(mastery_stats.learning_state)
+    ok &= check(
+        "mastery_advances_next_lesson_for_next_call",
+        advanced_state["current_module"] == 3
+        and advanced_state["current_week"] == 9
+        and advanced_state["current_lesson"] == 3
+        and "Lesson 3" in advanced_state["next_step"],
+        str(advanced_state),
+    )
+    path_prompt = build_curriculum_path_prompt(
+        {
+            "current_module": 3,
+            "current_week": 9,
+            "current_lesson": 2,
+            "active_skill": "subtraction",
+            "diagnostic_status": "done",
+        },
+        3,
+    )
+    ok &= check(
+        "curriculum_path_pins_exact_lesson",
+        "Global Lesson 34" in path_prompt
+        and "Think addition for subtraction" in path_prompt
+        and "Do not jump to the next module" in path_prompt,
+        path_prompt,
+    )
 
     opening = build_opening_turn(
         {"name": "Remi", "current_module": 2, "current_topic": "addition"},

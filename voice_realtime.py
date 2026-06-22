@@ -664,6 +664,7 @@ class RealtimeCall:
                     current_module=module,
                     memory=self.memory,
                     course=str(effective_state.get("course") or "numeracy"),
+                    learning_state=effective_state,
                 )
                 if is_premature_wrap_response(response, user_turns, elapsed_seconds):
                     logger.warning(
@@ -689,6 +690,7 @@ class RealtimeCall:
                         current_module=module,
                         memory=self.memory,
                         course=str(effective_state.get("course") or "numeracy"),
+                        learning_state=effective_state,
                     )
                 logger.info("Realtime turn %s llm=%.2fs response=%s", turn, time.monotonic() - llm_start, response)
                 messages.append({"role": "assistant", "content": response})

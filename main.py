@@ -30,6 +30,12 @@ from stt import SpeechToText
 from tts import TextToSpeech
 from llm import SabiLLM
 from memory import StudentMemory
+from feedback_admin import (
+    feedback_audio_path,
+    feedback_sidecar_path,
+    list_feedback_records,
+    load_feedback_record,
+)
 from voice import router as voice_router
 from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server
@@ -429,6 +435,57 @@ _last_flash_callbacks: dict[str, float] = {}
 
 def normalize_phone(phone: str) -> str:
     return re.sub(r"[^\d+]", "", phone or "")
+
+
+@app.get("/admin/feedback")
+async def admin_feedback_index(
+    limit: int = 25,
+    offset: int = 0,
+    phone: str = "",
+    call_id: str = "",
+    q: str = "",
+):
+    """
+    Protected tester-feedback review index.
+
+    This reads local feedback sidecars written by the AudioSocket path, so
+    notes remain reviewable even before the Supabase feedback table exists.
+    """
+    return JSONResponse(
+        list_feedback_records(
+            limit=limit,
+            offset=offset,
+            phone=phone,
+            call_id=call_id,
+            q=q,
+        )
+    )
+
+
+@app.get("/admin/feedback/{call_uuid}")
+async def admin_feedback_detail(call_uuid: str, include_raw: bool = False):
+    """Return one feedback sidecar. Raw transcript is opt-in."""
+    sidecar = feedback_sidecar_path(call_uuid)
+    if not sidecar or not sidecar.exists():
+        return JSONResponse({"error": "feedback_not_found"}, status_code=404)
+
+    record = load_feedback_record(sidecar, include_raw=include_raw)
+    if not record:
+        return JSONResponse({"error": "feedback_unreadable"}, status_code=422)
+    return JSONResponse(record)
+
+
+@app.get("/admin/feedback/{call_uuid}/audio")
+async def admin_feedback_audio(call_uuid: str):
+    """Download the raw feedback WAV for a tester note."""
+    audio_path = feedback_audio_path(call_uuid)
+    if not audio_path or not audio_path.exists():
+        return JSONResponse({"error": "feedback_audio_not_found"}, status_code=404)
+    return FileResponse(
+        str(audio_path),
+        media_type="audio/wav",
+        filename=audio_path.name,
+    )
 
 
 async def ami_originate(phone: str, attempt: int = 1, delay_seconds: float | None = None):

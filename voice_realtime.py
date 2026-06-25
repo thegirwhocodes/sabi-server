@@ -92,7 +92,10 @@ FAST_GREETING_TEXT = os.getenv(
 )
 USE_CACHED_GREETING = os.getenv("SABI_USE_CACHED_GREETING", "false").strip().lower() in {"1", "true", "yes"}
 MAX_CALL_SECONDS = int(os.getenv("SABI_MAX_CALL_SECONDS", "480"))
-FEEDBACK_MODE = os.getenv("SABI_FEEDBACK_MODE", "off").strip().lower()
+# The pre-pilot consent flow tells testers they will get an optional open
+# feedback prompt. Keep it available by default; set SABI_FEEDBACK_MODE=off to
+# disable, or testers + SABI_FEEDBACK_TEST_NUMBERS to restrict during trials.
+FEEDBACK_MODE = os.getenv("SABI_FEEDBACK_MODE", "all").strip().lower()
 FEEDBACK_TEST_NUMBERS = {
     "".join(ch for ch in value if ch.isdigit())
     for value in os.getenv("SABI_FEEDBACK_TEST_NUMBERS", "").split(",")
@@ -275,7 +278,7 @@ def _phone_digits(phone: str) -> str:
 def _feedback_enabled_for_phone(phone: str) -> bool:
     if FEEDBACK_MODE in {"", "0", "false", "no", "off"}:
         return False
-    if FEEDBACK_MODE in {"1", "true", "yes", "all"}:
+    if FEEDBACK_MODE in {"1", "true", "yes", "on", "all", "pilot", "prepilot", "pre-pilot"}:
         return True
     if FEEDBACK_MODE == "testers":
         digits = _phone_digits(phone)

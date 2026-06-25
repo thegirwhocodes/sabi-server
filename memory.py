@@ -13,6 +13,7 @@ from typing import Optional
 from supabase import create_client
 
 from curriculum_path import advance_learning_state_after_mastery, build_curriculum_path_prompt
+from curriculum_review import resolve_position_review
 from learning_state import (
     analyze_session,
     build_learning_state_prompt,
@@ -638,6 +639,103 @@ class StudentMemory:
             "profiles": profiles,
         }
 
+    async def review_learners(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        phone: str = "",
+        q: str = "",
+    ) -> dict:
+        """Read-only admin roster of children, curriculum state, and recent calling."""
+        safe_limit = max(1, min(int(limit or 50), 100))
+        safe_offset = max(0, int(offset or 0))
+        fetch_limit = min(500, safe_limit + safe_offset + 50)
+        phone_digits = _digits(phone)
+        text_filter = str(q or "").strip().lower()
+
+        if not self.client:
+            return {
+                "status": "unavailable",
+                "reason": "supabase_not_configured",
+                "limit": safe_limit,
+                "offset": safe_offset,
+                "total": 0,
+                "items": [],
+            }
+
+        try:
+            result = self.client.table("sabi_students").select("*").order(
+                "updated_at",
+                desc=True,
+            ).limit(fetch_limit).execute()
+            rows = result.data or []
+        except Exception as exc:
+            logger.warning("Could not load learner roster: %s", exc)
+            return {
+                "status": "error",
+                "reason": str(exc),
+                "limit": safe_limit,
+                "offset": safe_offset,
+                "total": 0,
+                "items": [],
+            }
+
+        filtered = []
+        for row in rows:
+            if phone_digits and not _student_phone_matches(row, phone_digits):
+                continue
+            if text_filter and not _student_matches_text(row, text_filter):
+                continue
+            filtered.append(row)
+
+        items = []
+        for row in filtered[safe_offset : safe_offset + safe_limit]:
+            sessions = self._recent_sessions_for_student(row.get("id"), 5)
+            effective_state = self._effective_state_from_student_and_sessions(row, sessions)
+            record = _student_review_record(row, effective_state, sessions)
+            record["calling"] = _calling_summary(row, sessions)
+            record["detail_endpoint"] = f"/admin/learners/{row.get('id')}"
+            items.append(record)
+
+        return {
+            "status": "ok",
+            "limit": safe_limit,
+            "offset": safe_offset,
+            "count": len(items),
+            "total": len(filtered),
+            "items": items,
+        }
+
+    async def review_student(self, student_id: str, limit: int = 20) -> dict:
+        """Read-only admin detail for one child profile and their recent calls."""
+        safe_limit = max(1, min(int(limit or 20), 50))
+        if not self.client:
+            return {
+                "status": "unavailable",
+                "reason": "supabase_not_configured",
+                "student_id": student_id,
+            }
+        try:
+            result = self.client.table("sabi_students").select("*").eq("id", student_id).limit(1).execute()
+            rows = result.data or []
+        except Exception as exc:
+            logger.warning("Could not load learner detail student=%s: %s", student_id, exc)
+            return {"status": "error", "reason": str(exc), "student_id": student_id}
+
+        if not rows:
+            return {"status": "not_found", "student_id": student_id}
+
+        student = rows[0]
+        sessions = self._recent_sessions_for_student(student_id, safe_limit)
+        effective_state = self._effective_state_from_student_and_sessions(student, sessions)
+        record = _student_review_record(student, effective_state, sessions)
+        record["calling"] = _calling_summary(student, sessions)
+        return {
+            "status": "ok",
+            "student": record,
+        }
+
     def _recent_sessions_for_student(self, student_id: str | None, limit: int = 5) -> list[dict]:
         if not student_id:
             return []
@@ -1156,6 +1254,7 @@ def _student_review_record(student: dict, effective_state: dict, sessions: list[
         "updated_at": student.get("updated_at"),
         "created_at": student.get("created_at"),
         "effective_state": _learning_state_review(effective_state),
+        "curriculum_position": resolve_position_review(effective_state),
         "recent_sessions": [_session_review_record(session) for session in sessions],
     }
 
@@ -1201,6 +1300,7 @@ def _session_review_record(session: dict) -> dict:
         "id": session.get("id"),
         "created_at": session.get("created_at"),
         "call_sid": session.get("call_sid"),
+        "call_review_endpoint": f"/admin/calls/{session.get('call_sid')}" if session.get("call_sid") else None,
         "phone_number": session.get("phone_number"),
         "channel": session.get("channel"),
         "duration_seconds": session.get("duration_seconds"),
@@ -1223,6 +1323,68 @@ def _preview_text(text: str | None, limit: int = 180) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 3].rstrip() + "..."
+
+
+def _calling_summary(student: dict, sessions: list[dict]) -> dict:
+    call_sessions = [
+        session for session in sessions
+        if session.get("call_sid") or session.get("phone_number") or session.get("channel")
+    ]
+    total_seconds = sum(int(session.get("duration_seconds") or 0) for session in call_sessions)
+    latest = call_sessions[0] if call_sessions else {}
+    return {
+        "total_sessions_recorded_on_student": student.get("total_sessions") or 0,
+        "recent_call_count": len(call_sessions),
+        "recent_call_seconds": total_seconds,
+        "recent_call_minutes": round(total_seconds / 60, 2),
+        "last_call_at": latest.get("created_at"),
+        "last_call_sid": latest.get("call_sid"),
+        "last_phone_number": latest.get("phone_number"),
+        "channels": sorted({str(session.get("channel")) for session in call_sessions if session.get("channel")}),
+        "call_review_endpoints": [
+            f"/admin/calls/{session.get('call_sid')}"
+            for session in call_sessions
+            if session.get("call_sid")
+        ],
+    }
+
+
+def _student_phone_matches(row: dict, query_digits: str) -> bool:
+    values = [
+        row.get("phone_number"),
+        row.get("phone_number_normalized"),
+        row.get("phone_household_key"),
+        row.get("learner_key"),
+        row.get("browser_id"),
+    ]
+    for value in values:
+        digits = _digits(str(value or ""))
+        if query_digits and digits and (query_digits in digits or digits in query_digits or query_digits[-10:] == digits[-10:]):
+            return True
+    return False
+
+
+def _student_matches_text(row: dict, text_filter: str) -> bool:
+    haystack = " ".join(
+        str(row.get(key) or "")
+        for key in (
+            "id",
+            "name",
+            "phone_number",
+            "phone_number_normalized",
+            "phone_household_key",
+            "learner_key",
+            "browser_id",
+            "current_level",
+            "baseline_status",
+            "last_session_summary",
+        )
+    ).lower()
+    return text_filter in haystack
+
+
+def _digits(value: str) -> str:
+    return "".join(ch for ch in (value or "") if ch.isdigit())
 
 
 def _learning_state_snapshot_message(state: dict) -> dict:

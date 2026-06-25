@@ -14,6 +14,8 @@ import os
 import struct
 import sys
 import tempfile
+import time
+from collections import deque
 from pathlib import Path
 
 
@@ -54,7 +56,7 @@ class FakeFeedbackCall:
         self.attempt = 1
         self.hungup = False
         self.prompt_played = False
-        self.wait_args: tuple[int, int | None] | None = None
+        self.wait_args: tuple[int, int | None, int | None] | None = None
         self.stt = FakeSTT()
         self.memory = FakeMemory()
 
@@ -66,8 +68,13 @@ class FakeFeedbackCall:
     async def play_pcm(self, pcm: bytes) -> None:
         self.prompt_played = bool(pcm)
 
-    async def wait_for_optional_utterance(self, timeout_seconds: int, max_frames: int | None = None) -> bytes:
-        self.wait_args = (timeout_seconds, max_frames)
+    async def wait_for_optional_utterance(
+        self,
+        timeout_seconds: int,
+        max_frames: int | None = None,
+        end_silence_frames: int | None = None,
+    ) -> bytes:
+        self.wait_args = (timeout_seconds, max_frames, end_silence_frames)
         # One second of 8 kHz signed-linear audio at a clearly non-silent level.
         return struct.pack("<h", 1800) * voice_realtime.SAMPLE_RATE
 
@@ -82,6 +89,38 @@ async def run_capture() -> tuple[FakeFeedbackCall, dict]:
     sidecar = ROOT / "feedback_fb-regression-001.json"
     metadata = json.loads(sidecar.read_text()) if sidecar.exists() else {}
     return call, metadata
+
+
+async def run_optional_wait_window_check() -> tuple[bool, dict]:
+    """The wait-to-start timeout must not cap an in-progress voice note."""
+    call = object.__new__(voice_realtime.RealtimeCall)
+    call.call_uuid = "optional-window-regression"
+    call.audio_queue = asyncio.Queue()
+    call.pre_roll = deque(maxlen=0)
+    call.hungup = False
+    call.end_reason = "unknown"
+    call.set_end_reason = lambda reason: setattr(call, "end_reason", reason)
+
+    loud_frame = struct.pack("<h", voice_realtime.SPEECH_RMS_THRESHOLD + 1000) * (
+        voice_realtime.FRAME_BYTES // 2
+    )
+    await call.audio_queue.put(loud_frame)
+    await call.audio_queue.put(loud_frame)
+
+    started_at = time.monotonic()
+    pcm = await voice_realtime.RealtimeCall.wait_for_optional_utterance(
+        call,
+        timeout_seconds=0.05,
+        max_frames=8,
+        end_silence_frames=3,
+    )
+    elapsed = time.monotonic() - started_at
+    return bool(pcm) and elapsed >= 0.05, {
+        "captured": bool(pcm),
+        "elapsed_seconds": round(elapsed, 3),
+        "pcm_bytes": len(pcm or b""),
+        "end_reason": call.end_reason,
+    }
 
 
 def main() -> int:
@@ -99,6 +138,7 @@ def main() -> int:
     )
 
     call, metadata = asyncio.run(run_capture())
+    optional_window_ok, optional_window_detail = asyncio.run(run_optional_wait_window_check())
     audio_path = ROOT / "feedback_fb-regression-001.wav"
     sidecar_path = ROOT / "feedback_fb-regression-001.json"
     saved = call.memory.calls[0] if call.memory.calls else {}
@@ -109,8 +149,14 @@ def main() -> int:
         call.wait_args == (
             voice_realtime.FEEDBACK_WAIT_SECONDS,
             max(1, int(voice_realtime.FEEDBACK_MAX_SECONDS * 1000 / voice_realtime.FRAME_MS)),
+            voice_realtime.FEEDBACK_END_SILENCE_FRAMES,
         ),
         call.wait_args,
+    )
+    ok &= check(
+        "feedback_wait_window_does_not_cap_active_note",
+        optional_window_ok,
+        optional_window_detail,
     )
     ok &= check("feedback_audio_written", audio_path.exists() and audio_path.stat().st_size > 44, audio_path)
     ok &= check("feedback_sidecar_written", sidecar_path.exists(), sidecar_path)

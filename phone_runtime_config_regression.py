@@ -62,8 +62,24 @@ def main() -> int:
             voice_realtime.FEEDBACK_WAIT_SECONDS,
         ),
         check(
+            "feedback_note_tolerates_natural_pauses",
+            voice_realtime.FEEDBACK_END_SILENCE_MS >= 2500,
+            voice_realtime.FEEDBACK_END_SILENCE_MS,
+        ),
+        check(
             "feedback_mode_known",
-            voice_realtime.FEEDBACK_MODE in {"off", "testers", "all", "1", "true", "yes"},
+            voice_realtime.FEEDBACK_MODE in {
+                "off",
+                "testers",
+                "all",
+                "1",
+                "true",
+                "yes",
+                "on",
+                "pilot",
+                "prepilot",
+                "pre-pilot",
+            },
             voice_realtime.FEEDBACK_MODE,
         ),
         check(

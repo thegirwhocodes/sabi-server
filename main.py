@@ -21,7 +21,7 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
@@ -30,13 +30,21 @@ from stt import SpeechToText
 from tts import TextToSpeech
 from llm import SabiLLM
 from memory import StudentMemory
-from call_admin import call_sidecar_path, list_call_records, load_call_record
+from call_admin import (
+    call_recording_path,
+    call_sidecar_path,
+    call_turn_audio_path,
+    list_call_records,
+    load_call_record,
+)
 from feedback_admin import (
     feedback_audio_path,
     feedback_sidecar_path,
     list_feedback_records,
     load_feedback_record,
 )
+from admin_review import render_admin_review_page
+from curriculum_review import build_curriculum_review_map
 from voice import router as voice_router
 from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server
@@ -511,6 +519,18 @@ async def admin_call_index(
     )
 
 
+@app.get("/admin/review", response_class=HTMLResponse)
+async def admin_review_console():
+    """Protected browser console for learner progress and call QA."""
+    return HTMLResponse(render_admin_review_page())
+
+
+@app.get("/admin/curriculum-map")
+async def admin_curriculum_map():
+    """Protected structured map of Sabi levels, lessons, and scaffold ladders."""
+    return JSONResponse(build_curriculum_review_map())
+
+
 @app.get("/admin/calls/{call_uuid}")
 async def admin_call_detail(call_uuid: str):
     """Return one phone-call QA sidecar."""
@@ -523,12 +543,64 @@ async def admin_call_detail(call_uuid: str):
     return JSONResponse(record)
 
 
+@app.get("/admin/calls/{call_uuid}/audio/{kind}")
+async def admin_call_audio(call_uuid: str, kind: str):
+    """Download full-call audio. kind=mixed, rx, or tx."""
+    audio_path = call_recording_path(call_uuid, kind)
+    if not audio_path or not audio_path.exists():
+        return JSONResponse({"error": "call_audio_not_found"}, status_code=404)
+    return FileResponse(
+        str(audio_path),
+        media_type="audio/wav",
+        filename=audio_path.name,
+    )
+
+
+@app.get("/admin/calls/{call_uuid}/turns/{turn_index}/audio/{role}")
+async def admin_call_turn_audio(call_uuid: str, turn_index: int, role: str):
+    """Download one per-turn user or assistant WAV clip."""
+    audio_path = call_turn_audio_path(call_uuid, turn_index, role)
+    if not audio_path or not audio_path.exists():
+        return JSONResponse({"error": "turn_audio_not_found"}, status_code=404)
+    return FileResponse(
+        str(audio_path),
+        media_type="audio/wav",
+        filename=audio_path.name,
+    )
+
+
+@app.get("/admin/learners")
+async def admin_learner_index(
+    limit: int = 50,
+    offset: int = 0,
+    phone: str = "",
+    q: str = "",
+):
+    """Protected roster of children, current level, progression, and calling history."""
+    result = await app.state.memory.review_learners(
+        limit=limit,
+        offset=offset,
+        phone=phone,
+        q=q,
+    )
+    return JSONResponse(result)
+
+
 @app.get("/admin/learners/by-phone")
 async def admin_learner_by_phone(phone: str, limit: int = 5):
     """Protected read-only continuity view for all learner profiles on one phone."""
     if not phone.strip():
         return JSONResponse({"error": "phone_required"}, status_code=400)
     result = await app.state.memory.review_phone_continuity(phone, limit=limit)
+    return JSONResponse(result)
+
+
+@app.get("/admin/learners/{student_id}")
+async def admin_learner_detail(student_id: str, limit: int = 20):
+    """Protected detail view for one child and their recent lesson/call evidence."""
+    result = await app.state.memory.review_student(student_id, limit=limit)
+    if result.get("status") == "not_found":
+        return JSONResponse(result, status_code=404)
     return JSONResponse(result)
 
 

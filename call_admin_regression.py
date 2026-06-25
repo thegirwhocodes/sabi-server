@@ -8,7 +8,10 @@ import tempfile
 from pathlib import Path
 
 from call_admin import (
+    append_call_turn_review,
+    call_recording_path,
     call_sidecar_path,
+    call_turn_audio_path,
     list_call_records,
     load_call_record,
     merge_call_hangup_event,
@@ -79,6 +82,7 @@ def main() -> int:
                 "dialstatus": "ANSWER",
                 "duration": "365",
                 "billsec": "360",
+                "recording": str(root / "calls" / "call-qa-001.wav"),
             },
             root,
         )
@@ -90,6 +94,60 @@ def main() -> int:
             merged,
         )
 
+        calls_dir = root / "calls"
+        calls_dir.mkdir()
+        for name in ["call-qa-001.wav", "call-qa-001_rx-network.wav", "call-qa-001_tx-sabi.wav"]:
+            (calls_dir / name).write_bytes(b"RIFFtest")
+
+        user_audio = call_turn_audio_path(call_uuid, 0, "user", root)
+        assistant_audio = call_turn_audio_path(call_uuid, 0, "assistant", root)
+        user_audio.parent.mkdir(parents=True, exist_ok=True)
+        user_audio.write_bytes(b"RIFFuser")
+        assistant_audio.write_bytes(b"RIFFassistant")
+        append_call_turn_review(
+            call_uuid=call_uuid,
+            turn_index=0,
+            user_audio_path=str(user_audio),
+            user_audio_seconds=1.2,
+            stt_transcript="fifteen naira",
+            stt_confidence=0.91,
+            normalized_transcript="15 naira",
+            learning_state_before={
+                "course": "numeracy",
+                "current_module": 4,
+                "current_week": 14,
+                "current_lesson": 2,
+                "tarl_level": 4,
+                "active_skill": "multiplication",
+                "wrong_streak": 1,
+                "scaffold_depth": 0,
+            },
+            learning_state_after={
+                "course": "numeracy",
+                "current_module": 4,
+                "current_week": 14,
+                "current_lesson": 2,
+                "tarl_level": 4,
+                "active_skill": "multiplication",
+                "repair_skill": "multiplication",
+                "wrong_streak": 2,
+                "scaffold_depth": 1,
+                "scaffold_ladder": {
+                    "level": 1,
+                    "skill": "multiplication",
+                    "teacher_move": "Translate multiplication back to equal groups.",
+                    "example_prompt": "Two bags have three oranges each.",
+                },
+            },
+            assistant_text="Good try. Let's use groups.",
+            assistant_tts_text="Good try. Let's use groups.",
+            assistant_audio_path=str(assistant_audio),
+            assistant_audio_seconds=2.4,
+            timings={"stt_seconds": 0.2, "llm_seconds": 0.5, "tts_seconds": 0.4},
+            flags=["transcript_normalized"],
+            directory=root,
+        )
+
         loaded = load_call_record(root / "call_call-qa-001.json")
         ok &= check(
             "load_call_record_adds_sidecar_metadata",
@@ -97,6 +155,25 @@ def main() -> int:
             and loaded["call_uuid"] == call_uuid
             and loaded["sidecar_path"].endswith("call_call-qa-001.json"),
             loaded,
+        )
+        ok &= check(
+            "call_record_exposes_full_and_split_recordings",
+            loaded["recordings"]["mixed"]["exists"] is True
+            and loaded["recordings"]["rx_network"]["exists"] is True
+            and loaded["recordings"]["tx_sabi"]["exists"] is True
+            and call_recording_path(call_uuid, "rx", root).name.endswith("_rx-network.wav"),
+            loaded.get("recordings"),
+        )
+        turn = loaded["turns"][0] if loaded.get("turns") else {}
+        ok &= check(
+            "turn_review_links_audio_transcript_and_bump_down",
+            turn.get("user", {}).get("has_audio") is True
+            and turn.get("assistant", {}).get("has_audio") is True
+            and turn.get("user", {}).get("stt_transcript") == "fifteen naira"
+            and turn.get("user", {}).get("normalized_transcript") == "15 naira"
+            and turn.get("bump_down", {}).get("detected") is True
+            and loaded.get("learning_progression", {}).get("bump_down_turns") == [0],
+            turn,
         )
 
         write_call_review_record(

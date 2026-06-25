@@ -23,6 +23,7 @@ import httpx
 
 from answer_matcher import extract_number
 from call_admin import merge_call_hangup_event, write_call_review_record
+from call_admin import append_call_turn_review, call_turn_audio_path
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
 from transcript_normalizer import normalize_lesson_transcript
@@ -30,6 +31,7 @@ from voice_asterisk import (
     CONFIDENCE_THRESHOLD,
     MAX_TURNS,
     build_call_control_messages,
+    clean_text_for_tts,
     is_premature_wrap_response,
     should_wrap_up,
     tts_and_convert,
@@ -103,6 +105,8 @@ FEEDBACK_TEST_NUMBERS = {
 }
 FEEDBACK_MAX_SECONDS = int(os.getenv("SABI_FEEDBACK_MAX_SECONDS", "90"))
 FEEDBACK_WAIT_SECONDS = int(os.getenv("SABI_FEEDBACK_WAIT_SECONDS", "8"))
+FEEDBACK_END_SILENCE_MS = int(os.getenv("SABI_FEEDBACK_END_SILENCE_MS", "3000"))
+FEEDBACK_END_SILENCE_FRAMES = max(1, int(FEEDBACK_END_SILENCE_MS / FRAME_MS))
 FEEDBACK_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_PROMPT_TEXT",
     (
@@ -167,6 +171,7 @@ def _rms(frame: bytes) -> int:
 
 
 def _write_wav(path: Path, pcm: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(CHANNELS)
         wav.setsampwidth(SAMPLE_WIDTH)
@@ -474,7 +479,11 @@ class RealtimeCall:
         logger.info("Playback complete uuid=%s elapsed=%.2fs", self.call_uuid, time.monotonic() - playback_start)
         return None
 
-    async def wait_for_utterance(self, max_frames: int | None = None) -> Optional[bytes]:
+    async def wait_for_utterance(
+        self,
+        max_frames: int | None = None,
+        end_silence_frames: int | None = None,
+    ) -> Optional[bytes]:
         """Wait until caller starts talking, then return one complete utterance."""
         speech_frames = 0
         while not self.hungup:
@@ -488,7 +497,11 @@ class RealtimeCall:
                 if speech_frames >= START_SPEECH_FRAMES:
                     frames = list(self.pre_roll)
                     frames.append(inbound)
-                    return await self.collect_utterance(frames, max_frames=max_frames)
+                    return await self.collect_utterance(
+                        frames,
+                        max_frames=max_frames,
+                        end_silence_frames=end_silence_frames,
+                    )
             else:
                 speech_frames = 0
         return None
@@ -497,27 +510,55 @@ class RealtimeCall:
         self,
         timeout_seconds: int,
         max_frames: int | None = None,
+        end_silence_frames: int | None = None,
     ) -> Optional[bytes]:
         if timeout_seconds <= 0:
             return None
-        try:
-            return await asyncio.wait_for(
-                self.wait_for_utterance(max_frames=max_frames),
-                timeout=timeout_seconds,
-            )
-        except asyncio.TimeoutError:
-            return None
 
-    async def collect_utterance(self, initial_frames: list[bytes], max_frames: int | None = None) -> bytes:
+        deadline = time.monotonic() + timeout_seconds
+        speech_frames = 0
+        while not self.hungup:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                inbound = await asyncio.wait_for(self.audio_queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                return None
+            if inbound is None:
+                self.hungup = True
+                self.set_end_reason("channel_closed_waiting_for_optional_speech")
+                return None
+            if _rms(inbound) >= SPEECH_RMS_THRESHOLD:
+                speech_frames += 1
+                if speech_frames >= START_SPEECH_FRAMES:
+                    frames = list(self.pre_roll)
+                    frames.append(inbound)
+                    return await self.collect_utterance(
+                        frames,
+                        max_frames=max_frames,
+                        end_silence_frames=end_silence_frames,
+                    )
+            else:
+                speech_frames = 0
+        return None
+
+    async def collect_utterance(
+        self,
+        initial_frames: list[bytes],
+        max_frames: int | None = None,
+        end_silence_frames: int | None = None,
+    ) -> bytes:
         frames = list(initial_frames)
         silent_frames = 0
         max_frame_count = max_frames or MAX_UTTERANCE_FRAMES
+        silence_limit = end_silence_frames or END_SILENCE_FRAMES
         while len(frames) < max_frame_count and not self.hungup:
             try:
                 inbound = await asyncio.wait_for(self.audio_queue.get(), timeout=COLLECT_TIMEOUT_MS / 1000)
             except asyncio.TimeoutError:
                 silent_frames += max(1, int(COLLECT_TIMEOUT_MS / FRAME_MS))
-                if silent_frames >= END_SILENCE_FRAMES:
+                if silent_frames >= silence_limit:
                     break
                 continue
 
@@ -531,30 +572,42 @@ class RealtimeCall:
                 silent_frames = 0
             else:
                 silent_frames += 1
-                if silent_frames >= END_SILENCE_FRAMES:
+                if silent_frames >= silence_limit:
                     break
 
         pcm = b"".join(frames)
-        logger.info("Collected utterance uuid=%s duration=%.2fs", self.call_uuid, len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH))
+        logger.info(
+            "Collected utterance uuid=%s duration=%.2fs silence_limit_frames=%s",
+            self.call_uuid,
+            len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH),
+            silence_limit,
+        )
         return pcm
 
-    async def transcribe_pcm(self, pcm: bytes, turn: int) -> dict:
-        path = SHARED_AUDIO_DIR / f"rt_rec_{self.call_uuid}_{turn}.wav"
+    async def transcribe_pcm(self, pcm: bytes, turn: int, audio_path: Path | None = None) -> dict:
+        path = audio_path or (SHARED_AUDIO_DIR / f"rt_rec_{self.call_uuid}_{turn}.wav")
+        keep_audio = audio_path is not None
         _write_wav(path, pcm)
+        duration_seconds = len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH)
         try:
             loop = asyncio.get_event_loop()
             start = time.monotonic()
             result = await loop.run_in_executor(None, self.stt.transcribe, str(path))
+            stt_latency = time.monotonic() - start
             logger.info(
                 "Realtime turn %s: '%s' conf=%.2f stt=%.2fs",
-                turn, result.get("text", ""), result.get("confidence", 0), time.monotonic() - start,
+                turn, result.get("text", ""), result.get("confidence", 0), stt_latency,
             )
+            result["audio_path"] = str(path)
+            result["audio_seconds"] = duration_seconds
+            result["stt_latency_seconds"] = stt_latency
             return result
         finally:
-            try:
-                path.unlink()
-            except OSError:
-                pass
+            if not keep_audio:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
     async def record_feedback_note(self, student_id: str | None, learning_state: dict | None) -> None:
         """Ask for one optional, open-ended tester note after the lesson."""
@@ -570,6 +623,7 @@ class RealtimeCall:
         feedback_pcm = await self.wait_for_optional_utterance(
             FEEDBACK_WAIT_SECONDS,
             max_frames=max_frames,
+            end_silence_frames=FEEDBACK_END_SILENCE_FRAMES,
         )
         if not feedback_pcm or self.hungup:
             logger.info("No optional feedback left uuid=%s", self.call_uuid)
@@ -633,6 +687,49 @@ class RealtimeCall:
             consent_recorded=True,
             assent_recorded=False,
         )
+
+    def persist_turn_review(
+        self,
+        *,
+        turn: int,
+        user_audio_path: Path | None,
+        transcript: dict,
+        raw_text: str,
+        normalized_text: str,
+        learning_state_before: dict | None,
+        learning_state_after: dict | None,
+        assistant_text: str = "",
+        assistant_pcm: bytes = b"",
+        timings: dict | None = None,
+        flags: list[str] | None = None,
+    ) -> None:
+        """Write one admin review row for an accepted, retried, or ignored turn."""
+        assistant_audio_path = call_turn_audio_path(self.call_uuid, turn, "assistant", SHARED_AUDIO_DIR)
+        assistant_seconds = 0.0
+        if assistant_pcm and assistant_audio_path:
+            _write_wav(assistant_audio_path, assistant_pcm)
+            assistant_seconds = len(assistant_pcm) / (SAMPLE_RATE * SAMPLE_WIDTH)
+        try:
+            append_call_turn_review(
+                call_uuid=self.call_uuid,
+                turn_index=turn,
+                user_audio_path=str(user_audio_path) if user_audio_path else "",
+                user_audio_seconds=float(transcript.get("audio_seconds") or 0),
+                stt_transcript=raw_text,
+                stt_confidence=float(transcript.get("confidence") or 0),
+                normalized_transcript=normalized_text,
+                learning_state_before=learning_state_before or {},
+                learning_state_after=learning_state_after or learning_state_before or {},
+                assistant_text=assistant_text,
+                assistant_tts_text=clean_text_for_tts(assistant_text) if assistant_text else "",
+                assistant_audio_path=str(assistant_audio_path) if assistant_audio_path and assistant_pcm else "",
+                assistant_audio_seconds=assistant_seconds,
+                timings=timings or {},
+                flags=flags or [],
+                directory=SHARED_AUDIO_DIR,
+            )
+        except Exception as exc:
+            logger.warning("Could not append turn review uuid=%s turn=%s: %s", self.call_uuid, turn, exc)
 
     async def request_callback_retry(self, reason: str) -> None:
         if self.mode != "callback" or not self.phone or self.phone == "unknown":
@@ -721,6 +818,7 @@ class RealtimeCall:
                     )
                     break
 
+                utterance_from_barge = interrupted is not None
                 utterance = interrupted if interrupted else await self.wait_for_utterance()
                 interrupted = None
                 if not utterance:
@@ -731,9 +829,15 @@ class RealtimeCall:
                     break
 
                 turn_start = time.monotonic()
-                transcript = await self.transcribe_pcm(utterance, turn)
+                user_audio_path = call_turn_audio_path(self.call_uuid, turn, "user", SHARED_AUDIO_DIR)
+                transcript = await self.transcribe_pcm(utterance, turn, user_audio_path)
                 text = transcript.get("text", "").strip()
+                raw_stt_text = text
                 confidence = float(transcript.get("confidence", 0))
+                turn_flags: list[str] = []
+                if utterance_from_barge:
+                    turn_flags.append("barge_in")
+                learning_state_before_turn = dict(effective_state or {})
                 normalized_text = text.lower().strip(" .,!?:;")
                 if _looks_like_carrier_audio(text):
                     logger.warning(
@@ -742,11 +846,39 @@ class RealtimeCall:
                         text,
                         self.attempt,
                     )
+                    self.persist_turn_review(
+                        turn=turn,
+                        user_audio_path=user_audio_path,
+                        transcript=transcript,
+                        raw_text=raw_stt_text,
+                        normalized_text=text,
+                        learning_state_before=learning_state_before_turn,
+                        learning_state_after=learning_state_before_turn,
+                        flags=[*turn_flags, "carrier_or_voicemail_audio"],
+                        timings={
+                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                        },
+                    )
                     await self.request_callback_retry(text)
                     self.set_end_reason("carrier_or_voicemail_audio")
                     break
                 if normalized_text in FILLER_WORDS:
                     logger.info("Realtime turn %s: ignoring filler '%s'", turn, text)
+                    self.persist_turn_review(
+                        turn=turn,
+                        user_audio_path=user_audio_path,
+                        transcript=transcript,
+                        raw_text=raw_stt_text,
+                        normalized_text=text,
+                        learning_state_before=learning_state_before_turn,
+                        learning_state_after=learning_state_before_turn,
+                        flags=[*turn_flags, "ignored_filler"],
+                        timings={
+                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                        },
+                    )
                     continue
                 if not text or _looks_like_stt_hallucination(text):
                     if _looks_like_stt_hallucination(text):
@@ -756,6 +888,22 @@ class RealtimeCall:
                     else:
                         retry_streak += 1
                         retry_pcm = await self.synthesize_pcm(RETRY_TEXT, "rt_retry")
+                        self.persist_turn_review(
+                            turn=turn,
+                            user_audio_path=user_audio_path,
+                            transcript=transcript,
+                            raw_text=raw_stt_text,
+                            normalized_text=text,
+                            learning_state_before=learning_state_before_turn,
+                            learning_state_after=learning_state_before_turn,
+                            assistant_text=RETRY_TEXT,
+                            assistant_pcm=retry_pcm,
+                            flags=[*turn_flags, "retry_prompt", "empty_or_hallucinated_transcript"],
+                            timings={
+                                "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                                "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                            },
+                        )
                         logger.info("Realtime turn %s retry pipeline=%.2fs", turn, time.monotonic() - turn_start)
                         interrupted = await self.play_pcm_with_barge(retry_pcm)
                         continue
@@ -767,6 +915,7 @@ class RealtimeCall:
                             text,
                             confidence,
                         )
+                        turn_flags.append("usable_low_confidence")
                     elif retry_streak >= 1:
                         logger.info(
                             "Realtime turn %s: passing unclear transcript after retry %r conf=%.2f",
@@ -777,6 +926,22 @@ class RealtimeCall:
                     else:
                         retry_streak += 1
                         retry_pcm = await self.synthesize_pcm(RETRY_TEXT, "rt_retry")
+                        self.persist_turn_review(
+                            turn=turn,
+                            user_audio_path=user_audio_path,
+                            transcript=transcript,
+                            raw_text=raw_stt_text,
+                            normalized_text=text,
+                            learning_state_before=learning_state_before_turn,
+                            learning_state_after=learning_state_before_turn,
+                            assistant_text=RETRY_TEXT,
+                            assistant_pcm=retry_pcm,
+                            flags=[*turn_flags, "retry_prompt", "low_confidence_rejected"],
+                            timings={
+                                "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                                "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                            },
+                        )
                         logger.info("Realtime turn %s retry pipeline=%.2fs", turn, time.monotonic() - turn_start)
                         interrupted = await self.play_pcm_with_barge(retry_pcm)
                         continue
@@ -789,9 +954,12 @@ class RealtimeCall:
                         text,
                         confidence,
                     )
+                    turn_flags.append("low_confidence")
 
                 retry_streak = 0
                 text_for_lesson = _normalize_transcript_for_lesson(text, messages)
+                if text_for_lesson != text:
+                    turn_flags.append("transcript_normalized")
                 messages.append({"role": "user", "content": text_for_lesson})
                 if not identity_confirmed:
                     resolved_student = await self.memory.resolve_student_for_spoken_identity(
@@ -878,9 +1046,30 @@ class RealtimeCall:
                         channel="asterisk_audiosocket",
                     )
                 logger.info("Realtime turn %s llm=%.2fs response=%s", turn, time.monotonic() - llm_start, response)
+                llm_latency = time.monotonic() - llm_start
                 messages.append({"role": "assistant", "content": response})
 
+                tts_start = time.monotonic()
                 response_pcm = await self.synthesize_pcm(response, "rt_resp")
+                tts_latency = time.monotonic() - tts_start
+                self.persist_turn_review(
+                    turn=turn,
+                    user_audio_path=user_audio_path,
+                    transcript=transcript,
+                    raw_text=raw_stt_text,
+                    normalized_text=text_for_lesson,
+                    learning_state_before=learning_state_before_turn,
+                    learning_state_after=dict(effective_state or {}),
+                    assistant_text=response,
+                    assistant_pcm=response_pcm,
+                    timings={
+                        "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                        "llm_seconds": round(llm_latency, 3),
+                        "tts_seconds": round(tts_latency, 3),
+                        "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                    },
+                    flags=turn_flags,
+                )
                 logger.info("Realtime turn %s response pipeline=%.2fs", turn, time.monotonic() - turn_start)
                 interrupted = await self.play_pcm_with_barge(response_pcm)
                 if should_wrap_up(messages, response, elapsed_seconds=time.monotonic() - call_started_at):

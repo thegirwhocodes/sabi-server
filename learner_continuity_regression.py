@@ -233,6 +233,30 @@ def main() -> int:
         profiles,
     )
 
+    roster = asyncio.run(memory.review_learners(limit=10, phone="08033374126"))
+    roster_items = roster.get("items") or []
+    remi_roster = next((item for item in roster_items if item.get("id") == "remi-row"), {})
+    ok &= check(
+        "learner_roster_lists_children_with_calling_summary",
+        roster["status"] == "ok"
+        and roster["total"] == 2
+        and remi_roster.get("calling", {}).get("recent_call_count") == 2
+        and remi_roster.get("calling", {}).get("last_call_sid") == "latest-call"
+        and "/admin/calls/latest-call" in remi_roster.get("calling", {}).get("call_review_endpoints", []),
+        roster,
+    )
+
+    detail = asyncio.run(memory.review_student("remi-row", limit=5))
+    ok &= check(
+        "learner_detail_shows_progression_and_recent_call_links",
+        detail["status"] == "ok"
+        and detail["student"]["id"] == "remi-row"
+        and detail["student"]["effective_state"]["current_module"] == 2
+        and detail["student"]["calling"]["recent_call_seconds"] == 405
+        and detail["student"]["recent_sessions"][0]["call_review_endpoint"] == "/admin/calls/latest-call",
+        detail,
+    )
+
     return 0 if ok else 1
 
 

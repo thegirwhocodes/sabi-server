@@ -1234,9 +1234,15 @@ def _student_review_sort_key(row: dict) -> tuple[int, str, str]:
 
 
 def _student_review_record(student: dict, effective_state: dict, sessions: list[dict]) -> dict:
+    identity = _student_display_identity(student)
     return {
         "id": student.get("id"),
         "name": student.get("name"),
+        "display_name": identity["display_name"],
+        "display_phone": identity["display_phone"],
+        "identity_status": identity["identity_status"],
+        "identity_label": identity["identity_label"],
+        "needs_name_capture": identity["needs_name_capture"],
         "phone_number": student.get("phone_number"),
         "phone_number_normalized": student.get("phone_number_normalized"),
         "phone_household_key": student.get("phone_household_key"),
@@ -1365,6 +1371,7 @@ def _student_phone_matches(row: dict, query_digits: str) -> bool:
 
 
 def _student_matches_text(row: dict, text_filter: str) -> bool:
+    identity = _student_display_identity(row)
     haystack = " ".join(
         str(row.get(key) or "")
         for key in (
@@ -1379,12 +1386,73 @@ def _student_matches_text(row: dict, text_filter: str) -> bool:
             "baseline_status",
             "last_session_summary",
         )
-    ).lower()
+    )
+    haystack = f"{haystack} {identity['display_name']} {identity['display_phone']} {identity['identity_label']}".lower()
     return text_filter in haystack
 
 
 def _digits(value: str) -> str:
     return "".join(ch for ch in (value or "") if ch.isdigit())
+
+
+def _student_display_identity(row: dict) -> dict:
+    """Return the board/admin identity label without writing fake names to memory.
+
+    `name` should stay reserved for the child's actual spoken/name-captured
+    identity. Admin surfaces still need a stable, humane label while that name
+    is pending, so derive one from phone/browser/id instead of ever rendering
+    "Unnamed learner".
+    """
+    raw_name = str(row.get("name") or "").strip()
+    if raw_name and raw_name.lower() not in {"unnamed learner", "unknown", "none", "null"}:
+        return {
+            "display_name": raw_name,
+            "display_phone": _display_phone_from_row(row),
+            "identity_status": "named",
+            "identity_label": "Named learner",
+            "needs_name_capture": False,
+        }
+
+    phone = _display_phone_from_row(row)
+    phone_digits = _digits(phone)
+    if phone_digits:
+        suffix = phone_digits[-4:] if len(phone_digits) >= 4 else phone_digits
+        return {
+            "display_name": f"Learner {suffix}",
+            "display_phone": phone,
+            "identity_status": "phone_pending_name",
+            "identity_label": "Name pending",
+            "needs_name_capture": True,
+        }
+
+    browser_id = str(row.get("browser_id") or "").strip()
+    if browser_id:
+        short = browser_id.replace("sabi-phone::", "")[:8]
+        return {
+            "display_name": f"Demo profile {short}",
+            "display_phone": "Web demo profile",
+            "identity_status": "demo_profile",
+            "identity_label": "Web demo",
+            "needs_name_capture": True,
+        }
+
+    row_id = str(row.get("id") or "").strip()
+    short_id = row_id[:8] if row_id else "pending"
+    return {
+        "display_name": f"Learner {short_id}",
+        "display_phone": "No phone linked",
+        "identity_status": "unlinked",
+        "identity_label": "Needs identity",
+        "needs_name_capture": True,
+    }
+
+
+def _display_phone_from_row(row: dict) -> str:
+    for key in ("phone_number_normalized", "phone_number", "phone_household_key"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _learning_state_snapshot_message(state: dict) -> dict:

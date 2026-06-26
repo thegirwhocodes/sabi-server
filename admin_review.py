@@ -25,7 +25,8 @@ def render_admin_review_page() -> str:
       --ink: #232b27;
       --muted: #68746d;
       --line: #e2e7e4;
-      --header: #f6f7f6;
+      --line-strong: #d4ddd7;
+      --header: #f6f8f7;
       --row: #f0f0f0;
       --panel: #ffffff;
       --warn: #9b5b00;
@@ -34,12 +35,13 @@ def render_admin_review_page() -> str:
       --bad-bg: #fff0ee;
       --good: #147a3f;
       --shadow: 0 18px 45px rgba(31, 43, 35, 0.12);
+      --soft-shadow: 0 8px 24px rgba(35, 43, 39, 0.06);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f7f9f8;
+      background: #f6f8f6;
       color: var(--ink);
       letter-spacing: 0;
     }
@@ -166,6 +168,7 @@ def render_admin_review_page() -> str:
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
+      box-shadow: var(--soft-shadow);
     }
     .panel-head {
       padding: 14px 16px;
@@ -202,7 +205,7 @@ def render_admin_review_page() -> str:
       border-right: 2px solid #fff;
       font-size: 15px;
     }
-    tbody tr:nth-child(even) { background: var(--row); }
+    tbody tr:nth-child(even) { background: #f6f7f6; }
     tbody tr { cursor: pointer; }
     tbody tr:hover { background: var(--green-soft); }
     tbody tr.active { outline: 2px solid var(--green); outline-offset: -2px; background: #eaf7ef; }
@@ -212,9 +215,10 @@ def render_admin_review_page() -> str:
       vertical-align: middle;
       overflow-wrap: anywhere;
     }
-    .user-cell { display: grid; gap: 3px; }
-    .user-name { font-weight: 620; }
+    .user-cell { display: grid; gap: 5px; }
+    .user-name { font-weight: 650; letter-spacing: 0; }
     .user-phone { color: var(--muted); font-size: 12px; }
+    .identity-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .pill {
       display: inline-flex;
       align-items: center;
@@ -232,6 +236,7 @@ def render_admin_review_page() -> str:
     .pill.warn { background: var(--warn-bg); color: var(--warn); border-color: #f0c27c; }
     .pill.bad { background: var(--bad-bg); color: var(--bad); border-color: #f3b6ae; }
     .pill.green { background: var(--green); color: #fff; border-color: var(--green); }
+    .pill.soft { background: #f7faf8; color: var(--muted); border-color: var(--line-strong); }
     .action-button {
       width: 34px;
       min-height: 28px;
@@ -241,7 +246,7 @@ def render_admin_review_page() -> str:
       line-height: 1;
     }
     .progress-cell { min-width: 220px; }
-    .sparkline { width: 100%; max-width: 260px; height: 52px; display: block; }
+    .sparkline { width: 100%; max-width: 260px; height: 44px; display: block; }
     .sparkline text { font-size: 9px; fill: var(--muted); }
     .drawer {
       position: fixed;
@@ -277,6 +282,7 @@ def render_admin_review_page() -> str:
       background: #fff;
       padding: 10px 11px;
       min-width: 0;
+      box-shadow: 0 1px 0 rgba(35, 43, 39, 0.02);
     }
     .kv-label { color: var(--muted); font-size: 12px; }
     .kv-value { margin-top: 4px; font-weight: 560; overflow-wrap: anywhere; font-size: 14px; line-height: 1.3; }
@@ -302,6 +308,7 @@ def render_admin_review_page() -> str:
       border-radius: 7px;
       background: #fff;
       cursor: pointer;
+      box-shadow: 0 1px 0 rgba(35, 43, 39, 0.02);
     }
     .mini-row:hover { background: var(--green-soft); border-color: #b9d9c4; }
     .conversation-date { font-size: 14px; font-weight: 620; }
@@ -321,7 +328,7 @@ def render_admin_review_page() -> str:
       min-height: 32px;
       border-radius: 5px;
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 620;
       border: 1px solid var(--line);
       color: var(--muted);
       background: #fff;
@@ -343,6 +350,7 @@ def render_admin_review_page() -> str:
       border-radius: 7px;
       background: #fff;
       overflow: hidden;
+      box-shadow: 0 1px 0 rgba(35, 43, 39, 0.02);
     }
     .timeline-turn-head {
       padding: 9px 12px;
@@ -374,15 +382,37 @@ def render_admin_review_page() -> str:
       gap: 8px;
       color: var(--muted);
       font-size: 11px;
-      font-weight: 650;
+      font-weight: 620;
       letter-spacing: .04em;
       text-transform: uppercase;
     }
+    .timeline-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 620;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .timeline-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--green);
+      display: inline-block;
+    }
+    .timeline-dot.sabi { background: var(--green-dark); }
     .timeline-text {
       font-size: 14px;
       line-height: 1.45;
       overflow-wrap: anywhere;
       white-space: pre-wrap;
+      background: #fbfcfb;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 10px;
     }
     .timeline-note { color: var(--muted); font-size: 12px; line-height: 1.35; }
     .audio-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -412,8 +442,10 @@ def render_admin_review_page() -> str:
       gap: 10px;
     }
     .curriculum-card.compact { padding: 16px; }
-    .curriculum-map { width: 100%; height: 90px; display: block; }
-    .curriculum-map text { font-size: 11px; fill: var(--muted); }
+    .curriculum-map { width: 100%; height: 138px; display: block; }
+    .curriculum-map text { font-size: 10px; fill: var(--muted); }
+    .curriculum-map .map-active-label { fill: var(--green-dark); font-weight: 650; }
+    .curriculum-map .map-branch-label { font-size: 9px; }
     .map-caption {
       display: flex;
       align-items: center;
@@ -592,12 +624,26 @@ def render_admin_review_page() -> str:
       return date.toLocaleString([], {month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"});
     }
     function displayPhone(record) {
-      const phone = record && (record.phone_number || record.phone_number_normalized || (record.calling || {}).last_phone_number);
-      return phone || "No phone linked yet";
+      const phone = record && (record.display_phone || record.phone_number_normalized || record.phone_number || (record.calling || {}).last_phone_number);
+      return phone || "No phone linked";
     }
     function phoneNote(record) {
-      const hasPhone = Boolean(record && (record.phone_number || record.phone_number_normalized || (record.calling || {}).last_phone_number));
-      return hasPhone ? "" : `<span class="status-note">Web/demo profile</span>`;
+      const label = (record && record.identity_label) || "";
+      if (!label) return "";
+      const status = (record && record.identity_status) || "";
+      const kind = status === "named" ? "good" : (status === "phone_pending_name" ? "soft" : "");
+      return pill(label, kind);
+    }
+    function learnerName(record) {
+      const direct = record && record.display_name;
+      if (direct) return direct;
+      const name = String((record && record.name) || "").trim();
+      if (name && !["unnamed learner", "unknown", "none", "null"].includes(name.toLowerCase())) return name;
+      const phone = displayPhone(record);
+      const digits = phone.replace(/\\D/g, "");
+      if (digits) return `Learner ${digits.slice(-4)}`;
+      const id = String((record && (record.id || record.browser_id)) || "pending");
+      return `Learner ${id.slice(0, 8)}`;
     }
     function preview(text, limit = 80) {
       const clean = String(text || "").replace(/\\s+/g, " ").trim();
@@ -720,10 +766,10 @@ def render_admin_review_page() -> str:
       const calling = item.calling || {};
       const position = item.curriculum_position || {};
       const numeracy = position.numeracy || {};
-      const status = scaffoldDepth(current) ? pill("Bumped down", "warn") : pill("On level", "good");
+      const status = scaffoldDepth(current) ? pill("Support branch", "green") : pill("On level", "good");
       const active = state.selectedLearner === item.id ? " active" : "";
       return `<tr class="${active}" data-learner="${escapeHtml(item.id)}">
-        <td><div class="user-cell"><span class="user-name">${escapeHtml(item.name || "Unnamed learner")}</span><span class="user-phone">${escapeHtml(displayPhone(item))}</span>${phoneNote(item)}</div></td>
+        <td><div class="user-cell"><span class="user-name">${escapeHtml(learnerName(item))}</span><span class="user-phone">${escapeHtml(displayPhone(item))}</span><div class="identity-row">${phoneNote(item)}</div></div></td>
         <td>${pill(current.course || "numeracy", "green")}</td>
         <td>Module ${escapeHtml(current.current_module ?? "?")}<div class="small">${escapeHtml(preview(numeracy.title || current.active_skill || ""))}</div></td>
         <td class="progress-cell">${progressSparkline(current)}</td>
@@ -800,15 +846,16 @@ def render_admin_review_page() -> str:
       const depth = scaffoldDepth(current);
       const streak = Number(current.correct_streak || 0);
       const x = 24 + (module - 1) * 38;
-      const y = depth ? 32 + depth * 4 : (streak >= 2 ? 16 : 24);
+      const trackY = 22;
+      const y = trackY;
       const label = depth ? `support ${depth}` : (streak >= 2 ? "moving up" : `M${module}`);
-      const color = depth ? "#9b5b00" : (streak >= 2 ? "#147a3f" : "#24933f");
-      return `<svg class="sparkline" viewBox="0 0 240 52" role="img" aria-label="curriculum progress map">
-        <line x1="24" y1="24" x2="216" y2="24" stroke="#d7ded9" stroke-width="4" stroke-linecap="round"/>
-        ${[1,2,3,4,5,6].map(n => `<circle cx="${24 + (n - 1) * 38}" cy="24" r="4" fill="${n <= module ? "#24933f" : "#cfd8d2"}"/>`).join("")}
-        <polyline points="24,24 ${x},24 ${x},${y}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="${x}" cy="${y}" r="6" fill="${color}"/>
-        <text x="${Math.max(6, x - 20)}" y="48">${escapeHtml(label)}</text>
+      const color = streak >= 2 ? "#147a3f" : "#24933f";
+      return `<svg class="sparkline" viewBox="0 0 240 44" role="img" aria-label="curriculum progress map">
+        <line x1="24" y1="${trackY}" x2="216" y2="${trackY}" stroke="#d7ded9" stroke-width="4" stroke-linecap="round"/>
+        ${[1,2,3,4,5,6].map(n => `<circle cx="${24 + (n - 1) * 38}" cy="${trackY}" r="4" fill="${n <= module ? "#24933f" : "#cfd8d2"}"/>`).join("")}
+        <line x1="24" y1="${trackY}" x2="${x}" y2="${trackY}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="${x}" cy="${y}" r="5" fill="#fff" stroke="${color}" stroke-width="2.5"/>
+        <text x="${Math.max(6, x - 20)}" y="41">${escapeHtml(label)}</text>
       </svg>`;
     }
     function curriculumStatusText(current) {
@@ -820,7 +867,7 @@ def render_admin_review_page() -> str:
     }
     function curriculumHelpText(current) {
       const depth = scaffoldDepth(current);
-      if (depth) return "The line dips because Sabi is using easier scaffolded examples before moving forward.";
+      if (depth) return "The branch shows the support path Sabi is using before returning to the main module path.";
       if (Number(current.correct_streak || 0) >= 2) return "The line rises when the child is showing mastery.";
       return "The green line shows how far the child has reached in the numeracy path.";
     }
@@ -829,17 +876,29 @@ def render_admin_review_page() -> str:
       const depth = scaffoldDepth(current);
       const streak = Number(current.correct_streak || 0);
       const x = 50 + (module - 1) * 96;
-      const y = depth ? 78 + depth * 8 : (streak >= 2 ? 38 : 58);
-      const color = depth ? "#9b5b00" : (streak >= 2 ? "#147a3f" : "#24933f");
-      return `<svg class="curriculum-map" viewBox="0 0 580 112" role="img" aria-label="learner curriculum path">
-        <line x1="50" y1="58" x2="530" y2="58" stroke="#d7ded9" stroke-width="7" stroke-linecap="round"/>
+      const trackY = 34;
+      const branchY = 82;
+      const color = streak >= 2 ? "#147a3f" : "#24933f";
+      const supportNodes = [-48, 0, 48].map((offset, index) => ({
+        x: Math.max(38, Math.min(542, x + offset)),
+        label: `Support ${index + 1}`,
+        level: index + 1,
+      }));
+      return `<svg class="curriculum-map" viewBox="0 0 580 138" role="img" aria-label="learner curriculum node map">
+        <line x1="50" y1="${trackY}" x2="530" y2="${trackY}" stroke="#d7ded9" stroke-width="5" stroke-linecap="round"/>
+        <line x1="50" y1="${trackY}" x2="${x}" y2="${trackY}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
         ${[1,2,3,4,5,6].map(n => {
           const cx = 50 + (n - 1) * 96;
           const done = n <= module;
-          return `<circle cx="${cx}" cy="58" r="10" fill="${done ? "#24933f" : "#cfd8d2"}"/><text x="${cx}" y="100" text-anchor="middle">${escapeHtml(moduleNames[n])}</text>`;
+          const active = n === module;
+          return `<circle cx="${cx}" cy="${trackY}" r="${active ? 8 : 6}" fill="${active ? "#fff" : (done ? "#24933f" : "#cfd8d2")}" stroke="${active ? color : "transparent"}" stroke-width="3"/><text class="${active ? "map-active-label" : ""}" x="${cx}" y="63" text-anchor="middle">${escapeHtml(moduleNames[n])}</text>`;
         }).join("")}
-        <polyline points="50,58 ${x},58 ${x},${y}" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="${x}" cy="${y}" r="12" fill="${color}"/>
+        ${depth ? `
+          <path d="M ${x} ${trackY + 8} C ${x} ${trackY + 28}, ${supportNodes[1].x} ${branchY - 18}, ${supportNodes[1].x} ${branchY}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="${supportNodes[0].x}" y1="${branchY}" x2="${supportNodes[2].x}" y2="${branchY}" stroke="#d7ded9" stroke-width="4" stroke-linecap="round"/>
+          <line x1="${supportNodes[0].x}" y1="${branchY}" x2="${supportNodes[Math.max(0, depth - 1)].x}" y2="${branchY}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
+          ${supportNodes.map(node => `<circle cx="${node.x}" cy="${branchY}" r="${node.level === depth ? 8 : 6}" fill="${node.level === depth ? "#fff" : (node.level < depth ? "#24933f" : "#cfd8d2")}" stroke="${node.level <= depth ? color : "transparent"}" stroke-width="3"/><text class="map-branch-label ${node.level === depth ? "map-active-label" : ""}" x="${node.x}" y="111" text-anchor="middle">${escapeHtml(node.label)}</text>`).join("")}
+        ` : ""}
       </svg>`;
     }
     async function openLearner(id) {
@@ -864,8 +923,8 @@ def render_admin_review_page() -> str:
       const numeracy = position.numeracy || {};
       const literacy = position.literacy || {};
       const calling = student.calling || {};
-      drawerTitle.textContent = student.name || "Unnamed learner";
-      drawerSubtitle.innerHTML = `${escapeHtml(displayPhone(student))} ${phoneNote(student)} ${pill(current.course || "course", "green")} ${scaffoldDepth(current) ? pill("bumped down", "warn") : pill("on level", "good")}`;
+      drawerTitle.textContent = learnerName(student);
+      drawerSubtitle.innerHTML = `${escapeHtml(displayPhone(student))} ${phoneNote(student)} ${pill(current.course || "course", "green")} ${scaffoldDepth(current) ? pill("support branch", "green") : pill("on level", "good")}`;
       drawerBody.innerHTML = `<div class="section">
         <div class="curriculum-card compact">
           <h3>Curriculum Position</h3>
@@ -937,6 +996,7 @@ def render_admin_review_page() -> str:
         </div>
       </div>
       ${recordingBlock(call.recordings || {})}
+      ${conversationTranscriptBlock(call.turns || [])}
       <div class="section">
         <h3>Turn Evidence</h3>
         ${(call.turns || []).length ? (call.turns || []).map(turnBlock).join("") : `<div class="empty">No per-turn clips on this older call. New calls show child audio, STT transcript, lesson text, Sabi audio, and TTS text here.</div>`}
@@ -955,6 +1015,56 @@ def render_admin_review_page() -> str:
     }
     function audioBox(label, endpoint, exists) {
       return `<div class="kv"><div class="kv-label">${escapeHtml(label)}</div>${exists ? `<audio controls preload="none" src="${escapeHtml(audioUrl(endpoint))}"></audio>` : `<div class="small">No audio file.</div>`}</div>`;
+    }
+    function conversationTranscriptBlock(turns) {
+      return `<div class="section">
+        <div class="section-title-row">
+          <h3>Conversation Transcript</h3>
+          <span class="status-note">Child audio + STT + Sabi reply</span>
+        </div>
+        <div class="conversation-timeline">
+          ${turns.length ? turns.map(transcriptTurn).join("") : `<div class="empty">No per-turn transcript was saved for this older call. New calls show exactly what the child said, what Sabi heard, and what Sabi replied.</div>`}
+        </div>
+      </div>`;
+    }
+    function transcriptTurn(turn) {
+      const user = turn.user || {};
+      const assistant = turn.assistant || {};
+      const flags = (turn.flags || []).map(flag => pill(flag, flag.includes("low") || flag.includes("retry") ? "warn" : "")).join(" ");
+      const childText = user.stt_transcript || "No transcript saved.";
+      const lessonText = user.normalized_transcript || "";
+      const sabiText = assistant.text || "No Sabi reply saved for this turn.";
+      const ttsText = assistant.tts_text || "";
+      const confidence = user.stt_confidence === undefined || user.stt_confidence === null || user.stt_confidence === ""
+        ? ""
+        : ` Confidence: ${user.stt_confidence}.`;
+      return `<div class="timeline-turn">
+        <div class="timeline-turn-head">
+          <span>Turn ${escapeHtml(turn.turn_index)}</span>
+          <span>${flags}</span>
+        </div>
+        <div class="timeline-pair">
+          <div class="timeline-side">
+            <div class="timeline-role">
+              <span class="timeline-label"><span class="timeline-dot"></span>Child said</span>
+              <span>${fmtSeconds(user.audio_seconds)}</span>
+            </div>
+            ${user.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(user.audio_endpoint))}"></audio>` : `<div class="small">No child clip.</div>`}
+            <div class="timeline-text">${escapeHtml(childText)}</div>
+            <div class="timeline-note">This is what Sabi transcribed from the child-audio clip above.${escapeHtml(confidence)}</div>
+            ${lessonText && lessonText !== childText ? `<div class="timeline-note">Lesson text after cleanup: ${escapeHtml(lessonText)}</div>` : ""}
+          </div>
+          <div class="timeline-side">
+            <div class="timeline-role">
+              <span class="timeline-label"><span class="timeline-dot sabi"></span>Sabi replied</span>
+              <span>${fmtSeconds(assistant.audio_seconds)}</span>
+            </div>
+            ${assistant.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(assistant.audio_endpoint))}"></audio>` : `<div class="small">No Sabi clip.</div>`}
+            <div class="timeline-text">${escapeHtml(sabiText)}</div>
+            ${ttsText && ttsText !== sabiText ? `<div class="timeline-note">Sent to TTS: ${escapeHtml(ttsText)}</div>` : `<div class="timeline-note">TTS text matches Sabi's reply.</div>`}
+          </div>
+        </div>
+      </div>`;
     }
     function turnBlock(turn) {
       const user = turn.user || {};
@@ -1018,7 +1128,7 @@ def render_admin_review_page() -> str:
       const items = state.view === "calls" ? state.calls : state.learners;
       const keys = state.view === "calls"
         ? ["call_uuid", "phone_number", "duration_seconds", "end_reason", "turn_count", "user_turns", "assistant_turns"]
-        : ["id", "name", "phone_number", "total_sessions", "total_correct", "total_wrong", "current_module"];
+        : ["id", "display_name", "name", "display_phone", "phone_number", "total_sessions", "total_correct", "total_wrong", "current_module"];
       const rows = [keys.join(",")].concat(items.map(item => keys.map(key => `"${String(item[key] ?? "").replace(/"/g, '""')}"`).join(",")));
       const blob = new Blob([rows.join("\\n")], { type: "text/csv" });
       const url = URL.createObjectURL(blob);

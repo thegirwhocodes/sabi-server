@@ -27,14 +27,29 @@ def main() -> int:
     ok &= check("accepts_simple_key_param", 'params.get("key")' in html and '"X-Admin-Pin"' in html)
     ok &= check("renders_learners_as_rows", "<table>" in html and "User</th>" in html and "Progress Map</th>" in html)
     ok &= check("renders_curriculum_graph", "progressSparkline" in html and "bigCurriculumMap" in html)
-    ok &= check("explains_missing_phone", "No phone linked yet" in html and "Web/demo profile" in html and '"no phone"' not in html)
+    ok &= check("explains_missing_phone", "No phone linked" in html and "identity_label" in html and '"no phone"' not in html)
+    ok &= check("never_renders_unnamed_learner", "Unnamed learner" not in html and "learnerName" in html and "display_name" in html)
     ok &= check("formats_session_dates", "fmtTimestamp(session.created_at)" in html and "No date saved" in html)
     ok &= check("renders_clean_conversation_rows", "conversation-action" in html and "Child turns" in html and "Length" in html)
     ok &= check("avoids_overlapping_map_label", "Current: M" not in html and "curriculumStatusText" in html)
+    ok &= check("uses_subtle_curriculum_marker", 'r="12"' not in html and 'stroke-width="3"' in html)
+    ok &= check(
+        "uses_green_branch_curriculum_map",
+        "learner curriculum node map" in html
+        and "map-branch-label" in html
+        and "#9b5b00" not in html.split("function bigCurriculumMap", 1)[-1],
+    )
     ok &= check("centers_curriculum_map_labels", 'text-anchor="middle"' in html)
     ok &= check("renders_curriculum_positions", "Current numeracy lesson" in html and "Current literacy lesson" in html)
     ok &= check("renders_learning_amount", "Learning evidence" in html and "Recent practice" in html)
     ok &= check("renders_exact_tts_text", "Sent to TTS" in html and "assistant.tts_text" in html)
+    ok &= check(
+        "renders_call_conversation_timeline",
+        "Conversation Transcript" in html
+        and "Child said" in html
+        and "Sabi replied" in html
+        and "Lesson text after cleanup" in html,
+    )
     ok &= check(
         "renders_curriculum_and_scaffolds",
         "Curriculum Map" in html
@@ -51,7 +66,7 @@ def main() -> int:
     ok &= check("renders_turn_audio", "turn.audio" not in html and "audio_endpoint" in html)
     ok &= check("propagates_key_to_audio_tags", "${authParamName}=${encodeURIComponent(accessKey)}" in html)
     ok &= check("shows_bump_down_language", "bump-down" in html and "scaffold" in html)
-    ok &= check("supports_board_workflows", "Download CSV" in html and "Recent Conversations" in html and "Turn Evidence" in html)
+    ok &= check("supports_board_workflows", "Download CSV" in html and "Recent Conversations" in html and "Conversation Transcript" in html)
     return 0 if ok else 1
 
 

@@ -29,9 +29,11 @@ def main() -> int:
     ok &= check("renders_curriculum_graph", "progressSparkline" in html and "bigCurriculumMap" in html)
     ok &= check("explains_missing_phone", "No phone linked yet" in html and "Web/demo profile" in html and '"no phone"' not in html)
     ok &= check("formats_session_dates", "fmtTimestamp(session.created_at)" in html and "No date saved" in html)
+    ok &= check("renders_clean_conversation_rows", "conversation-action" in html and "Child turns" in html and "Length" in html)
     ok &= check("avoids_overlapping_map_label", "Current: M" not in html and "curriculumStatusText" in html)
+    ok &= check("centers_curriculum_map_labels", 'text-anchor="middle"' in html)
     ok &= check("renders_curriculum_positions", "Current numeracy lesson" in html and "Current literacy lesson" in html)
-    ok &= check("renders_learning_amount", "Learning evidence" in html and "Recent calls" in html)
+    ok &= check("renders_learning_amount", "Learning evidence" in html and "Recent practice" in html)
     ok &= check("renders_exact_tts_text", "Sent to TTS" in html and "assistant.tts_text" in html)
     ok &= check(
         "renders_curriculum_and_scaffolds",

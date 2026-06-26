@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 import types
 import os
+import inspect
 from pathlib import Path
 
 try:
@@ -81,6 +82,12 @@ def main() -> int:
                 "literacy": voice_realtime.LITERACY_END_SILENCE_FRAMES,
                 "general": voice_realtime.END_SILENCE_FRAMES,
             },
+        ),
+        check(
+            "barge_in_uses_tunable_literacy_thresholds",
+            "speech_threshold" in inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge).parameters
+            and "end_silence_frames" in inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge).parameters,
+            inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge),
         ),
         check(
             "feedback_mode_known",

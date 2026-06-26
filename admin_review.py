@@ -66,9 +66,9 @@ def render_admin_review_page() -> str:
     }
     input { min-height: 38px; padding: 8px 10px; min-width: 260px; }
     h1, h2, h3 { margin: 0; }
-    h1 { font-size: 22px; font-weight: 650; }
-    h2 { font-size: 18px; font-weight: 650; }
-    h3 { font-size: 14px; font-weight: 700; }
+    h1 { font-size: 22px; font-weight: 620; }
+    h2 { font-size: 18px; font-weight: 620; }
+    h3 { font-size: 14px; font-weight: 650; }
     audio { width: 100%; margin-top: 8px; }
     .app {
       min-height: 100vh;
@@ -160,7 +160,7 @@ def render_admin_review_page() -> str:
       gap: 4px;
     }
     .metric-label { font-size: 12px; color: var(--muted); }
-    .metric-value { font-size: 24px; font-weight: 750; }
+    .metric-value { font-size: 23px; font-weight: 650; }
     .panel {
       background: #fff;
       border: 1px solid var(--line);
@@ -213,7 +213,7 @@ def render_admin_review_page() -> str:
       overflow-wrap: anywhere;
     }
     .user-cell { display: grid; gap: 3px; }
-    .user-name { font-weight: 700; }
+    .user-name { font-weight: 620; }
     .user-phone { color: var(--muted); font-size: 12px; }
     .pill {
       display: inline-flex;
@@ -279,7 +279,7 @@ def render_admin_review_page() -> str:
       min-width: 0;
     }
     .kv-label { color: var(--muted); font-size: 12px; }
-    .kv-value { margin-top: 4px; font-weight: 650; overflow-wrap: anywhere; font-size: 15px; line-height: 1.25; }
+    .kv-value { margin-top: 4px; font-weight: 560; overflow-wrap: anywhere; font-size: 14px; line-height: 1.3; }
     .section { display: grid; gap: 10px; }
     .section-title-row {
       display: flex;
@@ -294,19 +294,39 @@ def render_admin_review_page() -> str:
     }
     .mini-row {
       display: grid;
-      grid-template-columns: minmax(260px, 1fr) 86px 130px 78px;
+      grid-template-columns: minmax(260px, 1fr) 88px 132px 92px;
       gap: 10px;
       align-items: center;
-      padding: 12px 14px;
+      padding: 10px 12px;
       border: 1px solid var(--line);
       border-radius: 7px;
       background: #fff;
       cursor: pointer;
     }
     .mini-row:hover { background: var(--green-soft); border-color: #b9d9c4; }
-    .conversation-date { font-size: 15px; font-weight: 750; }
+    .conversation-date { font-size: 14px; font-weight: 620; }
     .conversation-summary { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.35; }
-    .conversation-meta { font-size: 15px; font-weight: 650; }
+    .conversation-meta { display: grid; gap: 2px; font-size: 14px; font-weight: 560; }
+    .mini-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .conversation-action {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 32px;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 700;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: #fff;
+    }
+    .conversation-action.open { background: var(--green); border-color: var(--green); color: #fff; }
     .quote {
       background: #f6f8f7;
       border-left: 3px solid var(--green);
@@ -317,6 +337,54 @@ def render_admin_review_page() -> str:
       font-size: 13px;
       line-height: 1.45;
     }
+    .conversation-timeline { display: grid; gap: 10px; }
+    .timeline-turn {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .timeline-turn-head {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #f7f8f7;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+    .timeline-pair {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .timeline-side {
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+      border-right: 1px solid var(--line);
+      min-width: 0;
+    }
+    .timeline-side:last-child { border-right: 0; }
+    .timeline-role {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .timeline-text {
+      font-size: 14px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    .timeline-note { color: var(--muted); font-size: 12px; line-height: 1.35; }
     .audio-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .turn-card {
       border: 1px solid var(--line);
@@ -344,7 +412,8 @@ def render_admin_review_page() -> str:
       gap: 10px;
     }
     .curriculum-card.compact { padding: 16px; }
-    .curriculum-map { width: 100%; height: 112px; display: block; }
+    .curriculum-map { width: 100%; height: 90px; display: block; }
+    .curriculum-map text { font-size: 11px; fill: var(--muted); }
     .map-caption {
       display: flex;
       align-items: center;
@@ -353,7 +422,7 @@ def render_admin_review_page() -> str:
       flex-wrap: wrap;
       padding-top: 2px;
     }
-    .map-caption strong { font-size: 15px; }
+    .map-caption strong { font-size: 14px; font-weight: 620; }
     .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     details.module {
       border: 1px solid var(--line);
@@ -405,6 +474,9 @@ def render_admin_review_page() -> str:
       .detail-grid, .turn-columns, .audio-grid, .module-grid { grid-template-columns: 1fr; }
       .drawer { width: 100vw; }
       .mini-row { grid-template-columns: 1fr; }
+      .timeline-pair { grid-template-columns: 1fr; }
+      .timeline-side { border-right: 0; border-bottom: 1px solid var(--line); }
+      .timeline-side:last-child { border-bottom: 0; }
       .topbar { align-items: flex-start; flex-direction: column; }
       input { min-width: 0; width: 100%; }
     }
@@ -764,7 +836,7 @@ def render_admin_review_page() -> str:
         ${[1,2,3,4,5,6].map(n => {
           const cx = 50 + (n - 1) * 96;
           const done = n <= module;
-          return `<circle cx="${cx}" cy="58" r="10" fill="${done ? "#24933f" : "#cfd8d2"}"/><text x="${cx - 30}" y="100">${escapeHtml(moduleNames[n])}</text>`;
+          return `<circle cx="${cx}" cy="58" r="10" fill="${done ? "#24933f" : "#cfd8d2"}"/><text x="${cx}" y="100" text-anchor="middle">${escapeHtml(moduleNames[n])}</text>`;
         }).join("")}
         <polyline points="50,58 ${x},58 ${x},${y}" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="${x}" cy="${y}" r="12" fill="${color}"/>
@@ -826,11 +898,12 @@ def render_admin_review_page() -> str:
       drawerBody.querySelectorAll("[data-open-call]").forEach(el => el.addEventListener("click", () => openCall(el.dataset.openCall)));
     }
     function sessionRow(session) {
+      const childTurns = Number(session.child_turns || 0);
       return `<div class="mini-row" ${session.call_sid ? `data-open-call="${escapeHtml(session.call_sid)}"` : ""}>
         <div><strong class="conversation-date">${escapeHtml(fmtTimestamp(session.created_at))}</strong><div class="conversation-summary">${escapeHtml(preview(session.summary || "", 105))}</div></div>
-        <div class="conversation-meta">${fmtSeconds(session.duration_seconds)}</div>
-        <div class="conversation-meta">${escapeHtml(session.child_turns || 0)} child turn${Number(session.child_turns || 0) === 1 ? "" : "s"}</div>
-        <div>${session.call_sid ? pill("Open", "green") : pill("Saved")}</div>
+        <div class="conversation-meta"><span class="mini-label">Length</span>${fmtSeconds(session.duration_seconds)}</div>
+        <div class="conversation-meta"><span class="mini-label">Child turns</span>${escapeHtml(childTurns)} turn${childTurns === 1 ? "" : "s"}</div>
+        <div><span class="conversation-action ${session.call_sid ? "open" : ""}">${session.call_sid ? "Open" : "Saved"}</span></div>
       </div>`;
     }
     async function openCall(id) {

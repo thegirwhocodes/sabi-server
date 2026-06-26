@@ -147,7 +147,7 @@ class SpeechToText:
 
         response = httpx.post(
             INTRON_SYNC_URL,
-            headers={"x-api-key": self._intron_key},
+            headers={"Authorization": f"Bearer {self._intron_key}"},
             files={"audio_file_blob": (filename, audio_bytes, mime)},
             data={
                 "audio_file_name": filename,

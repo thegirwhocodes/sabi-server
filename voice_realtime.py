@@ -464,7 +464,12 @@ class RealtimeCall:
             elapsed = time.monotonic() - frame_start
             await asyncio.sleep(max(0, FRAME_MS / 1000 - elapsed))
 
-    async def play_pcm_with_barge(self, pcm: bytes) -> Optional[bytes]:
+    async def play_pcm_with_barge(
+        self,
+        pcm: bytes,
+        speech_threshold: int | None = None,
+        end_silence_frames: int | None = None,
+    ) -> Optional[bytes]:
         """Play audio while watching caller audio. Returns interrupted utterance PCM."""
         # Drop audio that accumulated while LLM/TTS was thinking. Otherwise PSTN
         # noise can barge in before Sabi sends her first frame.
@@ -477,11 +482,13 @@ class RealtimeCall:
         utterance_frames: list[bytes] = []
         frame_count = max(1, len(pcm) // FRAME_BYTES)
         playback_start = time.monotonic()
+        threshold = speech_threshold or SPEECH_RMS_THRESHOLD
         logger.info(
-            "Playback start uuid=%s duration=%.2fs barge_grace_ms=%s",
+            "Playback start uuid=%s duration=%.2fs barge_grace_ms=%s speech_threshold=%s",
             self.call_uuid,
             len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH),
             BARGE_GRACE_MS,
+            threshold,
         )
 
         for offset in range(0, len(pcm), FRAME_BYTES):
@@ -516,7 +523,7 @@ class RealtimeCall:
 
                 rms = _rms(inbound)
                 peak_rms = max(peak_rms, rms)
-                if rms >= SPEECH_RMS_THRESHOLD:
+                if rms >= threshold:
                     speech_frames += 1
                     if not utterance_frames:
                         utterance_frames.extend(self.pre_roll)
@@ -530,7 +537,11 @@ class RealtimeCall:
                         self.call_uuid, peak_rms, drained_frames, offset // FRAME_BYTES,
                         frame_count, time.monotonic() - playback_start,
                     )
-                    return await self.collect_utterance(utterance_frames)
+                    return await self.collect_utterance(
+                        utterance_frames,
+                        end_silence_frames=end_silence_frames,
+                        speech_threshold=threshold,
+                    )
 
             elapsed = time.monotonic() - frame_start
             await asyncio.sleep(max(0, FRAME_MS / 1000 - elapsed))
@@ -875,7 +886,11 @@ class RealtimeCall:
             greeting_pcm = _load_fast_greeting_pcm() if use_static_greeting else None
             if greeting_pcm is None:
                 greeting_pcm = await self.synthesize_pcm(greeting, "rt_greeting")
-            interrupted = await self.play_pcm_with_barge(greeting_pcm)
+            interrupted = await self.play_pcm_with_barge(
+                greeting_pcm,
+                speech_threshold=_speech_threshold_for_state(effective_state),
+                end_silence_frames=_end_silence_frames_for_state(effective_state),
+            )
             if self.hungup:
                 self.set_end_reason("channel_closed_during_greeting")
                 return
@@ -987,7 +1002,11 @@ class RealtimeCall:
                             },
                         )
                         logger.info("Realtime turn %s retry pipeline=%.2fs", turn, time.monotonic() - turn_start)
-                        interrupted = await self.play_pcm_with_barge(retry_pcm)
+                        interrupted = await self.play_pcm_with_barge(
+                            retry_pcm,
+                            speech_threshold=speech_threshold,
+                            end_silence_frames=end_silence_frames,
+                        )
                         continue
                 literacy_answer = _looks_like_literacy_answer(text, effective_state)
                 if confidence < CONFIDENCE_THRESHOLD and not _looks_like_numeric_answer(text) and not literacy_answer:
@@ -1026,7 +1045,11 @@ class RealtimeCall:
                             },
                         )
                         logger.info("Realtime turn %s retry pipeline=%.2fs", turn, time.monotonic() - turn_start)
-                        interrupted = await self.play_pcm_with_barge(retry_pcm)
+                        interrupted = await self.play_pcm_with_barge(
+                            retry_pcm,
+                            speech_threshold=speech_threshold,
+                            end_silence_frames=end_silence_frames,
+                        )
                         continue
                 else:
                     retry_streak = 0
@@ -1162,7 +1185,11 @@ class RealtimeCall:
                     flags=turn_flags,
                 )
                 logger.info("Realtime turn %s response pipeline=%.2fs", turn, time.monotonic() - turn_start)
-                interrupted = await self.play_pcm_with_barge(response_pcm)
+                interrupted = await self.play_pcm_with_barge(
+                    response_pcm,
+                    speech_threshold=_speech_threshold_for_state(effective_state),
+                    end_silence_frames=_end_silence_frames_for_state(effective_state),
+                )
                 if should_wrap_up(messages, response, elapsed_seconds=time.monotonic() - call_started_at):
                     self.set_end_reason("sabi_wrap_up")
                     logger.info("Realtime wrapping up uuid=%s after %s user turns", self.call_uuid, user_turns)

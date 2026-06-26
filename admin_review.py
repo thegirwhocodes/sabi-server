@@ -645,6 +645,40 @@ def render_admin_review_page() -> str:
       const id = String((record && (record.id || record.browser_id)) || "pending");
       return `Learner ${id.slice(0, 8)}`;
     }
+    function digitsOnly(value) {
+      return String(value || "").replace(/\\D/g, "");
+    }
+    function learnerForCall(call) {
+      if (!call) return null;
+      const studentId = String(call.student_id || "");
+      if (studentId) {
+        const byId = state.learners.find(learner => String(learner.id || "") === studentId);
+        if (byId) return byId;
+      }
+      const callDigits = digitsOnly(call.phone_number);
+      if (!callDigits) return null;
+      return state.learners.find(learner => {
+        const learnerDigits = digitsOnly(displayPhone(learner));
+        return learnerDigits && (
+          learnerDigits === callDigits ||
+          learnerDigits.endsWith(callDigits.slice(-10)) ||
+          callDigits.endsWith(learnerDigits.slice(-10))
+        );
+      }) || null;
+    }
+    function callLearnerName(call) {
+      const learner = learnerForCall(call);
+      if (learner) return learnerName(learner);
+      const digits = digitsOnly(call && call.phone_number);
+      return digits ? `Learner ${digits.slice(-4)}` : "Unknown caller";
+    }
+    function callDisplayPhone(call) {
+      const learner = learnerForCall(call);
+      return (call && call.phone_number) || (learner && displayPhone(learner)) || "No phone linked";
+    }
+    function callerCell(call) {
+      return `<div class="user-cell"><span class="user-name">${escapeHtml(callLearnerName(call))}</span><span class="user-phone">${escapeHtml(callDisplayPhone(call))}</span></div>`;
+    }
     function preview(text, limit = 80) {
       const clean = String(text || "").replace(/\\s+/g, " ").trim();
       return clean.length > limit ? clean.slice(0, limit - 3) + "..." : clean;
@@ -787,7 +821,7 @@ def render_admin_review_page() -> str:
         <thead>
           <tr>
             <th style="width: 180px;">Date</th>
-            <th style="width: 170px;">Caller</th>
+            <th style="width: 220px;">Learner / Number</th>
             <th style="width: 130px;">Duration</th>
             <th style="width: 130px;">Turns</th>
             <th style="width: 170px;">Status</th>
@@ -807,7 +841,7 @@ def render_admin_review_page() -> str:
       const active = state.selectedCall === item.call_uuid ? " active" : "";
       return `<tr class="${active}" data-call="${escapeHtml(item.call_uuid)}">
         <td>${escapeHtml(fmtDate(item.created_at) || item.call_uuid || "")}</td>
-        <td>${escapeHtml(item.phone_number || "unknown")}</td>
+        <td>${callerCell(item)}</td>
         <td>${fmtSeconds(item.duration_seconds)}</td>
         <td>${escapeHtml(item.user_turns || 0)} child<div class="small">${escapeHtml(item.turn_count || 0)} clips</div></td>
         <td>${status}</td>
@@ -816,7 +850,9 @@ def render_admin_review_page() -> str:
       </tr>`;
     }
     function renderCurriculumView() {
-      updateRange(0);
+      document.getElementById("range").textContent = "Map view";
+      document.getElementById("prev-page").disabled = true;
+      document.getElementById("next-page").disabled = true;
       const curriculum = state.curriculum || {};
       const numeracy = (curriculum.numeracy || {}).modules || [];
       const literacy = (curriculum.literacy || {}).modules || [];
@@ -983,8 +1019,8 @@ def render_admin_review_page() -> str:
     }
     function renderCallDetail(call) {
       const progression = call.learning_progression || {};
-      drawerTitle.textContent = call.phone_number || "Call";
-      drawerSubtitle.innerHTML = `${escapeHtml(call.call_uuid || "")} ${pill(call.end_reason || "unknown", (call.quality_flags || []).length ? "warn" : "good")}`;
+      drawerTitle.textContent = callLearnerName(call);
+      drawerSubtitle.innerHTML = `${escapeHtml(callDisplayPhone(call))} · ${escapeHtml(call.call_uuid || "")} ${pill(call.end_reason || "unknown", (call.quality_flags || []).length ? "warn" : "good")}`;
       drawerBody.innerHTML = `<div class="section">
         <div class="detail-grid">
           ${kv("Duration", fmtSeconds(call.duration_seconds))}

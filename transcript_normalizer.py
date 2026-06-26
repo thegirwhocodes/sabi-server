@@ -34,6 +34,13 @@ MARKET_CONTEXT_WORDS = NUMERIC_CONTEXT_WORDS | {
     "item", "items", "food", "stall", "shop",
 }
 
+MATH_PROMPT_CONTEXT_WORDS = {
+    "naira", "kobo", "plus", "minus", "add", "added", "take", "times",
+    "equals", "equal", "left", "change", "altogether", "total", "much",
+    "cost", "costs", "pay", "paid", "buy", "bought", "share", "shared",
+    "divide", "divided", "groups", "group", "each", "answer",
+}
+
 UNCONDITIONAL_MISHEARS = {
     "wan": "one", "tu": "two", "tri": "three", "fo": "four",
     "fife": "five", "fi": "five", "sik": "six", "sevin": "seven",
@@ -56,6 +63,7 @@ MARKET_TERM_MISHEARS = (
     (re.compile(r"\b(granotes|granuts|gronuts|ground\s+notes|ground\s+nuts?|grand\s+nuts?|grandnuts?)\b", re.I), "groundnuts"),
     (re.compile(r"\b(piota|pyo\s+water|pure\s+wata|purewater|p\s+water|pew\s+water|pita\s+water)\b", re.I), "pure water"),
     (re.compile(r"\b(gary|gari)\b", re.I), "garri"),
+    (re.compile(r"\b(nero|narrow|nera|nira|nyra|naire)\b", re.I), "naira"),
 )
 
 
@@ -83,6 +91,23 @@ def _has_numeric_context(text: str) -> bool:
 
 def _has_market_context(text: str) -> bool:
     return any(token in MARKET_CONTEXT_WORDS for token in _tokens(text))
+
+
+def has_numeric_lesson_context(messages: list[dict[str, str]]) -> bool:
+    """Return true when recent tutor turns are asking for a numeric/market answer."""
+    recent_assistant = " ".join(
+        message.get("content", "")
+        for message in messages[-4:]
+        if message.get("role") == "assistant"
+    ).lower()
+    tokens = _tokens(recent_assistant)
+    if any(token in MARKET_CONTEXT_WORDS for token in tokens):
+        return True
+    if any(token in MATH_PROMPT_CONTEXT_WORDS for token in tokens):
+        return True
+    return any(_is_number_like(token) for token in tokens) and any(
+        token in MATH_PROMPT_CONTEXT_WORDS for token in tokens
+    )
 
 
 def _is_price_preposition(tokens: list[str], index: int) -> bool:
@@ -168,7 +193,7 @@ def normalize_lesson_transcript(text: str, messages: list[dict[str, str]]) -> No
         if message.get("role") == "assistant"
     ).lower()
 
-    force_numeric_context = _has_numeric_context(recent_assistant)
+    force_numeric_context = has_numeric_lesson_context(messages)
     result = normalize_number_mishears(text, force_numeric_context=force_numeric_context)
     normalized = result.text
     substitutions = list(result.substitutions)

@@ -26,7 +26,7 @@ from call_admin import merge_call_hangup_event, write_call_review_record
 from call_admin import append_call_turn_review, call_turn_audio_path
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
-from transcript_normalizer import normalize_lesson_transcript
+from transcript_normalizer import has_numeric_lesson_context, normalize_lesson_transcript
 from voice_asterisk import (
     CONFIDENCE_THRESHOLD,
     MAX_TURNS,
@@ -287,6 +287,20 @@ def _stt_mode_for_state(state: dict | None) -> str:
     return "literacy" if _is_literacy_state(state) else "general"
 
 
+def _stt_mode_for_turn(state: dict | None, messages: list[dict[str, str]]) -> str:
+    if has_numeric_lesson_context(messages):
+        return "general"
+    return _stt_mode_for_state(state)
+
+
+def _recent_assistant_stt_context(messages: list[dict[str, str]]) -> str:
+    return " ".join(
+        message.get("content", "")
+        for message in messages[-4:]
+        if message.get("role") == "assistant"
+    )
+
+
 def _speech_threshold_for_state(state: dict | None) -> int:
     return LITERACY_SPEECH_RMS_THRESHOLD if _is_literacy_state(state) else SPEECH_RMS_THRESHOLD
 
@@ -305,6 +319,7 @@ def _looks_like_literacy_answer(text: str, state: dict | None) -> bool:
     common_short = {
         "yes", "no", "same", "different", "rhyme", "rhymes", "sound", "sounds",
         "cat", "mat", "hat", "bat", "ball", "mango", "moon", "mama", "market",
+        "rat", "sat", "fat", "pat", "dog", "log", "fog", "hog", "big", "dig", "pig",
         "mmm", "mm", "sss", "ss", "ah", "at", "am", "ma", "pa", "ta",
     }
     tokens = normalized.split()
@@ -668,6 +683,7 @@ class RealtimeCall:
         turn: int,
         audio_path: Path | None = None,
         mode: str = "general",
+        context: str = "",
     ) -> dict:
         path = audio_path or (SHARED_AUDIO_DIR / f"rt_rec_{self.call_uuid}_{turn}.wav")
         keep_audio = audio_path is not None
@@ -676,7 +692,7 @@ class RealtimeCall:
         try:
             loop = asyncio.get_event_loop()
             start = time.monotonic()
-            result = await loop.run_in_executor(None, self.stt.transcribe, str(path), mode)
+            result = await loop.run_in_executor(None, self.stt.transcribe, str(path), mode, context)
             stt_latency = time.monotonic() - start
             logger.info(
                 "Realtime turn %s: '%s' conf=%.2f stt=%.2fs",
@@ -907,7 +923,9 @@ class RealtimeCall:
                     )
                     break
 
-                stt_mode = _stt_mode_for_state(effective_state)
+                numeric_stt_context = has_numeric_lesson_context(messages)
+                stt_mode = _stt_mode_for_turn(effective_state, messages)
+                stt_context = _recent_assistant_stt_context(messages)
                 speech_threshold = _speech_threshold_for_state(effective_state)
                 end_silence_frames = _end_silence_frames_for_state(effective_state)
                 utterance_from_barge = interrupted is not None
@@ -925,13 +943,21 @@ class RealtimeCall:
 
                 turn_start = time.monotonic()
                 user_audio_path = call_turn_audio_path(self.call_uuid, turn, "user", SHARED_AUDIO_DIR)
-                transcript = await self.transcribe_pcm(utterance, turn, user_audio_path, mode=stt_mode)
+                transcript = await self.transcribe_pcm(
+                    utterance,
+                    turn,
+                    user_audio_path,
+                    mode=stt_mode,
+                    context=stt_context,
+                )
                 text = transcript.get("text", "").strip()
                 raw_stt_text = text
                 confidence = float(transcript.get("confidence", 0))
                 turn_flags: list[str] = []
                 if stt_mode == "literacy":
                     turn_flags.append("literacy_stt")
+                elif numeric_stt_context:
+                    turn_flags.append("numeric_stt")
                 if utterance_from_barge:
                     turn_flags.append("barge_in")
                 learning_state_before_turn = dict(effective_state or {})

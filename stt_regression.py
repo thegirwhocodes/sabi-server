@@ -113,6 +113,20 @@ BUILT_IN_CASES: list[dict[str, Any]] = [
         "expected_numbers": [15, 30],
     },
     {
+        "id": "twelve_nero_is_naira_in_money_context",
+        "transcript": "Twelve nero.",
+        "assistant_context": "A mango costs three naira. You buy four mangoes. How much naira altogether?",
+        "expected_text": "Twelve naira.",
+        "expected_numbers": [12],
+    },
+    {
+        "id": "for_narrow_is_four_naira_in_money_context",
+        "transcript": "For narrow...",
+        "assistant_context": "One exercise book is twenty naira. Another exercise book is also twenty naira. How many naira altogether?",
+        "expected_text": "four naira",
+        "expected_numbers": [4],
+    },
+    {
         "id": "name_peter_not_pure_water",
         "transcript": "Peter",
         "assistant_context": "What is your name?",
@@ -179,7 +193,7 @@ def _transcribe_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
 
         started_at = time.monotonic()
-        stt_result = stt.transcribe(str(audio_path))
+        stt_result = stt.transcribe(str(audio_path), context=str(case.get("assistant_context", "")))
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         case_with_text = dict(case)
         case_with_text["transcript"] = stt_result.get("text", "")

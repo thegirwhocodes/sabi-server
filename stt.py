@@ -40,13 +40,54 @@ NIGERIAN_ENGLISH_PROMPT = (
 )
 
 LITERACY_ENGLISH_PROMPT = (
-    "Sabi is teaching foundational literacy to children in Lagos, Nigeria over a phone call. "
-    "The child may answer with very short sounds, single letters, syllables, rhymes, or simple words. "
-    "Preserve short phonics answers exactly when possible. Important examples: m, mmm, s, sss, a, ah, t, p, n, "
-    "cat, mat, hat, mango, moon, market, mama, ball, bat, syllable, rhyme, beginning sound, ending sound. "
-    "The tutor may ask: what sound starts mango, do cat and mat rhyme, clap the syllables, blend c a t, say the sound. "
-    "Do not force short sound answers into math words or market prices."
+    "Sabi teaches foundational literacy to children in Lagos over phone calls. "
+    "Transcribe short sounds, letters, syllables, rhymes, and simple words literally. "
+    "Examples: m, mmm, s, sss, a, ah, t, p, n, "
+    "cat, mat, hat, rat, sat, fat, pat, bat, dog, log, fog, hog, big, dig, pig, mango, moon, market, mama, ball, "
+    "syllable, rhyme, beginning sound, ending sound. "
+    "Do not change rhyme words into correct, right, wrong, or thank you unless clearly spoken. "
+    "Do not force literacy answers into math words or prices."
 )
+
+
+WORD_ANSWER_CUES = (
+    "another word",
+    "say a word",
+    "word that rhymes",
+    "what else rhymes",
+    "think of a word",
+    "ends with",
+)
+SUSPECT_LITERACY_FEEDBACK = {"correct", "right", "wrong", "thank you", "thanks"}
+LITERACY_WORDS = {
+    "cat", "mat", "hat", "rat", "sat", "fat", "pat", "bat",
+    "dog", "log", "fog", "hog", "big", "dig", "pig",
+}
+
+
+def _clean_prompt_context(context: str, limit: int = 220) -> str:
+    cleaned = " ".join(str(context or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[-limit:]
+
+
+def _plain_text(text: str) -> str:
+    return " ".join(str(text or "").lower().replace("-", " ").strip(" .,!?:;").split())
+
+
+def _expects_literacy_word_answer(context: str) -> bool:
+    normalized = _plain_text(context)
+    return any(cue in normalized for cue in WORD_ANSWER_CUES)
+
+
+def _is_suspect_literacy_feedback(text: str, context: str) -> bool:
+    return _expects_literacy_word_answer(context) and _plain_text(text) in SUSPECT_LITERACY_FEEDBACK
+
+
+def _is_short_literacy_word(text: str) -> bool:
+    normalized = _plain_text(text)
+    return normalized in LITERACY_WORDS or (normalized.isalpha() and 1 <= len(normalized) <= 5)
 
 
 class SpeechToText:
@@ -103,7 +144,7 @@ class SpeechToText:
             logger.exception("STT: Failed to load local Whisper fallback")
             raise
 
-    def transcribe(self, audio_path: str, mode: str = "general") -> dict:
+    def transcribe(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """
         Transcribe audio file to text.
 
@@ -123,18 +164,25 @@ class SpeechToText:
             else:
                 logger.warning("Intron STT requested but INTRON_API_KEY is not configured; using Groq/Whisper")
         if provider == "local":
-            return self._transcribe_local(audio_path, mode=mode)
+            return self._transcribe_local(audio_path, mode=mode, context=context)
         if self._use_groq:
-            return self._transcribe_groq(audio_path, mode=mode)
-        return self._transcribe_local(audio_path, mode=mode)
+            return self._transcribe_groq(audio_path, mode=mode, context=context)
+        return self._transcribe_local(audio_path, mode=mode, context=context)
 
     def _provider_for_mode(self, mode: str) -> str:
         if str(mode or "").lower() == "literacy":
             return self._literacy_provider
         return self._provider
 
-    def _prompt_for_mode(self, mode: str) -> str:
-        return LITERACY_ENGLISH_PROMPT if str(mode or "").lower() == "literacy" else NIGERIAN_ENGLISH_PROMPT
+    def _prompt_for_mode(self, mode: str, context: str = "") -> str:
+        prompt = LITERACY_ENGLISH_PROMPT if str(mode or "").lower() == "literacy" else NIGERIAN_ENGLISH_PROMPT
+        recent_context = _clean_prompt_context(context)
+        if recent_context:
+            prompt = (
+                f"{prompt} Recent tutor prompt for this exact child answer: {recent_context}. "
+                "Use that context only to resolve unclear short phone audio; keep the child's words literal."
+            )
+        return prompt
 
     def _transcribe_intron(self, audio_path: str, mode: str = "general") -> dict:
         """Transcribe via Intron Sahara ASR. Keep optional until real-call A/B testing."""
@@ -172,7 +220,7 @@ class SpeechToText:
             "provider": "intron",
         }
 
-    def _transcribe_groq(self, audio_path: str, mode: str = "general") -> dict:
+    def _transcribe_groq(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """Transcribe via Groq Whisper API (~200ms, free tier: 28,800 sec/day)."""
         try:
             with open(audio_path, "rb") as f:
@@ -190,7 +238,7 @@ class SpeechToText:
                 data={
                     "model": "whisper-large-v3",
                     "language": "en",
-                    "prompt": self._prompt_for_mode(mode),
+                    "prompt": self._prompt_for_mode(mode, context=context),
                     "response_format": "verbose_json",
                 },
                 timeout=15.0,
@@ -203,29 +251,50 @@ class SpeechToText:
             # if text is non-empty (Groq has high accuracy)
             confidence = 0.82 if text else 0.0
 
-            return {
+            result = {
                 "text": text,
                 "confidence": confidence,
                 "language": data.get("language", "en"),
                 "duration_seconds": round(data.get("duration", 0.0), 1),
                 "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
             }
+            if str(mode or "").lower() == "literacy" and _is_suspect_literacy_feedback(text, context):
+                try:
+                    alt = self._transcribe_local(audio_path, mode=mode, context=context)
+                    alt_text = alt.get("text", "")
+                    if alt_text and _plain_text(alt_text) != _plain_text(text) and _is_short_literacy_word(alt_text):
+                        alt["provider"] = "local_literacy_salvage"
+                        alt["salvaged_from"] = text
+                        return alt
+                except Exception as salvage_error:
+                    logger.warning("Literacy salvage STT failed (%s); using Groq result", salvage_error)
+            return result
 
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "Groq STT failed (%s %s: %s), falling back to local Whisper",
+                e.response.status_code,
+                e.request.url,
+                e.response.text[:500],
+            )
+            if not hasattr(self, "_model"):
+                self._load_local_model("large-v3", "cuda")
+            return self._transcribe_local(audio_path, mode=mode, context=context)
         except Exception as e:
             logger.warning(f"Groq STT failed ({e}), falling back to local Whisper")
             # Lazy-load local model if not already loaded
             if not hasattr(self, "_model"):
                 self._load_local_model("large-v3", "cuda")
-            return self._transcribe_local(audio_path, mode=mode)
+            return self._transcribe_local(audio_path, mode=mode, context=context)
 
-    def _transcribe_local(self, audio_path: str, mode: str = "general") -> dict:
+    def _transcribe_local(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """Transcribe using self-hosted faster-whisper (GPU)."""
         self._load_local_model()
         segments, info = self._model.transcribe(
             audio_path,
             language="en",
             beam_size=5,
-            initial_prompt=self._prompt_for_mode(mode),
+            initial_prompt=self._prompt_for_mode(mode, context=context),
             vad_filter=True,
             vad_parameters={
                 "min_silence_duration_ms": 650 if str(mode or "").lower() == "literacy" else 500,

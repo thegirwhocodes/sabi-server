@@ -31,6 +31,8 @@ def main() -> int:
     ok &= check("never_renders_unnamed_learner", "Unnamed learner" not in html and "learnerName" in html and "display_name" in html)
     ok &= check("formats_session_dates", "fmtTimestamp(session.created_at)" in html and "No date saved" in html)
     ok &= check("renders_clean_conversation_rows", "conversation-action" in html and "Child turns" in html and "Length" in html)
+    ok &= check("calls_show_learner_and_number", "Learner / Number" in html and "callLearnerName" in html and "callerCell" in html)
+    ok &= check("curriculum_range_is_map_label", "Map view" in html and "renderCurriculumView" in html)
     ok &= check("avoids_overlapping_map_label", "Current: M" not in html and "curriculumStatusText" in html)
     ok &= check("uses_subtle_curriculum_marker", 'r="12"' not in html and 'stroke-width="3"' in html)
     ok &= check(

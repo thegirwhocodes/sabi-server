@@ -55,8 +55,10 @@ FRAME_MS = 20
 FRAME_BYTES = int(SAMPLE_RATE * SAMPLE_WIDTH * FRAME_MS / 1000)
 
 SPEECH_RMS_THRESHOLD = int(os.getenv("SABI_BARGE_RMS", "650"))
+LITERACY_SPEECH_RMS_THRESHOLD = int(os.getenv("SABI_LITERACY_SPEECH_RMS", "420"))
 START_SPEECH_FRAMES = int(os.getenv("SABI_BARGE_START_FRAMES", "2"))
 END_SILENCE_FRAMES = int(os.getenv("SABI_UTTERANCE_END_SILENCE_FRAMES", "8"))
+LITERACY_END_SILENCE_FRAMES = int(os.getenv("SABI_LITERACY_UTTERANCE_END_SILENCE_FRAMES", "18"))
 MAX_UTTERANCE_FRAMES = int(os.getenv("SABI_MAX_UTTERANCE_FRAMES", "500"))
 PRE_ROLL_FRAMES = int(os.getenv("SABI_UTTERANCE_PREROLL_FRAMES", "10"))
 COLLECT_TIMEOUT_MS = int(os.getenv("SABI_COLLECT_TIMEOUT_MS", "80"))
@@ -256,6 +258,63 @@ def _looks_like_stt_hallucination(text: str) -> bool:
 def _looks_like_numeric_answer(text: str) -> bool:
     """Allow math answers through even when Whisper confidence is nervous."""
     return extract_number(text) is not None
+
+
+def _is_literacy_state(state: dict | None) -> bool:
+    state = state or {}
+    literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
+    skill_text = " ".join(
+        str(value or "")
+        for value in (
+            state.get("course"),
+            state.get("active_skill"),
+            literacy.get("active_skill"),
+            literacy.get("next_step"),
+            state.get("next_step"),
+        )
+    ).lower()
+    return (
+        state.get("course") == "literacy"
+        or "literacy" in skill_text
+        or "phonemic" in skill_text
+        or "sound" in skill_text
+        or "rhyme" in skill_text
+        or "syllable" in skill_text
+    )
+
+
+def _stt_mode_for_state(state: dict | None) -> str:
+    return "literacy" if _is_literacy_state(state) else "general"
+
+
+def _speech_threshold_for_state(state: dict | None) -> int:
+    return LITERACY_SPEECH_RMS_THRESHOLD if _is_literacy_state(state) else SPEECH_RMS_THRESHOLD
+
+
+def _end_silence_frames_for_state(state: dict | None) -> int:
+    return LITERACY_END_SILENCE_FRAMES if _is_literacy_state(state) else END_SILENCE_FRAMES
+
+
+def _looks_like_literacy_answer(text: str, state: dict | None) -> bool:
+    if not _is_literacy_state(state):
+        return False
+    normalized = " ".join((text or "").lower().replace("-", " ").split()).strip(" .,!?:;")
+    if not normalized:
+        return False
+    letters = {chr(code) for code in range(ord("a"), ord("z") + 1)}
+    common_short = {
+        "yes", "no", "same", "different", "rhyme", "rhymes", "sound", "sounds",
+        "cat", "mat", "hat", "bat", "ball", "mango", "moon", "mama", "market",
+        "mmm", "mm", "sss", "ss", "ah", "at", "am", "ma", "pa", "ta",
+    }
+    tokens = normalized.split()
+    if normalized in letters or normalized in common_short:
+        return True
+    if len(tokens) <= 3 and any(token in letters or token in common_short for token in tokens):
+        return True
+    if len(normalized) <= 5 and normalized.replace(" ", "") in common_short:
+        return True
+    return False
 
 
 def _normalize_transcript_for_lesson(text: str, messages: list[dict[str, str]]) -> str:
@@ -483,16 +542,18 @@ class RealtimeCall:
         self,
         max_frames: int | None = None,
         end_silence_frames: int | None = None,
+        speech_threshold: int | None = None,
     ) -> Optional[bytes]:
         """Wait until caller starts talking, then return one complete utterance."""
         speech_frames = 0
+        threshold = speech_threshold or SPEECH_RMS_THRESHOLD
         while not self.hungup:
             inbound = await self.audio_queue.get()
             if inbound is None:
                 self.hungup = True
                 self.set_end_reason("channel_closed_waiting_for_speech")
                 return None
-            if _rms(inbound) >= SPEECH_RMS_THRESHOLD:
+            if _rms(inbound) >= threshold:
                 speech_frames += 1
                 if speech_frames >= START_SPEECH_FRAMES:
                     frames = list(self.pre_roll)
@@ -501,6 +562,7 @@ class RealtimeCall:
                         frames,
                         max_frames=max_frames,
                         end_silence_frames=end_silence_frames,
+                        speech_threshold=threshold,
                     )
             else:
                 speech_frames = 0
@@ -511,12 +573,14 @@ class RealtimeCall:
         timeout_seconds: int,
         max_frames: int | None = None,
         end_silence_frames: int | None = None,
+        speech_threshold: int | None = None,
     ) -> Optional[bytes]:
         if timeout_seconds <= 0:
             return None
 
         deadline = time.monotonic() + timeout_seconds
         speech_frames = 0
+        threshold = speech_threshold or SPEECH_RMS_THRESHOLD
         while not self.hungup:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -529,7 +593,7 @@ class RealtimeCall:
                 self.hungup = True
                 self.set_end_reason("channel_closed_waiting_for_optional_speech")
                 return None
-            if _rms(inbound) >= SPEECH_RMS_THRESHOLD:
+            if _rms(inbound) >= threshold:
                 speech_frames += 1
                 if speech_frames >= START_SPEECH_FRAMES:
                     frames = list(self.pre_roll)
@@ -538,6 +602,7 @@ class RealtimeCall:
                         frames,
                         max_frames=max_frames,
                         end_silence_frames=end_silence_frames,
+                        speech_threshold=threshold,
                     )
             else:
                 speech_frames = 0
@@ -548,11 +613,13 @@ class RealtimeCall:
         initial_frames: list[bytes],
         max_frames: int | None = None,
         end_silence_frames: int | None = None,
+        speech_threshold: int | None = None,
     ) -> bytes:
         frames = list(initial_frames)
         silent_frames = 0
         max_frame_count = max_frames or MAX_UTTERANCE_FRAMES
         silence_limit = end_silence_frames or END_SILENCE_FRAMES
+        threshold = speech_threshold or SPEECH_RMS_THRESHOLD
         while len(frames) < max_frame_count and not self.hungup:
             try:
                 inbound = await asyncio.wait_for(self.audio_queue.get(), timeout=COLLECT_TIMEOUT_MS / 1000)
@@ -568,7 +635,7 @@ class RealtimeCall:
                 break
 
             frames.append(inbound)
-            if _rms(inbound) >= SPEECH_RMS_THRESHOLD:
+            if _rms(inbound) >= threshold:
                 silent_frames = 0
             else:
                 silent_frames += 1
@@ -584,7 +651,13 @@ class RealtimeCall:
         )
         return pcm
 
-    async def transcribe_pcm(self, pcm: bytes, turn: int, audio_path: Path | None = None) -> dict:
+    async def transcribe_pcm(
+        self,
+        pcm: bytes,
+        turn: int,
+        audio_path: Path | None = None,
+        mode: str = "general",
+    ) -> dict:
         path = audio_path or (SHARED_AUDIO_DIR / f"rt_rec_{self.call_uuid}_{turn}.wav")
         keep_audio = audio_path is not None
         _write_wav(path, pcm)
@@ -592,7 +665,7 @@ class RealtimeCall:
         try:
             loop = asyncio.get_event_loop()
             start = time.monotonic()
-            result = await loop.run_in_executor(None, self.stt.transcribe, str(path))
+            result = await loop.run_in_executor(None, self.stt.transcribe, str(path), mode)
             stt_latency = time.monotonic() - start
             logger.info(
                 "Realtime turn %s: '%s' conf=%.2f stt=%.2fs",
@@ -601,6 +674,7 @@ class RealtimeCall:
             result["audio_path"] = str(path)
             result["audio_seconds"] = duration_seconds
             result["stt_latency_seconds"] = stt_latency
+            result["mode"] = mode
             return result
         finally:
             if not keep_audio:
@@ -818,8 +892,14 @@ class RealtimeCall:
                     )
                     break
 
+                stt_mode = _stt_mode_for_state(effective_state)
+                speech_threshold = _speech_threshold_for_state(effective_state)
+                end_silence_frames = _end_silence_frames_for_state(effective_state)
                 utterance_from_barge = interrupted is not None
-                utterance = interrupted if interrupted else await self.wait_for_utterance()
+                utterance = interrupted if interrupted else await self.wait_for_utterance(
+                    end_silence_frames=end_silence_frames,
+                    speech_threshold=speech_threshold,
+                )
                 interrupted = None
                 if not utterance:
                     if self.hungup:
@@ -830,11 +910,13 @@ class RealtimeCall:
 
                 turn_start = time.monotonic()
                 user_audio_path = call_turn_audio_path(self.call_uuid, turn, "user", SHARED_AUDIO_DIR)
-                transcript = await self.transcribe_pcm(utterance, turn, user_audio_path)
+                transcript = await self.transcribe_pcm(utterance, turn, user_audio_path, mode=stt_mode)
                 text = transcript.get("text", "").strip()
                 raw_stt_text = text
                 confidence = float(transcript.get("confidence", 0))
                 turn_flags: list[str] = []
+                if stt_mode == "literacy":
+                    turn_flags.append("literacy_stt")
                 if utterance_from_barge:
                     turn_flags.append("barge_in")
                 learning_state_before_turn = dict(effective_state or {})
@@ -907,7 +989,8 @@ class RealtimeCall:
                         logger.info("Realtime turn %s retry pipeline=%.2fs", turn, time.monotonic() - turn_start)
                         interrupted = await self.play_pcm_with_barge(retry_pcm)
                         continue
-                if confidence < CONFIDENCE_THRESHOLD and not _looks_like_numeric_answer(text):
+                literacy_answer = _looks_like_literacy_answer(text, effective_state)
+                if confidence < CONFIDENCE_THRESHOLD and not _looks_like_numeric_answer(text) and not literacy_answer:
                     if confidence >= MIN_USABLE_CONFIDENCE and len(normalized_text) >= 3:
                         logger.info(
                             "Realtime turn %s: accepting usable low-confidence transcript %r conf=%.2f",
@@ -947,6 +1030,14 @@ class RealtimeCall:
                         continue
                 else:
                     retry_streak = 0
+                    if literacy_answer and confidence < CONFIDENCE_THRESHOLD:
+                        logger.info(
+                            "Realtime turn %s: accepting short literacy answer %r conf=%.2f",
+                            turn,
+                            text,
+                            confidence,
+                        )
+                        turn_flags.append("literacy_short_answer")
                 if confidence < CONFIDENCE_THRESHOLD:
                     logger.info(
                         "Realtime turn %s: accepting low-confidence answer %r conf=%.2f",

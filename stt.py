@@ -30,6 +30,15 @@ NIGERIAN_ENGLISH_PROMPT = (
     "Math: plus, minus, times, divided by, equals, remainder, total, altogether."
 )
 
+LITERACY_ENGLISH_PROMPT = (
+    "Sabi is teaching foundational literacy to children in Lagos, Nigeria over a phone call. "
+    "The child may answer with very short sounds, single letters, syllables, rhymes, or simple words. "
+    "Preserve short phonics answers exactly when possible. Important examples: m, mmm, s, sss, a, ah, t, p, n, "
+    "cat, mat, hat, mango, moon, market, mama, ball, bat, syllable, rhyme, beginning sound, ending sound. "
+    "The tutor may ask: what sound starts mango, do cat and mat rhyme, clap the syllables, blend c a t, say the sound. "
+    "Do not force short sound answers into math words or market prices."
+)
+
 
 class SpeechToText:
     def __init__(self, model_size: str = "large-v3", device: str = "cuda"):
@@ -61,7 +70,7 @@ class SpeechToText:
             )
             logger.info(f"STT: Local Whisper {model_size} loaded.")
 
-    def transcribe(self, audio_path: str) -> dict:
+    def transcribe(self, audio_path: str, mode: str = "general") -> dict:
         """
         Transcribe audio file to text.
 
@@ -72,10 +81,13 @@ class SpeechToText:
             dict with 'text' and 'confidence' keys
         """
         if self._use_groq:
-            return self._transcribe_groq(audio_path)
-        return self._transcribe_local(audio_path)
+            return self._transcribe_groq(audio_path, mode=mode)
+        return self._transcribe_local(audio_path, mode=mode)
 
-    def _transcribe_groq(self, audio_path: str) -> dict:
+    def _prompt_for_mode(self, mode: str) -> str:
+        return LITERACY_ENGLISH_PROMPT if str(mode or "").lower() == "literacy" else NIGERIAN_ENGLISH_PROMPT
+
+    def _transcribe_groq(self, audio_path: str, mode: str = "general") -> dict:
         """Transcribe via Groq Whisper API (~200ms, free tier: 28,800 sec/day)."""
         try:
             with open(audio_path, "rb") as f:
@@ -93,7 +105,7 @@ class SpeechToText:
                 data={
                     "model": "whisper-large-v3",
                     "language": "en",
-                    "prompt": NIGERIAN_ENGLISH_PROMPT,
+                    "prompt": self._prompt_for_mode(mode),
                     "response_format": "verbose_json",
                 },
                 timeout=15.0,
@@ -111,6 +123,7 @@ class SpeechToText:
                 "confidence": confidence,
                 "language": data.get("language", "en"),
                 "duration_seconds": round(data.get("duration", 0.0), 1),
+                "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
             }
 
         except Exception as e:
@@ -120,19 +133,19 @@ class SpeechToText:
                 from faster_whisper import WhisperModel
                 logger.info("Loading local Whisper large-v3 as fallback...")
                 self._model = WhisperModel("large-v3", device="cuda", compute_type="float16")
-            return self._transcribe_local(audio_path)
+            return self._transcribe_local(audio_path, mode=mode)
 
-    def _transcribe_local(self, audio_path: str) -> dict:
+    def _transcribe_local(self, audio_path: str, mode: str = "general") -> dict:
         """Transcribe using self-hosted faster-whisper (GPU)."""
         segments, info = self._model.transcribe(
             audio_path,
             language="en",
             beam_size=5,
-            initial_prompt=NIGERIAN_ENGLISH_PROMPT,
+            initial_prompt=self._prompt_for_mode(mode),
             vad_filter=True,
             vad_parameters={
-                "min_silence_duration_ms": 500,
-                "speech_pad_ms": 200,
+                "min_silence_duration_ms": 650 if str(mode or "").lower() == "literacy" else 500,
+                "speech_pad_ms": 320 if str(mode or "").lower() == "literacy" else 200,
             },
         )
 
@@ -153,4 +166,5 @@ class SpeechToText:
             "confidence": round(avg_confidence, 3),
             "language": info.language,
             "duration_seconds": round(info.duration, 1),
+            "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
         }

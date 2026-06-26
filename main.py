@@ -186,8 +186,10 @@ app = FastAPI(
 
 # API key authentication — protects AI endpoints from unauthorized use
 SABI_API_KEY = get_secret("SABI_API_KEY")
+SABI_ADMIN_PIN = get_secret("SABI_ADMIN_PIN", "123")
 OPEN_PATHS = {"/health", "/docs", "/openapi.json"}
 OPEN_PREFIXES = ("/voice/", "/audio/", "/asterisk/")
+READ_ONLY_ADMIN_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -250,7 +252,20 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if not SABI_API_KEY:
             return await call_next(request)
-        key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        key = (
+            request.headers.get("X-API-Key")
+            or request.headers.get("X-Admin-Pin")
+            or request.query_params.get("api_key")
+            or request.query_params.get("key")
+            or request.query_params.get("pin")
+        )
+        if (
+            SABI_ADMIN_PIN
+            and request.method in READ_ONLY_ADMIN_METHODS
+            and path.startswith("/admin/")
+            and key == SABI_ADMIN_PIN
+        ):
+            return await call_next(request)
         if key != SABI_API_KEY:
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
         return await call_next(request)

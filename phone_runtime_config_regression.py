@@ -67,6 +67,22 @@ def main() -> int:
             voice_realtime.FEEDBACK_END_SILENCE_MS,
         ),
         check(
+            "literacy_hears_softer_speech",
+            voice_realtime.LITERACY_SPEECH_RMS_THRESHOLD < voice_realtime.SPEECH_RMS_THRESHOLD,
+            {
+                "literacy": voice_realtime.LITERACY_SPEECH_RMS_THRESHOLD,
+                "general": voice_realtime.SPEECH_RMS_THRESHOLD,
+            },
+        ),
+        check(
+            "literacy_waits_longer_for_short_sounds",
+            voice_realtime.LITERACY_END_SILENCE_FRAMES > voice_realtime.END_SILENCE_FRAMES,
+            {
+                "literacy": voice_realtime.LITERACY_END_SILENCE_FRAMES,
+                "general": voice_realtime.END_SILENCE_FRAMES,
+            },
+        ),
+        check(
             "feedback_mode_known",
             voice_realtime.FEEDBACK_MODE in {
                 "off",

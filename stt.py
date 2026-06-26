@@ -1,6 +1,7 @@
 """
 Speech-to-Text for Sabi.
 Primary: Groq Whisper API (~200ms, 28,800 sec/day free) if GROQ_API_KEY is set.
+Optional: Intron Sahara ASR for Nigerian/African accented English testing.
 Fallback: Self-hosted faster-whisper (Whisper large-v3 on GPU, ~0.8-1.5s).
 
 Optimizations for Nigerian English:
@@ -16,6 +17,14 @@ from pathlib import Path
 import httpx
 
 logger = logging.getLogger("sabi.stt")
+
+INTRON_SYNC_URL = os.getenv(
+    "INTRON_STT_SYNC_URL",
+    "https://infer.voice.intron.io/file/v1/upload/sync",
+)
+INTRON_TIMEOUT_SECONDS = float(os.getenv("INTRON_STT_TIMEOUT_SECONDS", "8"))
+INTRON_LANGUAGE = os.getenv("INTRON_STT_LANGUAGE", "en")
+INTRON_CATEGORY = os.getenv("INTRON_STT_CATEGORY", "file_category_general")
 
 # Whisper prompt bias — providing domain-specific vocabulary in the initial_prompt
 # biases the decoder toward recognizing these words correctly.
@@ -55,12 +64,33 @@ class SpeechToText:
         # Re-load GROQ_API_KEY now that secret_loader is definitely available
         from secret_loader import get_secret
         self._groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
+        self._intron_key = get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY", "")
+        self._provider = os.getenv("SABI_STT_PROVIDER", "auto").strip().lower() or "auto"
+        self._literacy_provider = os.getenv("SABI_LITERACY_STT_PROVIDER", self._provider).strip().lower() or self._provider
+        self._model_size = model_size
+        self._device = device
 
-        if self._groq_key:
+        if self._groq_key and self._provider != "local":
             self._use_groq = True
             logger.info("STT: Groq Whisper API (fast, ~200ms)")
         else:
             self._use_groq = False
+        if self._provider in {"intron", "intron_first"} or self._literacy_provider in {"intron", "intron_first"}:
+            logger.info(
+                "STT: Intron Sahara ASR configured for provider=%s literacy_provider=%s available=%s",
+                self._provider,
+                self._literacy_provider,
+                bool(self._intron_key),
+            )
+        if not self._use_groq and not (self._intron_key and self._provider in {"intron", "intron_first"}):
+            self._load_local_model(model_size, device)
+
+    def _load_local_model(self, model_size: str | None = None, device: str | None = None) -> None:
+        if hasattr(self, "_model"):
+            return
+        model_size = model_size or self._model_size
+        device = device or self._device
+        try:
             logger.info(f"STT: Loading local Whisper {model_size} on {device}...")
             from faster_whisper import WhisperModel
             self._model = WhisperModel(
@@ -69,6 +99,9 @@ class SpeechToText:
                 compute_type="float16" if device == "cuda" else "int8",
             )
             logger.info(f"STT: Local Whisper {model_size} loaded.")
+        except Exception:
+            logger.exception("STT: Failed to load local Whisper fallback")
+            raise
 
     def transcribe(self, audio_path: str, mode: str = "general") -> dict:
         """
@@ -80,12 +113,64 @@ class SpeechToText:
         Returns:
             dict with 'text' and 'confidence' keys
         """
+        provider = self._provider_for_mode(mode)
+        if provider in {"intron", "intron_first"}:
+            if self._intron_key:
+                try:
+                    return self._transcribe_intron(audio_path, mode=mode)
+                except Exception as e:
+                    logger.warning("Intron STT failed (%s), falling back to Groq/Whisper", e)
+            else:
+                logger.warning("Intron STT requested but INTRON_API_KEY is not configured; using Groq/Whisper")
+        if provider == "local":
+            return self._transcribe_local(audio_path, mode=mode)
         if self._use_groq:
             return self._transcribe_groq(audio_path, mode=mode)
         return self._transcribe_local(audio_path, mode=mode)
 
+    def _provider_for_mode(self, mode: str) -> str:
+        if str(mode or "").lower() == "literacy":
+            return self._literacy_provider
+        return self._provider
+
     def _prompt_for_mode(self, mode: str) -> str:
         return LITERACY_ENGLISH_PROMPT if str(mode or "").lower() == "literacy" else NIGERIAN_ENGLISH_PROMPT
+
+    def _transcribe_intron(self, audio_path: str, mode: str = "general") -> dict:
+        """Transcribe via Intron Sahara ASR. Keep optional until real-call A/B testing."""
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+
+        ext = Path(audio_path).suffix.lower() or ".wav"
+        mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
+        filename = Path(audio_path).name or f"audio{ext}"
+
+        response = httpx.post(
+            INTRON_SYNC_URL,
+            headers={"x-api-key": self._intron_key},
+            files={"audio_file_blob": (filename, audio_bytes, mime)},
+            data={
+                "audio_file_name": filename,
+                "use_diarization": "FALSE",
+                "use_language_asr_input": INTRON_LANGUAGE,
+                "use_category": INTRON_CATEGORY,
+            },
+            timeout=INTRON_TIMEOUT_SECONDS,
+        )
+        if response.status_code == 503:
+            data = _safe_json(response)
+            raise RuntimeError(f"Intron sync still processing file_id={data.get('file_id', 'unknown')}")
+        response.raise_for_status()
+        data = response.json()
+        text = _extract_intron_text(data)
+        return {
+            "text": text,
+            "confidence": 0.84 if text else 0.0,
+            "language": INTRON_LANGUAGE,
+            "duration_seconds": round(float(data.get("duration") or data.get("duration_seconds") or 0.0), 1),
+            "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+            "provider": "intron",
+        }
 
     def _transcribe_groq(self, audio_path: str, mode: str = "general") -> dict:
         """Transcribe via Groq Whisper API (~200ms, free tier: 28,800 sec/day)."""
@@ -130,13 +215,12 @@ class SpeechToText:
             logger.warning(f"Groq STT failed ({e}), falling back to local Whisper")
             # Lazy-load local model if not already loaded
             if not hasattr(self, "_model"):
-                from faster_whisper import WhisperModel
-                logger.info("Loading local Whisper large-v3 as fallback...")
-                self._model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+                self._load_local_model("large-v3", "cuda")
             return self._transcribe_local(audio_path, mode=mode)
 
     def _transcribe_local(self, audio_path: str, mode: str = "general") -> dict:
         """Transcribe using self-hosted faster-whisper (GPU)."""
+        self._load_local_model()
         segments, info = self._model.transcribe(
             audio_path,
             language="en",
@@ -168,3 +252,37 @@ class SpeechToText:
             "duration_seconds": round(info.duration, 1),
             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
         }
+
+
+def _safe_json(response) -> dict:
+    try:
+        data = response.json()
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _extract_intron_text(data: dict) -> str:
+    """Handle small response-shape variations without making the call path brittle."""
+    for key in ("text", "transcript", "transcription"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for key in ("results", "result", "data"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            text = _extract_intron_text(value)
+            if text:
+                return text
+        if isinstance(value, list):
+            parts = []
+            for item in value:
+                if isinstance(item, dict):
+                    text = _extract_intron_text(item)
+                    if text:
+                        parts.append(text)
+                elif isinstance(item, str) and item.strip():
+                    parts.append(item.strip())
+            if parts:
+                return " ".join(parts).strip()
+    return ""

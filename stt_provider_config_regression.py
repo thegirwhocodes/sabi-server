@@ -22,12 +22,18 @@ def main() -> int:
     ok &= check("intron_extracts_documented_transcript_field", "audio_transcript" in source)
     ok &= check("intron_extracts_nested_duration", "processed_audio_duration_in_seconds" in source)
     ok &= check("intron_falls_back_to_whisper", "falling back to Groq/Whisper" in source)
+    ok &= check("stt_supports_isolated_provider_override", "provider: str | None = None" in source)
     ok &= check("literacy_prompt_preserves_short_sounds", "Transcribe short sounds" in source and "Do not force literacy answers" in source)
     ok &= check("literacy_prompt_protects_rhyme_words", "rat, sat, fat" in source and "correct, right, wrong" in source)
     ok &= check("stt_prompt_uses_recent_tutor_context", "Recent tutor prompt for this exact child answer" in source)
     ok &= check("literacy_salvages_suspicious_feedback_words", "local_literacy_salvage" in source)
     realtime = Path("voice_realtime.py").read_text(encoding="utf-8")
     ok &= check("numeric_prompts_bypass_literacy_stt", "_stt_mode_for_turn" in realtime and "numeric_stt" in realtime)
+    main = Path("main.py").read_text(encoding="utf-8")
+    asterisk = Path("asterisk/extensions.conf").read_text(encoding="utf-8")
+    ok &= check("intron_upload_test_route_is_admin_only", "/admin/stt/intron-test" in main)
+    ok &= check("intron_direct_call_uses_separate_context", "direct-call-intron" in main and "sabi-callback-intron" in main)
+    ok &= check("intron_audiosocket_uses_separate_port", "SABI_INTRON_AUDIOSOCKET_PORT" in main and "sabi:9020" in asterisk)
     return 0 if ok else 1
 
 

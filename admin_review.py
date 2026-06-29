@@ -524,7 +524,7 @@ def render_admin_review_page() -> str:
     @media (max-width: 1100px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; }
-      .nav { grid-template-columns: repeat(3, 1fr); }
+      .nav { grid-template-columns: repeat(4, 1fr); }
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .detail-grid, .turn-columns, .audio-grid, .module-grid { grid-template-columns: 1fr; }
       .drawer { width: 100vw; }
@@ -549,6 +549,7 @@ def render_admin_review_page() -> str:
       </div>
       <nav class="nav" aria-label="Sabi admin navigation">
         <button id="nav-learners" aria-selected="true">Learners</button>
+        <button id="nav-kids" aria-selected="false">Kids</button>
         <button id="nav-calls" aria-selected="false">Calls</button>
         <button id="nav-curriculum" aria-selected="false">Curriculum</button>
       </nav>
@@ -702,6 +703,28 @@ def render_admin_review_page() -> str:
     function callerCell(call) {
       return `<div class="user-cell"><span class="user-name">${escapeHtml(callLearnerName(call))}</span><span class="user-phone">${escapeHtml(callDisplayPhone(call))}</span></div>`;
     }
+    function isChildProfile(record) {
+      const type = String(
+        (record && (record.participant_type || record.profile_type || record.learner_type || record.kind)) || ""
+      ).toLowerCase();
+      const school = String((record && (record.school_status || record.enrollment_status || record.child_status)) || "").toLowerCase();
+      const hasPilotFields = Boolean(
+        record && (
+          record.consent_status ||
+          record.assent_status ||
+          record.caregiver_phone ||
+          record.network ||
+          record.prepilot_status ||
+          record.is_child
+        )
+      );
+      if (type.includes("adult") || type.includes("tester") || type.includes("staff")) return false;
+      if (type.includes("child") || type.includes("student") || school.includes("school") || hasPilotFields) return true;
+      return false;
+    }
+    function kidItems() {
+      return state.learners.filter(isChildProfile);
+    }
     function preview(text, limit = 80) {
       const clean = String(text || "").replace(/\\s+/g, " ").trim();
       return clean.length > limit ? clean.slice(0, limit - 3) + "..." : clean;
@@ -748,6 +771,7 @@ def render_admin_review_page() -> str:
       state.page = 0;
       drawer.classList.remove("open");
       document.getElementById("nav-learners").setAttribute("aria-selected", view === "learners");
+      document.getElementById("nav-kids").setAttribute("aria-selected", view === "kids");
       document.getElementById("nav-calls").setAttribute("aria-selected", view === "calls");
       document.getElementById("nav-curriculum").setAttribute("aria-selected", view === "curriculum");
       render();
@@ -756,12 +780,14 @@ def render_admin_review_page() -> str:
       renderHeader();
       renderMetrics();
       if (state.view === "learners") renderLearnersTable();
+      if (state.view === "kids") renderKidsTable();
       if (state.view === "calls") renderCallsTable();
       if (state.view === "curriculum") renderCurriculumView();
     }
     function renderHeader() {
       const titles = {
         learners: ["Learners", "Students, levels, calls, transcripts, and progress.", "Learner Database"],
+        kids: ["Kids", "Pre-pilot child profiles, consent, call readiness, and learning evidence.", "Kids Backend"],
         calls: ["Calls", "Recent phone sessions and recording evidence.", "Voice Sessions"],
         curriculum: ["Curriculum", "Structured learning path and bump-down rules.", "Curriculum Map"],
       };
@@ -769,15 +795,17 @@ def render_admin_review_page() -> str:
       document.getElementById("page-title").textContent = title;
       document.getElementById("page-subtitle").textContent = subtitle;
       document.getElementById("panel-title").textContent = panel;
-      search.placeholder = state.view === "calls" ? "Filter sessions or phone numbers" : "Filter learners or phone numbers";
+      search.placeholder = state.view === "calls" ? "Filter sessions or phone numbers" : "Filter learners, kids, or phone numbers";
     }
     function renderMetrics() {
       const learnerCount = state.learners.length;
+      const childCount = kidItems().length;
       const callCount = state.calls.length;
       const totalMinutes = state.calls.reduce((sum, call) => sum + Number(call.duration_seconds || 0), 0) / 60;
       const flaggedCalls = state.calls.filter(call => (call.quality_flags || []).length).length;
       metrics.innerHTML = [
         metric("Learners", learnerCount),
+        metric("Kids", childCount),
         metric("Recent calls", callCount),
         metric("Call minutes", totalMinutes.toFixed(1)),
         metric("Needs review", flaggedCalls),
@@ -817,6 +845,46 @@ def render_admin_review_page() -> str:
         <tbody>${rows || `<tr><td colspan="9"><div class="empty">No learners found.</div></td></tr>`}</tbody>
       </table>`;
       tableWrap.querySelectorAll("[data-learner]").forEach(row => row.addEventListener("click", () => openLearner(row.dataset.learner)));
+    }
+    function renderKidsTable() {
+      const kids = kidItems();
+      updateRange(kids.length);
+      const rows = pageSlice(kids).map(kidRow).join("");
+      tableWrap.innerHTML = `<table>
+        <thead>
+          <tr>
+            <th style="width: 230px;">Child</th>
+            <th style="width: 150px;">Consent</th>
+            <th style="width: 150px;">Network</th>
+            <th style="width: 180px;">Call readiness</th>
+            <th style="width: 260px;">Progress Map</th>
+            <th style="width: 150px;">Recent practice</th>
+            <th style="width: 150px;">Learning</th>
+            <th style="width: 90px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="8"><div class="empty">No child profiles registered yet. Adult tester calls stay in Learners and Calls until a pre-pilot child has consent, caregiver details, or child-profile fields.</div></td></tr>`}</tbody>
+      </table>`;
+      tableWrap.querySelectorAll("[data-learner]").forEach(row => row.addEventListener("click", () => openLearner(row.dataset.learner)));
+    }
+    function kidRow(item) {
+      const current = item.effective_state || {};
+      const calling = item.calling || {};
+      const consent = item.consent_status || (item.consent_recorded ? "consented" : "not recorded");
+      const assent = item.assent_status || (item.assent_recorded ? "assented" : "not recorded");
+      const readiness = calling.recent_call_count ? "Calls started" : "Ready to onboard";
+      const network = item.network || item.mobile_network || "unknown";
+      const active = state.selectedLearner === item.id ? " active" : "";
+      return `<tr class="${active}" data-learner="${escapeHtml(item.id)}">
+        <td><div class="user-cell"><span class="user-name">${escapeHtml(learnerName(item))}</span><span class="user-phone">${escapeHtml(displayPhone(item))}</span><div class="identity-row">${phoneNote(item)}</div></div></td>
+        <td>${pill(consent, consent === "not recorded" ? "warn" : "good")}<div class="small">Assent: ${escapeHtml(assent)}</div></td>
+        <td>${escapeHtml(network)}</td>
+        <td>${pill(readiness, calling.recent_call_count ? "good" : "soft")}<div class="small">${escapeHtml(item.school_status || item.enrollment_status || "")}</div></td>
+        <td class="progress-cell">${progressSparkline(current)}</td>
+        <td>${escapeHtml(calling.recent_call_count || 0)} calls<div class="small">${fmtSeconds(calling.recent_call_seconds)}</div></td>
+        <td>${escapeHtml(item.total_correct || 0)} correct<div class="small">${escapeHtml(item.total_wrong || 0)} needs help</div></td>
+        <td><button class="action-button" title="Open child">...</button></td>
+      </tr>`;
     }
     function learnerRow(item) {
       const current = item.effective_state || {};
@@ -1213,6 +1281,7 @@ def render_admin_review_page() -> str:
       URL.revokeObjectURL(url);
     }
     document.getElementById("nav-learners").addEventListener("click", () => setView("learners"));
+    document.getElementById("nav-kids").addEventListener("click", () => setView("kids"));
     document.getElementById("nav-calls").addEventListener("click", () => setView("calls"));
     document.getElementById("nav-curriculum").addEventListener("click", () => setView("curriculum"));
     document.getElementById("refresh").addEventListener("click", loadData);

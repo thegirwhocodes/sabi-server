@@ -79,6 +79,10 @@ async def lifespan(app: FastAPI):
 
     # Initialize components
     app.state.stt = SpeechToText()
+    app.state.intron_stt = SpeechToText(
+        provider=os.getenv("SABI_STT_TEST_PROVIDER", "intron_first"),
+        literacy_provider=os.getenv("SABI_LITERACY_STT_TEST_PROVIDER", "intron_first"),
+    )
     app.state.tts = TextToSpeech()
     app.state.llm = SabiLLM()
     app.state.memory = StudentMemory()
@@ -128,6 +132,13 @@ async def lifespan(app: FastAPI):
         tts=app.state.tts,
         memory=app.state.memory,
     )
+    intron_audiosocket_server = await start_audiosocket_server(
+        stt=app.state.intron_stt,
+        llm=app.state.llm,
+        tts=app.state.tts,
+        memory=app.state.memory,
+        port=int(os.getenv("SABI_INTRON_AUDIOSOCKET_PORT", "9020")),
+    )
 
     logger.info("All models loaded. Sabi is ready.")
     yield
@@ -136,6 +147,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Sabi server...")
     audiosocket_server.close()
     await audiosocket_server.wait_closed()
+    intron_audiosocket_server.close()
+    await intron_audiosocket_server.wait_closed()
     agi_server.close()
     await agi_server.wait_closed()
 
@@ -293,6 +306,40 @@ async def speech_to_text(request: Request):
         result = app.state.stt.transcribe(str(temp_path))
         elapsed = time.time() - start
         logger.info(f"STT: '{result['text']}' (confidence={result['confidence']:.2f}, {elapsed:.1f}s)")
+        return JSONResponse(result)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+@app.post("/admin/stt/intron-test")
+async def intron_speech_to_text_test(request: Request):
+    """
+    Protected upload test for the Intron STT lane.
+
+    This lets us run real saved call clips through Intron without changing the
+    production AudioSocket route. If INTRON_API_KEY is not configured, the
+    response will explicitly report the fallback provider used by stt.py.
+    """
+    form = await request.form()
+    audio_file = form.get("audio")
+    mode = str(form.get("mode") or "general").strip().lower() or "general"
+    context = str(form.get("context") or "")
+    if not audio_file:
+        return JSONResponse({"error": "No audio file provided"}, status_code=400)
+    if mode not in {"general", "literacy"}:
+        return JSONResponse({"error": "mode must be general or literacy"}, status_code=400)
+
+    temp_path = AUDIO_DIR / f"intron_test_{uuid.uuid4().hex}.wav"
+    content = await audio_file.read()
+    with open(temp_path, "wb") as f:
+        f.write(content)
+
+    try:
+        start = time.time()
+        result = app.state.intron_stt.transcribe(str(temp_path), mode=mode, context=context)
+        elapsed = time.time() - start
+        result["latency_ms"] = int(elapsed * 1000)
+        result["test_route"] = "admin_stt_intron_test"
         return JSONResponse(result)
     finally:
         temp_path.unlink(missing_ok=True)
@@ -598,7 +645,12 @@ async def admin_learner_detail(student_id: str, limit: int = 20):
     return JSONResponse(result)
 
 
-async def ami_originate(phone: str, attempt: int = 1, delay_seconds: float | None = None):
+async def ami_originate(
+    phone: str,
+    attempt: int = 1,
+    delay_seconds: float | None = None,
+    context: str = "sabi-callback",
+):
     """Send AMI Originate command to Asterisk to call the child back."""
     reader, writer = await asyncio.open_connection(AMI_HOST, AMI_PORT)
 
@@ -631,7 +683,7 @@ async def ami_originate(phone: str, attempt: int = 1, delay_seconds: float | Non
     writer.write(
         f"Action: Originate\r\n"
         f"Channel: PJSIP/{phone}@africastalking\r\n"
-        f"Context: sabi-callback\r\n"
+        f"Context: {context}\r\n"
         f"Exten: {phone}\r\n"
         f"Priority: 1\r\n"
         f"CallerID: Sabi <{SABI_CALLER_ID}>\r\n"
@@ -791,6 +843,49 @@ async def direct_sabi_call(
         "phone": normalized_phone,
         "attempt": safe_attempt,
         "delay_seconds": safe_delay,
+    })
+
+
+@app.post("/admin/asterisk/direct-call-intron")
+async def direct_sabi_intron_call(
+    phone: str = Form(...),
+    attempt: int = Form(1),
+    delay_seconds: float = Form(0),
+):
+    """
+    Protected direct test hook for the isolated Intron STT AudioSocket lane.
+
+    Production callback/inbound still use the normal `sabi-callback` context.
+    This route originates into `sabi-callback-intron`, which connects Asterisk
+    to the second AudioSocket listener on port 9020.
+    """
+    normalized_phone = normalize_phone(phone)
+    if not normalized_phone or normalized_phone == "+":
+        logger.warning("Direct Intron Sabi call rejected: missing phone number")
+        return JSONResponse({"status": "rejected", "reason": "missing_phone"}, status_code=400)
+
+    safe_attempt = max(1, attempt)
+    safe_delay = max(0, delay_seconds)
+    logger.info(
+        "Direct Intron Sabi call requested for %s attempt=%s delay=%.1fs",
+        normalized_phone,
+        safe_attempt,
+        safe_delay,
+    )
+    asyncio.create_task(
+        ami_originate(
+            normalized_phone,
+            attempt=safe_attempt,
+            delay_seconds=safe_delay,
+            context="sabi-callback-intron",
+        )
+    )
+    return JSONResponse({
+        "status": "direct_intron_call_initiated",
+        "phone": normalized_phone,
+        "attempt": safe_attempt,
+        "delay_seconds": safe_delay,
+        "context": "sabi-callback-intron",
     })
 
 

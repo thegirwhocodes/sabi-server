@@ -19,6 +19,7 @@ def main() -> int:
     ok = True
     ok &= check("renders_admin_console_title", "Sabi Admin Console" in html)
     ok &= check("renders_table_first_navigation", "nav-learners" in html and "Learner Database" in html)
+    ok &= check("renders_kids_backend_tab", "nav-kids" in html and "Kids Backend" in html and "isChildProfile" in html)
     ok &= check("fetches_learner_roster", "/admin/learners?limit=100" in html)
     ok &= check("fetches_call_queue", "/admin/calls?limit=100" in html)
     ok &= check("fetches_curriculum_map", "/admin/curriculum-map" in html)

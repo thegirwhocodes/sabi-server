@@ -107,8 +107,9 @@ FEEDBACK_TEST_NUMBERS = {
 }
 FEEDBACK_MAX_SECONDS = int(os.getenv("SABI_FEEDBACK_MAX_SECONDS", "90"))
 FEEDBACK_WAIT_SECONDS = int(os.getenv("SABI_FEEDBACK_WAIT_SECONDS", "8"))
-FEEDBACK_END_SILENCE_MS = int(os.getenv("SABI_FEEDBACK_END_SILENCE_MS", "3000"))
+FEEDBACK_END_SILENCE_MS = int(os.getenv("SABI_FEEDBACK_END_SILENCE_MS", "4500"))
 FEEDBACK_END_SILENCE_FRAMES = max(1, int(FEEDBACK_END_SILENCE_MS / FRAME_MS))
+FEEDBACK_SPEECH_RMS_THRESHOLD = int(os.getenv("SABI_FEEDBACK_SPEECH_RMS", "320"))
 FEEDBACK_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_PROMPT_TEXT",
     (
@@ -725,8 +726,9 @@ class RealtimeCall:
             FEEDBACK_WAIT_SECONDS,
             max_frames=max_frames,
             end_silence_frames=FEEDBACK_END_SILENCE_FRAMES,
+            speech_threshold=FEEDBACK_SPEECH_RMS_THRESHOLD,
         )
-        if not feedback_pcm or self.hungup:
+        if not feedback_pcm:
             logger.info("No optional feedback left uuid=%s", self.call_uuid)
             return
 

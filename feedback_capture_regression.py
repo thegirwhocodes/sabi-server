@@ -73,10 +73,29 @@ class FakeFeedbackCall:
         timeout_seconds: int,
         max_frames: int | None = None,
         end_silence_frames: int | None = None,
+        speech_threshold: int | None = None,
     ) -> bytes:
-        self.wait_args = (timeout_seconds, max_frames, end_silence_frames)
+        self.wait_args = (timeout_seconds, max_frames, end_silence_frames, speech_threshold)
         # One second of 8 kHz signed-linear audio at a clearly non-silent level.
         return struct.pack("<h", 1800) * voice_realtime.SAMPLE_RATE
+
+
+class FakeFeedbackHangupCall(FakeFeedbackCall):
+    def __init__(self) -> None:
+        super().__init__()
+        self.call_uuid = "fb-regression-hangup"
+        self.call_id = self.call_uuid
+
+    async def wait_for_optional_utterance(
+        self,
+        timeout_seconds: int,
+        max_frames: int | None = None,
+        end_silence_frames: int | None = None,
+        speech_threshold: int | None = None,
+    ) -> bytes:
+        self.wait_args = (timeout_seconds, max_frames, end_silence_frames, speech_threshold)
+        self.hungup = True
+        return struct.pack("<h", 1900) * voice_realtime.SAMPLE_RATE
 
 
 async def run_capture() -> tuple[FakeFeedbackCall, dict]:
@@ -87,6 +106,18 @@ async def run_capture() -> tuple[FakeFeedbackCall, dict]:
         learning_state={"course": "numeracy", "current_module": 2},
     )
     sidecar = ROOT / "feedback_fb-regression-001.json"
+    metadata = json.loads(sidecar.read_text()) if sidecar.exists() else {}
+    return call, metadata
+
+
+async def run_capture_with_hangup() -> tuple[FakeFeedbackHangupCall, dict]:
+    call = FakeFeedbackHangupCall()
+    await voice_realtime.RealtimeCall.record_feedback_note(
+        call,
+        student_id="student-feedback-hangup",
+        learning_state={"course": "numeracy", "current_module": 2},
+    )
+    sidecar = ROOT / "feedback_fb-regression-hangup.json"
     metadata = json.loads(sidecar.read_text()) if sidecar.exists() else {}
     return call, metadata
 
@@ -138,6 +169,7 @@ def main() -> int:
     )
 
     call, metadata = asyncio.run(run_capture())
+    hangup_call, hangup_metadata = asyncio.run(run_capture_with_hangup())
     optional_window_ok, optional_window_detail = asyncio.run(run_optional_wait_window_check())
     audio_path = ROOT / "feedback_fb-regression-001.wav"
     sidecar_path = ROOT / "feedback_fb-regression-001.json"
@@ -150,6 +182,7 @@ def main() -> int:
             voice_realtime.FEEDBACK_WAIT_SECONDS,
             max(1, int(voice_realtime.FEEDBACK_MAX_SECONDS * 1000 / voice_realtime.FRAME_MS)),
             voice_realtime.FEEDBACK_END_SILENCE_FRAMES,
+            voice_realtime.FEEDBACK_SPEECH_RMS_THRESHOLD,
         ),
         call.wait_args,
     )
@@ -176,6 +209,15 @@ def main() -> int:
         and saved.get("recording_path") == str(audio_path)
         and saved.get("consent_recorded") is True,
         saved,
+    )
+    ok &= check(
+        "feedback_partial_note_saved_after_channel_close",
+        hangup_metadata.get("student_id") == "student-feedback-hangup"
+        and hangup_metadata.get("duration_seconds") == 1
+        and (ROOT / "feedback_fb-regression-hangup.wav").exists()
+        and hangup_call.memory.calls
+        and hangup_call.memory.calls[0].get("call_id") == "fb-regression-hangup",
+        hangup_metadata,
     )
 
     return 0 if ok else 1

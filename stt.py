@@ -91,7 +91,13 @@ def _is_short_literacy_word(text: str) -> bool:
 
 
 class SpeechToText:
-    def __init__(self, model_size: str = "large-v3", device: str = "cuda"):
+    def __init__(
+        self,
+        model_size: str = "large-v3",
+        device: str = "cuda",
+        provider: str | None = None,
+        literacy_provider: str | None = None,
+    ):
         """
         Initialize STT. Uses Groq Whisper API if GROQ_API_KEY is available
         (much faster: ~200ms vs ~1s local). Falls back to self-hosted faster-whisper.
@@ -106,8 +112,12 @@ class SpeechToText:
         from secret_loader import get_secret
         self._groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
         self._intron_key = get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY", "")
-        self._provider = os.getenv("SABI_STT_PROVIDER", "auto").strip().lower() or "auto"
-        self._literacy_provider = os.getenv("SABI_LITERACY_STT_PROVIDER", self._provider).strip().lower() or self._provider
+        env_provider = os.getenv("SABI_STT_PROVIDER", "auto")
+        self._provider = (provider or env_provider).strip().lower() or "auto"
+        env_literacy_provider = os.getenv("SABI_LITERACY_STT_PROVIDER", self._provider)
+        self._literacy_provider = (
+            literacy_provider or env_literacy_provider
+        ).strip().lower() or self._provider
         self._model_size = model_size
         self._device = device
 

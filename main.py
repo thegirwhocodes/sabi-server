@@ -187,6 +187,9 @@ app = FastAPI(
 # API key authentication — protects AI endpoints from unauthorized use
 SABI_API_KEY = get_secret("SABI_API_KEY")
 SABI_ADMIN_PIN = get_secret("SABI_ADMIN_PIN", "123")
+TRUST_API_KEY_FOR_RATE_LIMIT_BYPASS = os.getenv(
+    "SABI_TRUST_API_KEY_FOR_RATE_LIMIT_BYPASS", "1"
+).strip().lower() not in {"0", "false", "no"}
 OPEN_PATHS = {"/health", "/docs", "/openapi.json"}
 OPEN_PREFIXES = ("/voice/", "/audio/", "/asterisk/")
 READ_ONLY_ADMIN_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -211,6 +214,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if path in self.AI_PATHS:
             tier = "ai"
+            if self._is_trusted_ai_request(request):
+                return await call_next(request)
         elif path.startswith(self.VOICE_PREFIXES):
             tier = "voice"
         else:
@@ -243,6 +248,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if forwarded:
             return forwarded.rsplit(",", 1)[-1].strip()
         return request.client.host if request.client else "unknown"
+
+    @staticmethod
+    def _is_trusted_ai_request(request: Request) -> bool:
+        if not TRUST_API_KEY_FOR_RATE_LIMIT_BYPASS or not SABI_API_KEY:
+            return False
+        supplied_key = (
+            request.headers.get("X-API-Key")
+            or request.query_params.get("api_key")
+            or request.query_params.get("key")
+        )
+        return supplied_key == SABI_API_KEY
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):

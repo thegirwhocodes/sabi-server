@@ -87,9 +87,16 @@ services:
     environment:
       - CHATTERBOX_REFERENCE_DIR=/app/reference_audio
       - CHATTERBOX_DEFAULT_SPEAKER=naomi
+      - CHATTERBOX_MAX_CONCURRENT=${CHATTERBOX_MAX_CONCURRENT:-1}
+      - CHATTERBOX_MAX_QUEUE=${CHATTERBOX_MAX_QUEUE:-12}
+      - CHATTERBOX_QUEUE_TIMEOUT_SECONDS=${CHATTERBOX_QUEUE_TIMEOUT_SECONDS:-8}
+      - CHATTERBOX_CACHE_ENABLED=${CHATTERBOX_CACHE_ENABLED:-1}
+      - CHATTERBOX_CACHE_DIR=/app/tts_cache
+      - CHATTERBOX_CACHE_MAX_FILES=${CHATTERBOX_CACHE_MAX_FILES:-5000}
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - chatterbox_cache:/root/.cache
+      - chatterbox_tts_cache:/app/tts_cache
       - ./chatterbox-tts/reference_audio:/app/reference_audio
     deploy:
       resources:
@@ -147,4 +154,5 @@ secrets:
 volumes:
   ollama_data:
   chatterbox_cache:
+  chatterbox_tts_cache:
   shared_audio:

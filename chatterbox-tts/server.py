@@ -20,6 +20,8 @@ import io
 import os
 import re
 import time
+import asyncio
+import hashlib
 import logging
 from pathlib import Path
 
@@ -37,6 +39,12 @@ MODEL_DIR = os.getenv("CHATTERBOX_MODEL_DIR", "")
 REFERENCE_DIR = os.getenv("CHATTERBOX_REFERENCE_DIR", "/app/reference_audio")
 DEFAULT_SPEAKER = os.getenv("CHATTERBOX_DEFAULT_SPEAKER", "bukola")
 MAX_TEXT_LENGTH = int(os.getenv("CHATTERBOX_MAX_TEXT_LENGTH", "2000"))
+MAX_CONCURRENT_SYNTHESIS = max(1, int(os.getenv("CHATTERBOX_MAX_CONCURRENT", "1")))
+MAX_QUEUE_WAITERS = max(0, int(os.getenv("CHATTERBOX_MAX_QUEUE", "12")))
+QUEUE_TIMEOUT_SECONDS = max(0.1, float(os.getenv("CHATTERBOX_QUEUE_TIMEOUT_SECONDS", "8")))
+CACHE_ENABLED = os.getenv("CHATTERBOX_CACHE_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+CACHE_DIR = Path(os.getenv("CHATTERBOX_CACHE_DIR", "/app/tts_cache"))
+CACHE_MAX_FILES = max(0, int(os.getenv("CHATTERBOX_CACHE_MAX_FILES", "5000")))
 
 # Pronunciation map for Nigerian English words the model may mispronounce
 PRONUNCIATION_MAP = {
@@ -136,6 +144,18 @@ def audio_to_mp3_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
 # Global model state
 model = None
 speaker_audio_cache = {}  # name → audio_prompt_path
+tts_semaphore: asyncio.BoundedSemaphore | None = None
+queue_waiters = 0
+queue_waiters_lock: asyncio.Lock | None = None
+stats = {
+    "requests": 0,
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "syntheses": 0,
+    "queue_rejections": 0,
+    "queue_timeouts": 0,
+    "errors": 0,
+}
 
 
 def load_model():
@@ -237,9 +257,19 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup():
     """Load model and speakers on startup."""
+    global tts_semaphore, queue_waiters_lock
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tts_semaphore = asyncio.BoundedSemaphore(MAX_CONCURRENT_SYNTHESIS)
+    queue_waiters_lock = asyncio.Lock()
     load_model()
     load_speakers()
-    logger.info("Chatterbox TTS server ready.")
+    logger.info(
+        "Chatterbox TTS server ready. max_concurrent=%s max_queue=%s queue_timeout=%.1fs cache=%s",
+        MAX_CONCURRENT_SYNTHESIS,
+        MAX_QUEUE_WAITERS,
+        QUEUE_TIMEOUT_SECONDS,
+        "on" if CACHE_ENABLED else "off",
+    )
 
 
 @app.get("/health")
@@ -257,6 +287,18 @@ async def health():
         "model": "chatterbox-turbo",
         "speakers": list(speaker_audio_cache.keys()),
         "gpu": gpu_info,
+        "inference": {
+            "max_concurrent": MAX_CONCURRENT_SYNTHESIS,
+            "max_queue": MAX_QUEUE_WAITERS,
+            "queue_timeout_seconds": QUEUE_TIMEOUT_SECONDS,
+            "current_waiters": queue_waiters,
+        },
+        "cache": {
+            "enabled": CACHE_ENABLED,
+            "dir": str(CACHE_DIR),
+            "max_files": CACHE_MAX_FILES,
+        },
+        "stats": stats,
     }
 
 
@@ -267,6 +309,107 @@ async def list_voices():
         "voices": list(speaker_audio_cache.keys()),
         "default": DEFAULT_SPEAKER,
     }
+
+
+def _cache_path(
+    text: str,
+    speaker_name: str,
+    exaggeration: float,
+    output_format: str,
+) -> Path:
+    key_material = "\n".join(
+        [
+            "chatterbox-turbo-v1",
+            speaker_name or "",
+            f"{exaggeration:.2f}",
+            output_format,
+            preprocess_text(text),
+        ]
+    )
+    digest = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
+    suffix = "mp3" if output_format == "mp3" else "wav"
+    return CACHE_DIR / f"{digest}.{suffix}"
+
+
+async def _acquire_tts_slot() -> tuple[bool, str]:
+    global queue_waiters
+    if tts_semaphore is None or queue_waiters_lock is None:
+        return False, "not_ready"
+
+    counted_waiter = False
+    async with queue_waiters_lock:
+        if tts_semaphore.locked():
+            if queue_waiters >= MAX_QUEUE_WAITERS:
+                stats["queue_rejections"] += 1
+                return False, "queue_full"
+            queue_waiters += 1
+            counted_waiter = True
+
+    try:
+        await asyncio.wait_for(tts_semaphore.acquire(), timeout=QUEUE_TIMEOUT_SECONDS)
+        return True, "ok"
+    except asyncio.TimeoutError:
+        stats["queue_timeouts"] += 1
+        return False, "queue_timeout"
+    finally:
+        if counted_waiter:
+            async with queue_waiters_lock:
+                queue_waiters = max(0, queue_waiters - 1)
+
+
+def _release_tts_slot() -> None:
+    if tts_semaphore is not None:
+        tts_semaphore.release()
+
+
+def _synthesize_and_encode(
+    text: str,
+    speaker_name: str,
+    exaggeration: float,
+    output_format: str,
+) -> tuple[bytes, str, float, float]:
+    start = time.time()
+    audio, sr = synthesize_speech(
+        text=text,
+        speaker_name=speaker_name,
+        exaggeration=exaggeration,
+    )
+    elapsed = time.time() - start
+    duration = len(audio) / sr
+
+    if output_format == "mp3":
+        audio_bytes = audio_to_mp3_bytes(audio, sr)
+        media_type = "audio/mpeg"
+    else:
+        audio_bytes = audio_to_wav_bytes(audio, sr)
+        media_type = "audio/wav"
+
+    return audio_bytes, media_type, elapsed, duration
+
+
+def _write_cache(cache_path: Path, audio_bytes: bytes) -> None:
+    if not CACHE_ENABLED:
+        return
+    tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    tmp_path.write_bytes(audio_bytes)
+    tmp_path.replace(cache_path)
+
+
+def _prune_cache_if_needed() -> None:
+    if not CACHE_ENABLED or CACHE_MAX_FILES <= 0:
+        return
+    try:
+        files = [path for path in CACHE_DIR.iterdir() if path.is_file()]
+    except OSError:
+        return
+    overflow = len(files) - CACHE_MAX_FILES
+    if overflow <= 0:
+        return
+    for path in sorted(files, key=lambda item: item.stat().st_mtime)[:overflow]:
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 @app.post("/tts")
@@ -285,6 +428,7 @@ async def tts_endpoint(request: Request):
         "speed": 1.0
     }
     """
+    stats["requests"] += 1
     try:
         data = await request.json()
     except Exception:
@@ -297,31 +441,55 @@ async def tts_endpoint(request: Request):
     speaker_name = data.get("speaker_name", DEFAULT_SPEAKER)
     exaggeration = float(data.get("exaggeration", 0.5))
     output_format = data.get("format", "wav").lower()
+    if output_format not in {"mp3", "wav"}:
+        return JSONResponse({"error": "Unsupported format"}, status_code=400)
 
     # Clamp exaggeration
     exaggeration = max(0.25, min(2.0, exaggeration))
 
-    start = time.time()
-    try:
-        audio, sr = synthesize_speech(
-            text=text,
-            speaker_name=speaker_name,
-            exaggeration=exaggeration,
+    cache_path = _cache_path(text, speaker_name, exaggeration, output_format)
+    if CACHE_ENABLED and cache_path.exists():
+        stats["cache_hits"] += 1
+        audio_bytes = cache_path.read_bytes()
+        media_type = "audio/mpeg" if output_format == "mp3" else "audio/wav"
+        logger.info("TTS cache hit: %s chars exag=%.2f", len(text), exaggeration)
+        return Response(
+            content=audio_bytes,
+            media_type=media_type,
+            headers={
+                "X-Cache": "HIT",
+                "X-Exaggeration": f"{exaggeration:.2f}",
+            },
         )
+
+    stats["cache_misses"] += 1
+    acquired, reason = await _acquire_tts_slot()
+    if not acquired:
+        status = 503 if reason in {"queue_full", "queue_timeout"} else 500
+        return JSONResponse(
+            {"error": reason},
+            status_code=status,
+            headers={"Retry-After": str(int(QUEUE_TIMEOUT_SECONDS))},
+        )
+
+    try:
+        audio_bytes, media_type, elapsed, duration = await asyncio.to_thread(
+            _synthesize_and_encode,
+            text,
+            speaker_name,
+            exaggeration,
+            output_format,
+        )
+        stats["syntheses"] += 1
+        _write_cache(cache_path, audio_bytes)
+        if stats["syntheses"] % 100 == 0:
+            _prune_cache_if_needed()
     except Exception as e:
+        stats["errors"] += 1
         logger.error(f"Synthesis error: {e}", exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
-
-    elapsed = time.time() - start
-    duration = len(audio) / sr
-
-    # Convert to output format
-    if output_format == "mp3":
-        audio_bytes = audio_to_mp3_bytes(audio, sr)
-        media_type = "audio/mpeg"
-    else:
-        audio_bytes = audio_to_wav_bytes(audio, sr)
-        media_type = "audio/wav"
+    finally:
+        _release_tts_slot()
 
     logger.info(f"TTS: {len(text)} chars → {duration:.1f}s audio ({elapsed:.1f}s, exag={exaggeration})")
 
@@ -329,6 +497,7 @@ async def tts_endpoint(request: Request):
         content=audio_bytes,
         media_type=media_type,
         headers={
+            "X-Cache": "MISS",
             "X-Inference-Time": f"{elapsed:.3f}",
             "X-Audio-Duration": f"{duration:.3f}",
             "X-Exaggeration": f"{exaggeration:.2f}",

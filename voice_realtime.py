@@ -106,10 +106,28 @@ FEEDBACK_TEST_NUMBERS = {
     if value.strip()
 }
 FEEDBACK_MAX_SECONDS = int(os.getenv("SABI_FEEDBACK_MAX_SECONDS", "90"))
-FEEDBACK_WAIT_SECONDS = int(os.getenv("SABI_FEEDBACK_WAIT_SECONDS", "8"))
-FEEDBACK_END_SILENCE_MS = int(os.getenv("SABI_FEEDBACK_END_SILENCE_MS", "4500"))
+# Wait window: how long to wait for the caller to START speaking after the prompt.
+# Tuned up from 8s after testers reported the call cutting off while they
+# gathered their thoughts. Real-world: an adult needs ~10-20s to decide what
+# to say; a child needs longer.
+FEEDBACK_WAIT_SECONDS = int(os.getenv("SABI_FEEDBACK_WAIT_SECONDS", "25"))
+# Mid-note silence: how long the caller can pause inside their note before we
+# consider it finished. Tuned up so think-pauses don't truncate the note.
+FEEDBACK_END_SILENCE_MS = int(os.getenv("SABI_FEEDBACK_END_SILENCE_MS", "6000"))
 FEEDBACK_END_SILENCE_FRAMES = max(1, int(FEEDBACK_END_SILENCE_MS / FRAME_MS))
-FEEDBACK_SPEECH_RMS_THRESHOLD = int(os.getenv("SABI_FEEDBACK_SPEECH_RMS", "320"))
+# RMS floor for "this frame contains speech". Lowered from 320 so softer
+# voices on poor PSTN aren't rejected as silence.
+FEEDBACK_SPEECH_RMS_THRESHOLD = int(os.getenv("SABI_FEEDBACK_SPEECH_RMS", "220"))
+# If the first wait window expires with no speech, repeat a short prompt once
+# and try again. Set SABI_FEEDBACK_RETRY_ENABLED=0 to disable.
+FEEDBACK_RETRY_ENABLED = os.getenv("SABI_FEEDBACK_RETRY_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+# DTMF digit a caller can press to skip the feedback window immediately.
+# Empty string disables.
+FEEDBACK_DTMF_SKIP_DIGIT = os.getenv("SABI_FEEDBACK_DTMF_SKIP_DIGIT", "1").strip()
+# Length of the audible "go" cue beep played right before the recording
+# window opens, so the caller knows recording is now live.
+FEEDBACK_GO_CUE_MS = int(os.getenv("SABI_FEEDBACK_GO_CUE_MS", "400"))
+FEEDBACK_GO_CUE_FREQ_HZ = int(os.getenv("SABI_FEEDBACK_GO_CUE_FREQ_HZ", "880"))
 FEEDBACK_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_PROMPT_TEXT",
     (
@@ -120,9 +138,42 @@ FEEDBACK_PROMPT_TEXT = os.getenv(
         "If you do, just start talking after this."
     ),
 )
+FEEDBACK_RETRY_PROMPT_TEXT = os.getenv(
+    "SABI_FEEDBACK_RETRY_PROMPT_TEXT",
+    (
+        "I did not hear anything. If you have something to share, start now. "
+        "Or press 1 to skip and end the call."
+    ),
+)
 
 CALL_REGISTRY: dict[str, dict[str, str]] = {}
 HANGUP_EVENTS: dict[str, dict[str, str]] = {}
+
+
+def _build_go_cue_pcm() -> bytes:
+    """Generate a short sine-wave beep so the caller knows recording is live.
+
+    Avoids the latency of a TTS round-trip. 8 kHz signed-linear, mono, the
+    same format Asterisk AudioSocket expects.
+    """
+    if FEEDBACK_GO_CUE_MS <= 0:
+        return b""
+    import math
+    num_samples = int(SAMPLE_RATE * FEEDBACK_GO_CUE_MS / 1000)
+    amp = 8000
+    freq = max(220, min(2000, FEEDBACK_GO_CUE_FREQ_HZ))
+    # 20ms fade-in/out so the tone doesn't click.
+    fade_samples = min(int(SAMPLE_RATE * 0.02), num_samples // 4)
+    samples = []
+    for i in range(num_samples):
+        envelope = 1.0
+        if i < fade_samples:
+            envelope = i / fade_samples
+        elif i > num_samples - fade_samples:
+            envelope = max(0.0, (num_samples - i) / fade_samples)
+        value = int(amp * envelope * math.sin(2 * math.pi * freq * i / SAMPLE_RATE))
+        samples.append(value)
+    return struct.pack(f"<{num_samples}h", *samples)
 
 
 def register_call(call_uuid: str, phone: str = "unknown", mode: str = "inbound", attempt: str = "1") -> None:
@@ -406,6 +457,7 @@ class RealtimeCall:
             self.attempt = 1
         self.call_id = call_uuid
         self.audio_queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue(maxsize=1200)
+        self.dtmf_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=32)
         self.pre_roll: deque[bytes] = deque(maxlen=PRE_ROLL_FRAMES)
         self.hungup = False
         self.end_reason = "unknown"
@@ -429,7 +481,18 @@ class RealtimeCall:
                     except asyncio.QueueFull:
                         logger.warning("Audio queue full; dropping caller frame uuid=%s", self.call_uuid)
                 elif packet_type == AUDIO_TYPE_DTMF:
-                    logger.info("DTMF on AudioSocket uuid=%s digit=%r", self.call_uuid, payload)
+                    digit = ""
+                    if payload:
+                        try:
+                            digit = payload.decode("ascii", errors="ignore").strip()
+                        except Exception:
+                            digit = ""
+                    logger.info("DTMF on AudioSocket uuid=%s digit=%r", self.call_uuid, digit or payload)
+                    if digit:
+                        try:
+                            self.dtmf_queue.put_nowait(digit)
+                        except asyncio.QueueFull:
+                            logger.warning("DTMF queue full; dropping digit uuid=%s digit=%s", self.call_uuid, digit)
                 elif packet_type == AUDIO_TYPE_ERROR:
                     logger.warning("AudioSocket error packet uuid=%s payload=%r", self.call_uuid, payload)
                 else:
@@ -601,28 +664,80 @@ class RealtimeCall:
         max_frames: int | None = None,
         end_silence_frames: int | None = None,
         speech_threshold: int | None = None,
+        dtmf_skip_digit: str | None = None,
+        rms_telemetry: dict | None = None,
     ) -> Optional[bytes]:
+        """Wait for speech, optionally short-circuited by a DTMF digit.
+
+        rms_telemetry, when passed, is mutated in place with peak_rms,
+        mean_rms, frames_observed, frames_above_threshold, ended_reason,
+        time_to_first_speech_ms (or None). This lets callers debug why a
+        recording window closed without changing the function's return type.
+        """
         if timeout_seconds <= 0:
+            if rms_telemetry is not None:
+                rms_telemetry["ended_reason"] = "timeout_zero"
+                rms_telemetry["time_to_first_speech_ms"] = None
             return None
 
         deadline = time.monotonic() + timeout_seconds
         speech_frames = 0
         threshold = speech_threshold or SPEECH_RMS_THRESHOLD
+        peak_rms = 0
+        rms_sum = 0
+        frames_observed = 0
+        frames_above_threshold = 0
+        wait_started_at = time.monotonic()
+
+        def _record_metrics(ended_reason: str, time_to_speech_ms: int | None) -> None:
+            if rms_telemetry is None:
+                return
+            rms_telemetry["peak_rms"] = peak_rms
+            rms_telemetry["mean_rms"] = int(rms_sum / frames_observed) if frames_observed else 0
+            rms_telemetry["frames_observed"] = frames_observed
+            rms_telemetry["frames_above_threshold"] = frames_above_threshold
+            rms_telemetry["ended_reason"] = ended_reason
+            rms_telemetry["time_to_first_speech_ms"] = time_to_speech_ms
+            rms_telemetry["wait_seconds_used"] = round(time.monotonic() - wait_started_at, 2)
+
         while not self.hungup:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                _record_metrics("wait_timeout", None)
                 return None
+            # If a DTMF skip is enabled, drain any digits the caller pressed
+            # while the prompt was still playing so we can short-circuit
+            # immediately on the first matching digit.
+            if dtmf_skip_digit:
+                while True:
+                    try:
+                        digit = self.dtmf_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if digit == dtmf_skip_digit:
+                        _record_metrics("dtmf_skipped", None)
+                        return None
             try:
                 inbound = await asyncio.wait_for(self.audio_queue.get(), timeout=remaining)
             except asyncio.TimeoutError:
+                _record_metrics("wait_timeout", None)
                 return None
             if inbound is None:
                 self.hungup = True
                 self.set_end_reason("channel_closed_waiting_for_optional_speech")
+                _record_metrics("channel_closed", None)
                 return None
-            if _rms(inbound) >= threshold:
+            rms = _rms(inbound)
+            frames_observed += 1
+            rms_sum += rms
+            if rms > peak_rms:
+                peak_rms = rms
+            if rms >= threshold:
                 speech_frames += 1
+                frames_above_threshold += 1
                 if speech_frames >= START_SPEECH_FRAMES:
+                    time_to_speech_ms = int((time.monotonic() - wait_started_at) * 1000)
+                    _record_metrics("speech_captured", time_to_speech_ms)
                     frames = list(self.pre_roll)
                     frames.append(inbound)
                     return await self.collect_utterance(
@@ -633,6 +748,7 @@ class RealtimeCall:
                     )
             else:
                 speech_frames = 0
+        _record_metrics("channel_closed", None)
         return None
 
     async def collect_utterance(
@@ -712,24 +828,134 @@ class RealtimeCall:
                     pass
 
     async def record_feedback_note(self, student_id: str | None, learning_state: dict | None) -> None:
-        """Ask for one optional, open-ended tester note after the lesson."""
+        """Ask for one optional, open-ended tester note after the lesson.
+
+        Flow:
+          1. Play the long open-ended prompt.
+          2. Play a short "go" beep so the caller knows recording is now live.
+          3. Wait up to FEEDBACK_WAIT_SECONDS for them to start; allow DTMF
+             skip via FEEDBACK_DTMF_SKIP_DIGIT.
+          4. If the first window expires with no speech AND
+             FEEDBACK_RETRY_ENABLED, play a short re-prompt + beep and try
+             one more time.
+          5. Always write a sidecar — even when no audio was captured — so an
+             admin can see WHY the window closed (timeout vs dtmf_skipped vs
+             channel_closed). This was previously a silent return that left
+             the call ending mysteriously.
+        """
         if not _feedback_enabled_for_phone(self.phone) or self.hungup:
             return
 
+        prompt_played_at = time.monotonic()
         prompt_pcm = await self.synthesize_pcm(FEEDBACK_PROMPT_TEXT, "rt_feedback_prompt")
         await self.play_pcm(prompt_pcm)
         if self.hungup:
             return
+        prompt_played_seconds = round(time.monotonic() - prompt_played_at, 2)
+
+        # Audible "you're live" cue right before opening the recording window.
+        go_cue = _build_go_cue_pcm()
+        if go_cue:
+            await self.play_pcm(go_cue)
+            if self.hungup:
+                return
+
+        # Drain any DTMF/audio that arrived during the prompt so the wait
+        # window starts from a clean baseline.
+        self.drain_audio()
+        while True:
+            try:
+                self.dtmf_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
         max_frames = max(1, int(FEEDBACK_MAX_SECONDS * 1000 / FRAME_MS))
+        skip_digit = FEEDBACK_DTMF_SKIP_DIGIT or None
+        attempts: list[dict] = []
+
+        first_metrics: dict = {}
         feedback_pcm = await self.wait_for_optional_utterance(
             FEEDBACK_WAIT_SECONDS,
             max_frames=max_frames,
             end_silence_frames=FEEDBACK_END_SILENCE_FRAMES,
             speech_threshold=FEEDBACK_SPEECH_RMS_THRESHOLD,
+            dtmf_skip_digit=skip_digit,
+            rms_telemetry=first_metrics,
         )
+        attempts.append({"attempt": 1, "metrics": first_metrics})
+
+        # Retry once if the first window expired with no speech (and they
+        # didn't DTMF-skip out, and the channel is still up).
+        if (
+            not feedback_pcm
+            and FEEDBACK_RETRY_ENABLED
+            and not self.hungup
+            and first_metrics.get("ended_reason") == "wait_timeout"
+        ):
+            try:
+                retry_pcm = await self.synthesize_pcm(FEEDBACK_RETRY_PROMPT_TEXT, "rt_feedback_retry")
+                await self.play_pcm(retry_pcm)
+                if not self.hungup and go_cue:
+                    await self.play_pcm(go_cue)
+                if not self.hungup:
+                    self.drain_audio()
+                    while True:
+                        try:
+                            self.dtmf_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                    second_metrics: dict = {}
+                    feedback_pcm = await self.wait_for_optional_utterance(
+                        FEEDBACK_WAIT_SECONDS,
+                        max_frames=max_frames,
+                        end_silence_frames=FEEDBACK_END_SILENCE_FRAMES,
+                        speech_threshold=FEEDBACK_SPEECH_RMS_THRESHOLD,
+                        dtmf_skip_digit=skip_digit,
+                        rms_telemetry=second_metrics,
+                    )
+                    attempts.append({"attempt": 2, "metrics": second_metrics})
+            except Exception as exc:
+                logger.warning("Feedback retry failed uuid=%s: %s", self.call_uuid, exc)
+
+        final_metrics = attempts[-1]["metrics"] if attempts else {}
+        ended_reason = final_metrics.get("ended_reason", "unknown")
+
+        # ALWAYS write a sidecar — even with no audio — so the admin can see
+        # whether the caller skipped, timed out, or got cut off by hangup.
         if not feedback_pcm:
-            logger.info("No optional feedback left uuid=%s", self.call_uuid)
+            logger.info(
+                "No optional feedback captured uuid=%s ended_reason=%s attempts=%d",
+                self.call_uuid, ended_reason, len(attempts),
+            )
+            try:
+                feedback_path = SHARED_AUDIO_DIR / f"feedback_{self.call_uuid}.json"
+                feedback_path.write_text(
+                    json.dumps(
+                        {
+                            "call_uuid": self.call_uuid,
+                            "call_id": self.call_id,
+                            "phone_number": self.phone,
+                            "student_id": student_id,
+                            "channel": "asterisk_audiosocket",
+                            "participant_type": "tester",
+                            "recording_path": "",
+                            "transcript": "",
+                            "duration_seconds": 0,
+                            "tags": ["open_voice_note", f"no_audio:{ended_reason}"],
+                            "feedback_mode": FEEDBACK_MODE,
+                            "mode": self.mode,
+                            "attempt": self.attempt,
+                            "learning_state": learning_state or {},
+                            "prompt_played_seconds": prompt_played_seconds,
+                            "ended_reason": ended_reason,
+                            "wait_attempts": attempts,
+                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        },
+                        ensure_ascii=True, indent=2, default=str,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Could not write empty feedback sidecar uuid=%s: %s", self.call_uuid, exc)
             return
 
         duration_seconds = int(len(feedback_pcm) / (SAMPLE_RATE * SAMPLE_WIDTH))
@@ -762,6 +988,16 @@ class RealtimeCall:
             "mode": self.mode,
             "attempt": self.attempt,
             "learning_state": learning_state or {},
+            "prompt_played_seconds": prompt_played_seconds,
+            "ended_reason": ended_reason,
+            "time_to_first_speech_ms": final_metrics.get("time_to_first_speech_ms"),
+            "rms_telemetry": {
+                "peak": final_metrics.get("peak_rms"),
+                "mean": final_metrics.get("mean_rms"),
+                "frames_observed": final_metrics.get("frames_observed"),
+                "frames_above_threshold": final_metrics.get("frames_above_threshold"),
+            },
+            "wait_attempts": attempts,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         try:
@@ -785,6 +1021,11 @@ class RealtimeCall:
                 "attempt": self.attempt,
                 "feedback_mode": FEEDBACK_MODE,
                 "learning_state": learning_state or {},
+                "prompt_played_seconds": prompt_played_seconds,
+                "ended_reason": ended_reason,
+                "time_to_first_speech_ms": final_metrics.get("time_to_first_speech_ms"),
+                "rms_telemetry": feedback_metadata["rms_telemetry"],
+                "wait_attempts": attempts,
             },
             tags=["open_voice_note"],
             consent_recorded=True,
@@ -830,6 +1071,7 @@ class RealtimeCall:
                 timings=timings or {},
                 flags=flags or [],
                 directory=SHARED_AUDIO_DIR,
+                stt_provider=str(transcript.get("provider") or ""),
             )
         except Exception as exc:
             logger.warning("Could not append turn review uuid=%s turn=%s: %s", self.call_uuid, turn, exc)

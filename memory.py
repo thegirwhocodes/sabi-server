@@ -29,6 +29,8 @@ logger = logging.getLogger("sabi.memory")
 
 LEARNING_STATE_SNAPSHOT_PREFIX = "SABI_LEARNING_STATE_SNAPSHOT:"
 COMPAT_LEARNER_PREFIX = "sabi-phone"
+TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 
 MODULE_NAMES = {
     0: "diagnostic",
@@ -357,6 +359,45 @@ class StudentMemory:
         normalized_phone = normalize_phone_number(phone_number)
         variants = phone_lookup_variants(phone_number)
 
+        if one_profile_per_phone_enabled():
+            row = self._lookup_student_by_phone(normalized_phone, variants)
+            if row:
+                row = self._keep_single_phone_profile(row, normalized_phone, child_name)
+                return {**row, "is_new": False}
+
+            insert_payload = {
+                **_single_phone_identity_payload(normalized_phone, child_name),
+                "name": child_name,
+                "current_level": "beginner",
+                "current_module": 0,
+                "current_topic": "diagnostic",
+                "skills": {},
+                "learning_state": default_learning_state(),
+                "baseline_status": "not_started",
+                "current_week": 1,
+                "current_lesson": 1,
+                "tarl_level": 0,
+                "total_sessions": 0,
+                "total_correct": 0,
+                "total_wrong": 0,
+            }
+            try:
+                result = self._insert_student_with_fallback(insert_payload)
+            except Exception as exc:
+                if _is_duplicate_key_error(exc):
+                    row = self._lookup_student_by_phone(normalized_phone, variants)
+                    if row:
+                        logger.info("Recovered existing single-phone student after duplicate insert: %s", normalized_phone)
+                        return {**row, "is_new": False}
+                raise
+
+            if result and result.data and len(result.data) > 0:
+                return {**result.data[0], "is_new": True}
+            row = self._lookup_student_by_phone(normalized_phone, variants)
+            if row:
+                return {**row, "is_new": False}
+            return {"id": "new", "name": None, "current_module": 0, "is_new": True}
+
         if child_name:
             row = self._lookup_student_by_phone_and_name(normalized_phone, variants, child_name)
             if row:
@@ -427,6 +468,8 @@ class StudentMemory:
         messages: list[dict],
     ) -> dict | None:
         """Switch a shared-phone call to the named learner as soon as the child answers."""
+        if one_profile_per_phone_enabled():
+            return None
         if not self.client or not current_student.get("needs_identity_confirmation"):
             return None
         spoken_child_name = extract_child_name(messages)
@@ -683,6 +726,8 @@ class StudentMemory:
 
         filtered = []
         for row in rows:
+            if _is_zero_evidence_unlinked_demo(row):
+                continue
             if phone_digits and not _student_phone_matches(row, phone_digits):
                 continue
             if text_filter and not _student_matches_text(row, text_filter):
@@ -817,6 +862,8 @@ class StudentMemory:
         variants: list[str],
         child_name: str | None,
     ) -> dict | None:
+        if one_profile_per_phone_enabled():
+            return self._lookup_student_by_phone(normalized_phone, variants)
         name_key = normalize_child_name_for_identity(child_name)
         if not name_key:
             return None
@@ -904,6 +951,8 @@ class StudentMemory:
         variants: list[str],
         child_name: str,
     ) -> dict | None:
+        if one_profile_per_phone_enabled():
+            return self._keep_single_phone_profile(current_student, normalized_phone, child_name)
         name_key = normalize_child_name_for_identity(child_name)
         if not name_key:
             return current_student
@@ -1006,6 +1055,42 @@ class StudentMemory:
             logger.debug("Compatibility learner insert failed: %s", exc)
         return None
 
+    def _keep_single_phone_profile(
+        self,
+        current_student: dict,
+        normalized_phone: str,
+        child_name: str | None = None,
+    ) -> dict:
+        """Keep one durable learner row per caller number.
+
+        The old shared-phone mode created a separate profile when Sabi heard a
+        different spoken name. For the pre-pilot tester phase, that made Naomi
+        and other adult testers appear multiple times. In single-phone mode,
+        spoken names can fill a blank profile name, but never split one phone
+        number into another learner row.
+        """
+        if not current_student:
+            return current_student
+        payload = _single_phone_identity_payload(normalized_phone)
+        current_name = str(current_student.get("name") or "").strip()
+        child_name_clean = str(child_name or "").strip()
+        current_name_key = normalize_child_name_for_identity(current_name)
+        child_name_key = normalize_child_name_for_identity(child_name_clean)
+        if child_name_key and (
+            not current_name_key
+            or current_name.lower() in {"unnamed learner", "unknown", "none", "null"}
+            or current_name_key == child_name_key
+        ):
+            payload["name"] = child_name_clean
+            payload["child_name_normalized"] = child_name_key
+        updated = dict(current_student)
+        updated.update(payload)
+        try:
+            self._update_student_with_fallback(current_student.get("id"), payload)
+        except Exception as exc:
+            logger.debug("Could not enforce single-phone learner identity for %s: %s", current_student.get("id"), exc)
+        return updated
+
     def _update_student_with_fallback(self, student_id: str, payload: dict):
         return self._update_with_optional_fallback(
             "sabi_students",
@@ -1070,7 +1155,11 @@ class StudentMemory:
         if not student_id or normalized_phone == "unknown":
             return
         payload = {
-            **_phone_identity_payload(normalized_phone, child_name),
+            **(
+                _single_phone_identity_payload(normalized_phone, child_name)
+                if one_profile_per_phone_enabled()
+                else _phone_identity_payload(normalized_phone, child_name)
+            ),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
@@ -1117,6 +1206,22 @@ def _mentioned_columns(error: Exception, columns: set[str]) -> set[str]:
 def _is_duplicate_key_error(error: Exception) -> bool:
     text = _error_text(error).lower()
     return "23505" in text or "duplicate key" in text or "unique constraint" in text
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = str(os.getenv(name, "")).strip().lower()
+    if not value:
+        return default
+    if value in TRUE_ENV_VALUES:
+        return True
+    if value in FALSE_ENV_VALUES:
+        return False
+    return default
+
+
+def one_profile_per_phone_enabled() -> bool:
+    """Whether one caller number should resolve to exactly one learner row."""
+    return _env_flag("SABI_ONE_PROFILE_PER_PHONE", True)
 
 
 def _redact_feedback_text(text: str) -> str:
@@ -1178,6 +1283,18 @@ def _phone_identity_payload(normalized_phone: str, child_name: str | None = None
     return payload
 
 
+def _single_phone_identity_payload(normalized_phone: str, child_name: str | None = None) -> dict:
+    payload = {
+        "phone_number": normalized_phone,
+        "phone_number_normalized": normalized_phone,
+        "phone_household_key": normalized_phone,
+    }
+    child_name_normalized = normalize_child_name_for_identity(child_name)
+    if child_name_normalized:
+        payload["child_name_normalized"] = child_name_normalized
+    return payload
+
+
 def _compatibility_identity_payload(normalized_phone: str, child_name: str | None = None) -> dict:
     compatibility_key = compatibility_learner_key_for(normalized_phone, child_name)
     if not compatibility_key:
@@ -1205,6 +1322,8 @@ def _is_compatibility_learner_row(row: dict, normalized_phone: str) -> bool:
 
 def _annotate_shared_phone_profiles(row: dict, rows: list[dict]) -> dict:
     """Mark rows where a phone number already belongs to multiple named learners."""
+    if one_profile_per_phone_enabled():
+        return dict(row)
     names: list[str] = []
     seen: set[str] = set()
     for item in rows:
@@ -1231,6 +1350,21 @@ def _student_review_sort_key(row: dict) -> tuple[int, str, str]:
         str(row.get("name") or ""),
         str(row.get("id") or ""),
     )
+
+
+def _is_zero_evidence_unlinked_demo(row: dict) -> bool:
+    if int(row.get("total_sessions") or 0) != 0:
+        return False
+    if int(row.get("total_correct") or 0) != 0:
+        return False
+    if int(row.get("total_wrong") or 0) != 0:
+        return False
+    if str(row.get("last_session_summary") or "").strip():
+        return False
+    raw_name = str(row.get("name") or "").strip().lower()
+    has_placeholder_name = not raw_name or raw_name in {"unnamed learner", "unknown", "none", "null"}
+    has_demo_browser_id = bool(str(row.get("browser_id") or "").strip())
+    return has_placeholder_name or has_demo_browser_id
 
 
 def _student_review_record(student: dict, effective_state: dict, sessions: list[dict]) -> dict:

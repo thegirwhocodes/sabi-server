@@ -268,6 +268,36 @@ def main() -> int:
         f"{race_lookup} rows={race_memory.client.rows}",
     )
 
+    single_phone_memory = StudentMemory.__new__(StudentMemory)
+    single_phone_memory.client = FakeSupabaseClient(
+        rows=[
+            {
+                "id": "naomi-phone-row",
+                "phone_number": "+18604367048",
+                "phone_number_normalized": "+18604367048",
+                "name": "Naomi",
+                "total_sessions": 12,
+                "created_at": "2026-06-01T00:00:00+00:00",
+            },
+        ],
+        has_normalized_column=True,
+        unique_phone=False,
+    )
+    single_phone_lookup = asyncio.run(
+        single_phone_memory.find_or_create_student("+1 860 436 7048", child_name="Someone Else")
+    )
+    ok &= check(
+        "one_profile_per_phone_reuses_existing_phone_row",
+        single_phone_lookup["id"] == "naomi-phone-row"
+        and single_phone_lookup["is_new"] is False
+        and len(single_phone_memory.client.rows) == 1
+        and not single_phone_lookup.get("learner_key"),
+        f"{single_phone_lookup} rows={single_phone_memory.client.rows}",
+    )
+
+    previous_identity_mode = os.environ.get("SABI_ONE_PROFILE_PER_PHONE")
+    os.environ["SABI_ONE_PROFILE_PER_PHONE"] = "0"
+
     shared_phone_memory = StudentMemory.__new__(StudentMemory)
     shared_phone_memory.client = FakeSupabaseClient(
         rows=[
@@ -430,6 +460,11 @@ def main() -> int:
         legacy_lookup["id"] == legacy_amara["id"],
         f"lookup={legacy_lookup}",
     )
+
+    if previous_identity_mode is None:
+        os.environ.pop("SABI_ONE_PROFILE_PER_PHONE", None)
+    else:
+        os.environ["SABI_ONE_PROFILE_PER_PHONE"] = previous_identity_mode
 
     snapshot_memory = StudentMemory.__new__(StudentMemory)
     snapshot_state = {

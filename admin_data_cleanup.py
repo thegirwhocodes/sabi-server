@@ -3,8 +3,9 @@
 
 This intentionally does not invent child names. `name` remains the actual child
 name captured by Sabi. Blank, zero-evidence test rows can be removed after a
-JSON backup; active phone learners are preserved and shown through derived
-admin display names.
+JSON backup. Named no-phone demo rows with zero sessions can also be removed:
+they are browser/demo clutter, not phone pilot learners. Active phone learners
+are preserved and shown through derived admin display names.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from memory import StudentMemory, _student_display_identity
+from memory import StudentMemory, _is_zero_evidence_unlinked_demo, _student_display_identity
 
 
 BASE_STUDENT_COLUMNS = [
@@ -51,7 +52,7 @@ def main() -> int:
 
     available_optional = _available_optional_columns(memory)
     rows = _load_students(memory, available_optional)
-    safe_delete = [row for row in rows if _is_safe_placeholder(row, memory)]
+    safe_delete = [row for row in rows if _is_safe_delete(row, memory)]
     blank_name = [row for row in rows if _blank_name(row)]
     phone_pending = [
         row for row in blank_name
@@ -63,13 +64,13 @@ def main() -> int:
         "mode": "apply" if args.apply else "dry_run",
         "total_students": len(rows),
         "blank_name_rows": len(blank_name),
-        "safe_zero_evidence_placeholders": len(safe_delete),
+        "safe_zero_evidence_rows": len(safe_delete),
         "active_phone_learners_pending_name": len(phone_pending),
         "optional_identity_columns_present": available_optional,
         "missing_identity_columns": [
             column for column in OPTIONAL_IDENTITY_COLUMNS if column not in available_optional
         ],
-        "sample_safe_delete": [_preview_row(row) for row in safe_delete[:20]],
+        "sample_safe_delete": [_preview_row(row) for row in safe_delete[:30]],
         "sample_phone_pending": [_preview_row(row) for row in phone_pending[:20]],
     }
 
@@ -79,11 +80,22 @@ def main() -> int:
         report["backup_path"] = str(backup_path)
 
     deleted = 0
+    skipped_delete: list[dict] = []
     if args.apply and safe_delete:
         for row in safe_delete:
-            memory.client.table("sabi_students").delete().eq("id", row["id"]).execute()
-            deleted += 1
+            try:
+                memory.client.table("sabi_students").delete().eq("id", row["id"]).execute()
+                deleted += 1
+            except Exception as exc:
+                if _is_foreign_key_delete_error(exc):
+                    skipped_delete.append({
+                        **_preview_row(row),
+                        "reason": _error_text(exc)[:240],
+                    })
+                    continue
+                raise
     report["deleted_rows"] = deleted
+    report["skipped_referenced_rows"] = skipped_delete
 
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
@@ -106,8 +118,8 @@ def _load_students(memory: StudentMemory, optional_columns: list[str]) -> list[d
     return result.data or []
 
 
-def _is_safe_placeholder(row: dict, memory: StudentMemory) -> bool:
-    if not _blank_name(row):
+def _is_safe_delete(row: dict, memory: StudentMemory) -> bool:
+    if not _blank_name(row) and not _is_zero_evidence_unlinked_demo(row):
         return False
     if int(row.get("total_sessions") or 0) != 0:
         return False
@@ -115,16 +127,38 @@ def _is_safe_placeholder(row: dict, memory: StudentMemory) -> bool:
         return False
     if str(row.get("last_session_summary") or "").strip():
         return False
-    try:
-        sessions = memory.client.table("sabi_sessions").select("id").eq(
-            "student_id",
-            row.get("id"),
-        ).limit(1).execute()
-        if sessions.data:
-            return False
-    except Exception:
+    if _has_student_reference(memory, "sabi_sessions", row.get("id")):
+        return False
+    if _has_student_reference(memory, "sabi_active_calls", row.get("id")):
+        return False
+    if _has_student_reference(memory, "sabi_call_feedback", row.get("id")):
         return False
     return True
+
+
+def _has_student_reference(memory: StudentMemory, table_name: str, student_id: str | None) -> bool:
+    if not student_id:
+        return True
+    try:
+        result = memory.client.table(table_name).select("student_id").eq(
+            "student_id",
+            student_id,
+        ).limit(1).execute()
+        return bool(result.data)
+    except Exception:
+        return table_name == "sabi_sessions"
+
+
+def _error_text(error: Exception) -> str:
+    return " ".join(
+        str(getattr(error, attr, "") or "")
+        for attr in ("message", "details", "hint", "code")
+    ) or str(error)
+
+
+def _is_foreign_key_delete_error(error: Exception) -> bool:
+    text = _error_text(error).lower()
+    return "23503" in text or "foreign key constraint" in text or "still referenced" in text
 
 
 def _blank_name(row: dict) -> bool:

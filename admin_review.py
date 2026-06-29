@@ -237,6 +237,29 @@ def render_admin_review_page() -> str:
     .pill.bad { background: var(--bad-bg); color: var(--bad); border-color: #f3b6ae; }
     .pill.green { background: var(--green); color: #fff; border-color: var(--green); }
     .pill.soft { background: #f7faf8; color: var(--muted); border-color: var(--line-strong); }
+    .call-status-cell .pill {
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      line-height: 1.2;
+      justify-content: flex-start;
+    }
+    .call-review-cell {
+      min-width: 0;
+    }
+    .review-title {
+      display: block;
+      font-weight: 620;
+      line-height: 1.25;
+    }
+    .review-id {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
     .action-button {
       width: 34px;
       min-height: 28px;
@@ -836,7 +859,7 @@ def render_admin_review_page() -> str:
     function callRow(item) {
       const flags = item.quality_flags || [];
       const hasClips = Number(item.turn_count || 0) > 0;
-      const status = flags.length ? pill(flags[0], "warn") : pill(item.end_reason || "Success", "good");
+      const status = flags.length ? pill(callFlagLabel(flags[0]), "warn") : pill(callFlagLabel(item.end_reason || "Success"), "good");
       const review = hasClips ? "Turn audio and transcript ready" : "Full-call recording only";
       const active = state.selectedCall === item.call_uuid ? " active" : "";
       return `<tr class="${active}" data-call="${escapeHtml(item.call_uuid)}">
@@ -844,10 +867,25 @@ def render_admin_review_page() -> str:
         <td>${callerCell(item)}</td>
         <td>${fmtSeconds(item.duration_seconds)}</td>
         <td>${escapeHtml(item.user_turns || 0)} child<div class="small">${escapeHtml(item.turn_count || 0)} clips</div></td>
-        <td>${status}</td>
-        <td>${escapeHtml(review)}<div class="small">${escapeHtml(item.call_uuid || "")}</div></td>
+        <td class="call-status-cell">${status}</td>
+        <td class="call-review-cell"><span class="review-title">${escapeHtml(review)}</span><span class="review-id">${escapeHtml(item.call_uuid || "")}</span></td>
         <td><button class="action-button" title="Open call">...</button></td>
       </tr>`;
+    }
+    function callFlagLabel(value) {
+      const key = String(value || "").trim();
+      const labels = {
+        no_child_turns: "No child speech",
+        ended_before_minimum_lesson_window: "Ended too soon",
+        short_call: "Short call",
+        no_usable_speech: "No usable speech",
+        server_exception: "Server issue",
+        channel_closed: "Call closed",
+        sabi_wrap_up: "Completed",
+        audiosocket_closed_by_asterisk_or_network: "Call ended",
+        Success: "Success",
+      };
+      return labels[key] || key.replaceAll("_", " ");
     }
     function renderCurriculumView() {
       document.getElementById("range").textContent = "Map view";

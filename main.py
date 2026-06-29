@@ -47,14 +47,11 @@ from admin_review import render_admin_review_page
 from curriculum_review import build_curriculum_review_map
 from voice import router as voice_router
 from voice_twilio import router as twilio_router
-from voice_asterisk import start_agi_server
+from voice_asterisk import start_agi_server, synthesize_phone_tts
 from voice_realtime import record_hangup_event, register_call, start_audiosocket_server
 from secret_loader import get_secret
 
 load_dotenv()
-
-# Chatterbox TTS server (self-hosted, emotion-aware)
-CHATTERBOX_URL = os.getenv("CHATTERBOX_URL", "http://localhost:8001")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sabi")
@@ -64,40 +61,6 @@ AUDIO_DIR = Path("audio_cache")
 AUDIO_DIR.mkdir(exist_ok=True)
 
 import re
-import httpx
-
-def detect_exaggeration(text: str) -> float:
-    """Detect emotion from LLM response and return Chatterbox exaggeration level."""
-    if re.search(r'\[laugh\]|!\s*!|Well done|Correct|Yes!|Great|Excellent|Sharp sharp', text, re.I):
-        return 0.75
-    if re.search(r'\[sigh\]|Almost|Good try|tricky|Let me help', text, re.I):
-        return 0.35
-    if re.search(r'\[chuckle\]|Oya|Let.s try|ready', text, re.I):
-        return 0.6
-    return 0.5
-
-async def synthesize_chatterbox(text: str, output_path: str) -> bool:
-    """Generate speech via Chatterbox Turbo with emotion-aware exaggeration."""
-    try:
-        exaggeration = detect_exaggeration(text)
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{CHATTERBOX_URL}/tts",
-                json={
-                    "text": text[:2000],
-                    "speaker_name": "naomi",
-                    "format": "mp3",
-                    "exaggeration": exaggeration,
-                },
-            )
-            resp.raise_for_status()
-            with open(output_path, "wb") as f:
-                f.write(resp.content)
-            logger.info(f"Chatterbox TTS: {len(text)} chars, exag={exaggeration}")
-            return True
-    except Exception as e:
-        logger.warning(f"Chatterbox TTS failed: {e}")
-        return False
 
 # Pre-generated thinking cues
 THINKING_CUES = [
@@ -337,7 +300,7 @@ async def speech_to_text(request: Request):
 
 @app.post("/tts")
 async def text_to_speech(request: Request):
-    """Generate speech audio from text using Chatterbox, falling back to YarnGPT."""
+    """Generate speech audio from text using the configured server TTS provider."""
     data = await request.json()
     text = data.get("text", "")
     if not text:
@@ -347,8 +310,8 @@ async def text_to_speech(request: Request):
     output_path = AUDIO_DIR / f"tts_{audio_id}.mp3"
 
     start = time.time()
-    if not await synthesize_chatterbox(text, str(output_path)):
-        app.state.tts.synthesize(text, str(output_path))
+    if not await synthesize_phone_tts(app.state.tts, text, str(output_path)):
+        return JSONResponse({"error": "TTS generation failed"}, status_code=503)
     elapsed = time.time() - start
     logger.info(f"TTS: {len(text)} chars → {output_path.name} ({elapsed:.1f}s)")
 
@@ -434,11 +397,11 @@ async def process_turn(request: Request):
         messages.append({"role": "assistant", "content": response_text})
         app.state.memory.set_call_messages(call_id, messages)
 
-    # 3. TTS — try Chatterbox (emotion-aware) first, fallback to YarnGPT
+    # 3. TTS
     audio_id = uuid.uuid4().hex
     output_path = AUDIO_DIR / f"response_{audio_id}.mp3"
-    if not await synthesize_chatterbox(response_text, str(output_path)):
-        app.state.tts.synthesize(response_text, str(output_path))
+    if not await synthesize_phone_tts(app.state.tts, response_text, str(output_path)):
+        return JSONResponse({"error": "TTS generation failed"}, status_code=503)
 
     total_elapsed = time.time() - total_start
     logger.info(f"Full turn: {total_elapsed:.1f}s (STT→LLM→TTS)")

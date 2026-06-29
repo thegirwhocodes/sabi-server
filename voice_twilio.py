@@ -1,6 +1,6 @@
 """
 Twilio voice webhook handlers for Sabi.
-Same AI pipeline as Africa's Talking (Whisper → Claude → ElevenLabs/Chatterbox),
+Same AI pipeline as Africa's Talking (Whisper → Claude → ElevenLabs/YarnGPT),
 just wrapped in TwiML instead of AT XML.
 """
 
@@ -26,9 +26,6 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = get_secret("TWILIO_AUTH_TOKEN")
 THINKING_CUE_COUNT = 5
 
-# Chatterbox TTS server (fallback)
-CHATTERBOX_URL = os.getenv("CHATTERBOX_URL", "http://localhost:8001")
-
 # ElevenLabs — same model/voice_settings as curriculum-app/lib/voice/tts-client.ts (website demo parity)
 ELEVENLABS_VOICE_ID = get_secret("ELEVENLABS_VOICE_ID", "oC2pCZZWEDRe6lmZpaaw")
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or "eleven_flash_v2_5"
@@ -40,42 +37,6 @@ def twiml_response(twiml: str) -> Response:
         content=f'<?xml version="1.0" encoding="UTF-8"?>\n<Response>{twiml}</Response>',
         media_type="application/xml",
     )
-
-
-def detect_exaggeration(text: str) -> float:
-    """Detect emotion from LLM response for Chatterbox exaggeration."""
-    import re
-    if re.search(r'\[laugh\]|!\s*!|Well done|Correct|Yes!|Great|Excellent|Sharp sharp', text, re.I):
-        return 0.75
-    if re.search(r'\[sigh\]|Almost|Good try|tricky|Let me help', text, re.I):
-        return 0.35
-    if re.search(r'\[chuckle\]|Oya|Let.s try|ready', text, re.I):
-        return 0.6
-    return 0.5
-
-
-async def synthesize_chatterbox(text: str, output_path: str) -> bool:
-    """Generate speech via Chatterbox Turbo with emotion-aware exaggeration."""
-    try:
-        exaggeration = detect_exaggeration(text)
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{CHATTERBOX_URL}/tts",
-                json={
-                    "text": text[:2000],
-                    "speaker_name": "naomi",
-                    "format": "mp3",
-                    "exaggeration": exaggeration,
-                },
-            )
-            resp.raise_for_status()
-            with open(output_path, "wb") as f:
-                f.write(resp.content)
-            logger.info(f"Chatterbox TTS: {len(text)} chars, exag={exaggeration}")
-            return True
-    except Exception as e:
-        logger.warning(f"Chatterbox TTS failed: {e}")
-        return False
 
 
 async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
@@ -112,11 +73,9 @@ async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
 
 
 async def synthesize_tts(text: str, output_path: str, request) -> None:
-    """Try ElevenLabs → Chatterbox → YarnGPT fallback chain."""
+    """Try ElevenLabs → YarnGPT fallback chain."""
     t = normalize_money_for_speech(text)
     if await synthesize_elevenlabs(t, output_path):
-        return
-    if await synthesize_chatterbox(t, output_path):
         return
     request.app.state.tts.synthesize(t, output_path)
 
@@ -151,7 +110,7 @@ async def twilio_incoming(request: Request):
         {"role": "assistant", "content": greeting}
     ])
 
-    # Generate greeting audio (ElevenLabs Bukola → Chatterbox → YarnGPT)
+    # Generate greeting audio (ElevenLabs Bukola → YarnGPT)
     audio_id = uuid.uuid4().hex
     audio_path = f"audio_cache/greeting_{audio_id}.mp3"
     await synthesize_tts(greeting, audio_path, request)
@@ -176,7 +135,7 @@ async def twilio_incoming(request: Request):
 async def twilio_recording(request: Request):
     """
     Handle Twilio recording callback.
-    Download audio → Whisper STT → Claude LLM → Chatterbox TTS → play back.
+    Download audio → Whisper STT → Claude LLM → TTS → play back.
     """
     form = await request.form()
     recording_url = form.get("RecordingUrl", "")
@@ -286,7 +245,7 @@ async def twilio_recording(request: Request):
 
     logger.info(f"LLM response ({user_turns} turns): {response_text[:80]}...")
 
-    # 7. TTS (ElevenLabs Bukola → Chatterbox → YarnGPT)
+    # 7. TTS (ElevenLabs Bukola → YarnGPT)
     response_id = uuid.uuid4().hex
     response_path = f"audio_cache/response_{response_id}.mp3"
     await synthesize_tts(response_text, response_path, request)

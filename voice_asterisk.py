@@ -32,7 +32,6 @@ logger = logging.getLogger("sabi.asterisk")
 
 SHARED_AUDIO_DIR = Path(os.getenv("SABI_SHARED_AUDIO_DIR", "/shared/audio"))
 SHARED_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-CHATTERBOX_URL = os.getenv("CHATTERBOX_URL", "http://sabi-chatterbox:8001")
 ELEVENLABS_API_KEY = get_secret("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = get_secret("ELEVENLABS_VOICE_ID", "oC2pCZZWEDRe6lmZpaaw")
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or "eleven_flash_v2_5"
@@ -78,17 +77,6 @@ def mp3_to_asterisk_wav(mp3_path: str, wav_path: str) -> str:
     return wav_path
 
 
-def detect_exaggeration(text: str) -> float:
-    """Detect emotion from LLM response for Chatterbox exaggeration."""
-    if re.search(r'\[laugh\]|!\s*!|Well done|Correct|Yes!|Great|Excellent|Sharp sharp', text, re.I):
-        return 0.75
-    if re.search(r'\[sigh\]|Almost|Good try|tricky|Let me help', text, re.I):
-        return 0.35
-    if re.search(r'\[chuckle\]|Oya|Let.s try|ready', text, re.I):
-        return 0.6
-    return 0.5
-
-
 def clean_text_for_tts(text: str) -> str:
     """Remove stage directions that voice providers may read out loud."""
     text = normalize_money_for_speech(text).strip()
@@ -103,30 +91,6 @@ def clean_text_for_tts(text: str) -> str:
     text = re.sub(r"([.!?])\s+([.!?])", r"\1", text)
     text = re.sub(r"\s+([,.!?;:])", r"\1", text)
     return text.strip()
-
-
-async def synthesize_chatterbox(text: str, output_path: str) -> bool:
-    """Generate speech via Chatterbox Turbo. Returns True on success."""
-    try:
-        exaggeration = detect_exaggeration(text)
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            resp = await client.post(
-                f"{CHATTERBOX_URL}/tts",
-                json={
-                    "text": text[:2000],
-                    "speaker_name": "naomi",
-                    "format": "mp3",
-                    "exaggeration": exaggeration,
-                },
-            )
-            resp.raise_for_status()
-            with open(output_path, "wb") as f:
-                f.write(resp.content)
-            logger.info(f"Chatterbox TTS: {len(text)} chars, exag={exaggeration}")
-            return True
-    except Exception as e:
-        logger.warning(f"Chatterbox TTS failed: {e}")
-        return False
 
 
 async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
@@ -175,6 +139,21 @@ async def synthesize_yarngpt(tts, text: str, output_path: str) -> bool:
         return False
 
 
+async def synthesize_phone_tts(tts, text: str, output_path: str) -> bool:
+    """Generate phone audio with the configured cloud/free provider chain."""
+    if TTS_PRIMARY == "yarngpt":
+        return (
+            await synthesize_yarngpt(tts, text, output_path)
+            or await synthesize_elevenlabs(text, output_path)
+        )
+    if TTS_PRIMARY not in {"elevenlabs", "yarngpt"}:
+        logger.warning("Unsupported SABI_TTS_PRIMARY=%s; using ElevenLabs then YarnGPT", TTS_PRIMARY)
+    return (
+        await synthesize_elevenlabs(text, output_path)
+        or await synthesize_yarngpt(tts, text, output_path)
+    )
+
+
 async def tts_and_convert(tts, text: str, label: str = "resp") -> str:
     """Generate TTS audio and convert to Asterisk WAV format.
 
@@ -185,24 +164,7 @@ async def tts_and_convert(tts, text: str, label: str = "resp") -> str:
     wav_path = str(SHARED_AUDIO_DIR / f"{label}_{audio_id}.wav")
     clean_text = clean_text_for_tts(text)
 
-    if TTS_PRIMARY == "yarngpt":
-        ok = (
-            await synthesize_yarngpt(tts, clean_text, mp3_path)
-            or await synthesize_elevenlabs(clean_text, mp3_path)
-            or await synthesize_chatterbox(clean_text, mp3_path)
-        )
-    elif TTS_PRIMARY == "chatterbox":
-        ok = (
-            await synthesize_chatterbox(clean_text, mp3_path)
-            or await synthesize_elevenlabs(clean_text, mp3_path)
-            or await synthesize_yarngpt(tts, clean_text, mp3_path)
-        )
-    else:
-        ok = (
-            await synthesize_elevenlabs(clean_text, mp3_path)
-            or await synthesize_chatterbox(clean_text, mp3_path)
-            or await synthesize_yarngpt(tts, clean_text, mp3_path)
-        )
+    ok = await synthesize_phone_tts(tts, clean_text, mp3_path)
 
     if not ok:
         raise RuntimeError("All TTS providers failed")

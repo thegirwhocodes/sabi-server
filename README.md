@@ -10,7 +10,7 @@ This backend is the low-latency telephony stack: speech-to-text, curriculum-awar
 - Runs speech-to-text over local Whisper / faster paths when configured.
 - Generates tutoring responses with provider fallback: Cerebras, Claude, Groq, or Ollama.
 - Pulls student memory from Supabase.
-- Speaks responses through Chatterbox, YarnGPT, or configured TTS fallback.
+- Speaks responses through ElevenLabs or YarnGPT, depending on configured fallback order.
 - Streams LLM sentences into TTS to reduce time to first audio.
 - Maintains active call history and wraps up long lessons naturally.
 

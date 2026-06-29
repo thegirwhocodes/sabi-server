@@ -18,7 +18,6 @@ import struct
 import math
 
 SERVER = os.getenv("SABI_URL", "http://localhost:8000")
-CHATTERBOX = os.getenv("CHATTERBOX_URL", "http://sabi-chatterbox:8001")
 API_KEY = os.getenv("SABI_API_KEY", "")
 
 # Try loading from Docker secrets if env var not set
@@ -90,7 +89,7 @@ async def simulate_turn(client, turn_id, audio_bytes, results):
         timings["llm"] = time.monotonic() - llm_start
         llm_text = resp.json().get("response", "Well done!")
 
-        # 3. TTS (Chatterbox)
+        # 3. TTS
         tts_start = time.monotonic()
         resp = await client.post(
             f"{SERVER}/tts",

@@ -19,6 +19,8 @@ def main() -> int:
     ok &= check("intron_is_optional", "SABI_STT_PROVIDER" in source and "SABI_LITERACY_STT_PROVIDER" in source)
     ok &= check("intron_uses_bearer_auth", '"Authorization": f"Bearer {self._intron_key}"' in source)
     ok &= check("intron_uses_file_sync_endpoint", "https://infer.voice.intron.io/file/v1/upload/sync" in source)
+    ok &= check("intron_extracts_documented_transcript_field", "audio_transcript" in source)
+    ok &= check("intron_extracts_nested_duration", "processed_audio_duration_in_seconds" in source)
     ok &= check("intron_falls_back_to_whisper", "falling back to Groq/Whisper" in source)
     ok &= check("literacy_prompt_preserves_short_sounds", "Transcribe short sounds" in source and "Do not force literacy answers" in source)
     ok &= check("literacy_prompt_protects_rhyme_words", "rat, sat, fat" in source and "correct, right, wrong" in source)

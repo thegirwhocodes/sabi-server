@@ -17,6 +17,8 @@ import asyncio
 import httpx
 from fastapi import APIRouter, Request, Response
 
+from voice_asterisk import synthesize_phone_tts
+
 logger = logging.getLogger("sabi.voice")
 
 router = APIRouter()
@@ -66,11 +68,10 @@ async def incoming_call(request: Request):
         {"role": "assistant", "content": greeting}
     ])
 
-    # Generate greeting audio — try Chatterbox (emotion-aware) then YarnGPT
+    # Generate greeting audio with the configured server TTS provider.
     audio_id = uuid.uuid4().hex
     audio_path = f"audio_cache/greeting_{audio_id}.mp3"
-    if not await _synthesize_chatterbox(request.app, greeting, audio_path):
-        request.app.state.tts.synthesize(greeting, audio_path)
+    await _synthesize_server_tts(request.app, greeting, audio_path)
 
     response_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -143,8 +144,11 @@ async def handle_recording(request: Request):
     if result["confidence"] < 0.5 or not result["text"].strip():
         repeat_audio_id = uuid.uuid4().hex
         repeat_path = f"audio_cache/repeat_{repeat_audio_id}.mp3"
-        if not await _synthesize_chatterbox(request.app, "I didn't quite hear that. Can you say it again?", repeat_path):
-            request.app.state.tts.synthesize("I didn't quite hear that. Can you say it again?", repeat_path)
+        await _synthesize_server_tts(
+            request.app,
+            "I didn't quite hear that. Can you say it again?",
+            repeat_path,
+        )
         return xml_response(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Play url="{SERVER_URL}/audio/repeat_{repeat_audio_id}.mp3"/>
@@ -193,8 +197,7 @@ async def handle_recording(request: Request):
             call_id=session_id,
             channel="africas_talking_xml",
         )
-        if not await _synthesize_chatterbox(request.app, response_text, response_path):
-            request.app.state.tts.synthesize(response_text, response_path)
+        await _synthesize_server_tts(request.app, response_text, response_path)
 
     # ── STEP 6: Save to conversation history ──
     messages.append({"role": "assistant", "content": response_text})
@@ -232,36 +235,10 @@ async def call_events(request: Request):
 
 # ── Helpers ──
 
-async def _synthesize_chatterbox(app, text: str, output_path: str) -> bool:
-    """Generate speech via Chatterbox Turbo. Returns True on success."""
-    chatterbox_url = os.getenv("CHATTERBOX_URL", "http://localhost:8001")
-    try:
-        import re
-        exaggeration = 0.5
-        if re.search(r'\[laugh\]|!\s*!|Well done|Correct|Yes!|Great|Sharp sharp', text, re.I):
-            exaggeration = 0.75
-        elif re.search(r'\[sigh\]|Almost|Good try|tricky|Let me help', text, re.I):
-            exaggeration = 0.35
-        elif re.search(r'\[chuckle\]|Oya|Let.s try|ready', text, re.I):
-            exaggeration = 0.6
-
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{chatterbox_url}/tts",
-                json={
-                    "text": text[:2000],
-                    "speaker_name": "naomi",
-                    "format": "mp3",
-                    "exaggeration": exaggeration,
-                },
-            )
-            resp.raise_for_status()
-            with open(output_path, "wb") as f:
-                f.write(resp.content)
-            return True
-    except Exception as e:
-        logger.warning(f"Chatterbox TTS failed: {e}")
-        return False
+async def _synthesize_server_tts(app, text: str, output_path: str) -> None:
+    """Run the configured server TTS provider without blocking the event loop."""
+    if not await synthesize_phone_tts(app.state.tts, text, output_path):
+        raise RuntimeError("All TTS providers failed")
 
 
 async def _stream_llm_to_tts(
@@ -298,13 +275,12 @@ async def _stream_llm_to_tts(
         chunk_id = uuid.uuid4().hex
         chunk_path = f"audio_cache/chunk_{chunk_id}.mp3"
 
-        # Synthesize this sentence immediately
-        if not await _synthesize_chatterbox(app, sentence, chunk_path):
-            try:
-                app.state.tts.synthesize(sentence, chunk_path)
-            except Exception as e:
-                logger.warning(f"TTS chunk failed for '{sentence[:40]}': {e}")
-                continue
+        # Synthesize this sentence immediately.
+        try:
+            await _synthesize_server_tts(app, sentence, chunk_path)
+        except Exception as e:
+            logger.warning(f"TTS chunk failed for '{sentence[:40]}': {e}")
+            continue
 
         audio_chunks.append(chunk_path)
         logger.info(f"Streaming TTS: synthesized sentence '{sentence[:50]}'")

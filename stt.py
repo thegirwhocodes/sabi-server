@@ -207,7 +207,7 @@ class SpeechToText:
         )
         if response.status_code == 503:
             data = _safe_json(response)
-            raise RuntimeError(f"Intron sync still processing file_id={data.get('file_id', 'unknown')}")
+            raise RuntimeError(f"Intron sync still processing file_id={_extract_intron_file_id(data)}")
         response.raise_for_status()
         data = response.json()
         text = _extract_intron_text(data)
@@ -215,7 +215,7 @@ class SpeechToText:
             "text": text,
             "confidence": 0.84 if text else 0.0,
             "language": INTRON_LANGUAGE,
-            "duration_seconds": round(float(data.get("duration") or data.get("duration_seconds") or 0.0), 1),
+            "duration_seconds": _extract_intron_duration(data),
             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
             "provider": "intron",
         }
@@ -333,7 +333,7 @@ def _safe_json(response) -> dict:
 
 def _extract_intron_text(data: dict) -> str:
     """Handle small response-shape variations without making the call path brittle."""
-    for key in ("text", "transcript", "transcription"):
+    for key in ("text", "transcript", "transcription", "audio_transcript"):
         value = data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -355,3 +355,33 @@ def _extract_intron_text(data: dict) -> str:
             if parts:
                 return " ".join(parts).strip()
     return ""
+
+
+def _extract_intron_duration(data: dict) -> float:
+    """Return audio duration from the response shape used by Intron file sync."""
+    for key in ("duration", "duration_seconds", "processed_audio_duration_in_seconds"):
+        value = data.get(key)
+        if value not in (None, ""):
+            try:
+                return round(float(value), 1)
+            except (TypeError, ValueError):
+                pass
+    for key in ("results", "result", "data"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            duration = _extract_intron_duration(value)
+            if duration:
+                return duration
+    return 0.0
+
+
+def _extract_intron_file_id(data: dict) -> str:
+    """Return the file id from an Intron sync timeout/status response."""
+    for key in ("file_id", "id"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        return _extract_intron_file_id(nested)
+    return "unknown"

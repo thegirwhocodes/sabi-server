@@ -267,6 +267,7 @@ class SpeechToText:
                 "language": data.get("language", "en"),
                 "duration_seconds": round(data.get("duration", 0.0), 1),
                 "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+                "provider": "groq",
             }
             if str(mode or "").lower() == "literacy" and _is_suspect_literacy_feedback(text, context):
                 try:
@@ -330,6 +331,7 @@ class SpeechToText:
             "language": info.language,
             "duration_seconds": round(info.duration, 1),
             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+            "provider": "local_whisper",
         }
 
 

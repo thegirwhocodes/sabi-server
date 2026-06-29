@@ -155,8 +155,13 @@ def append_call_turn_review(
     timings: dict[str, Any] | None = None,
     flags: list[str] | None = None,
     directory: Path | None = None,
+    stt_provider: str = "",
 ) -> dict[str, Any] | None:
-    """Attach one complete tutor turn to the call review sidecar."""
+    """Attach one complete tutor turn to the call review sidecar.
+
+    `stt_provider` lets the admin console show which STT engine handled each
+    turn ("groq", "intron", "local_whisper", "local_literacy_salvage").
+    """
     path = call_sidecar_path(call_uuid, directory)
     if not path:
         return None
@@ -182,6 +187,7 @@ def append_call_turn_review(
         assistant_audio_seconds=assistant_audio_seconds,
         timings=timings or {},
         flags=flags or [],
+        stt_provider=stt_provider,
     )
     turns = [
         turn
@@ -191,6 +197,14 @@ def append_call_turn_review(
     turns.append(turn_record)
     record["turns"] = sorted(turns, key=lambda turn: int(turn.get("turn_index", 0)))
     record["turn_count"] = len(record["turns"])
+    # Rollup of every STT provider that handled at least one turn on this call.
+    providers_seen = sorted({
+        str((turn.get("user") or {}).get("stt_provider") or "")
+        for turn in record["turns"]
+        if (turn.get("user") or {}).get("stt_provider")
+    })
+    if providers_seen:
+        record["stt_providers_used"] = providers_seen
     record["updated_at"] = int(time.time())
     path.write_text(json.dumps(record, ensure_ascii=True, indent=2, sort_keys=True, default=str))
     return record
@@ -437,6 +451,7 @@ def _turn_review_record(
     assistant_audio_seconds: float,
     timings: dict[str, Any],
     flags: list[str],
+    stt_provider: str = "",
 ) -> dict[str, Any]:
     state_before = _learning_state_review(learning_state_before or {})
     state_after = _learning_state_review(learning_state_after or {})
@@ -449,6 +464,7 @@ def _turn_review_record(
             "audio_endpoint": f"/admin/calls/{call_uuid}/turns/{turn_index}/audio/user",
             "stt_transcript": stt_transcript,
             "stt_confidence": round(float(stt_confidence or 0), 3),
+            "stt_provider": str(stt_provider or ""),
             "normalized_transcript": normalized_transcript,
             "normalization_changed": normalized_changed,
             "input_audio_note": (

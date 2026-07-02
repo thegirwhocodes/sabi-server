@@ -156,11 +156,15 @@ def append_call_turn_review(
     flags: list[str] | None = None,
     directory: Path | None = None,
     stt_provider: str = "",
+    tts_provider: str = "",
 ) -> dict[str, Any] | None:
     """Attach one complete tutor turn to the call review sidecar.
 
     `stt_provider` lets the admin console show which STT engine handled each
     turn ("groq", "intron", "local_whisper", "local_literacy_salvage").
+    `tts_provider` records which TTS engine spoke Sabi's reply
+    ("chatterbox", "elevenlabs", "yarngpt") — the evidence for the
+    Chatterbox-vs-ElevenLabs canary.
     """
     path = call_sidecar_path(call_uuid, directory)
     if not path:
@@ -188,6 +192,7 @@ def append_call_turn_review(
         timings=timings or {},
         flags=flags or [],
         stt_provider=stt_provider,
+        tts_provider=tts_provider,
     )
     turns = [
         turn
@@ -205,6 +210,13 @@ def append_call_turn_review(
     })
     if providers_seen:
         record["stt_providers_used"] = providers_seen
+    tts_seen = sorted({
+        str((turn.get("assistant") or {}).get("tts_provider") or "")
+        for turn in record["turns"]
+        if (turn.get("assistant") or {}).get("tts_provider")
+    })
+    if tts_seen:
+        record["tts_providers_used"] = tts_seen
     record["updated_at"] = int(time.time())
     path.write_text(json.dumps(record, ensure_ascii=True, indent=2, sort_keys=True, default=str))
     return record
@@ -452,6 +464,7 @@ def _turn_review_record(
     timings: dict[str, Any],
     flags: list[str],
     stt_provider: str = "",
+    tts_provider: str = "",
 ) -> dict[str, Any]:
     state_before = _learning_state_review(learning_state_before or {})
     state_after = _learning_state_review(learning_state_after or {})
@@ -475,6 +488,7 @@ def _turn_review_record(
         "assistant": {
             "text": assistant_text,
             "tts_text": assistant_tts_text,
+            "tts_provider": str(tts_provider or ""),
             "tts_text_changed": (assistant_tts_text or "").strip() != (assistant_text or "").strip(),
             "audio_path": assistant_audio_path,
             "audio_seconds": round(float(assistant_audio_seconds or 0), 2),

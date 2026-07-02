@@ -440,7 +440,7 @@ async def _send_packet(writer: asyncio.StreamWriter, packet_type: int, payload: 
 
 class RealtimeCall:
     def __init__(self, call_uuid: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                 stt, llm, tts, memory):
+                 stt, llm, tts, memory, tts_primary: str = ""):
         self.call_uuid = call_uuid
         self.reader = reader
         self.writer = writer
@@ -448,6 +448,12 @@ class RealtimeCall:
         self.llm = llm
         self.tts = tts
         self.memory = memory
+        # Per-lane TTS provider override. Empty = global SABI_TTS_PRIMARY.
+        # The isolated test lane (port 9020) sets this from
+        # SABI_TTS_TEST_PRIMARY so Chatterbox can be canaried without touching
+        # the production chain.
+        self.tts_primary = (tts_primary or "").strip().lower()
+        self.last_tts_provider = ""
         metadata = CALL_REGISTRY.pop(call_uuid, {})
         self.phone = metadata.get("phone", "unknown")
         self.mode = metadata.get("mode", "inbound")
@@ -522,9 +528,15 @@ class RealtimeCall:
 
     async def synthesize_pcm(self, text: str, label: str) -> bytes:
         start = time.monotonic()
-        path_without_ext = await tts_and_convert(self.tts, text, label)
+        path_without_ext, provider = await tts_and_convert(
+            self.tts, text, label, primary=self.tts_primary or None
+        )
+        self.last_tts_provider = provider
         pcm = _read_wav_pcm(path_without_ext)
-        logger.info("%s TTS ready in %.2fs (%d bytes)", label, time.monotonic() - start, len(pcm))
+        logger.info(
+            "%s TTS ready in %.2fs (%d bytes, provider=%s)",
+            label, time.monotonic() - start, len(pcm), provider,
+        )
         return pcm
 
     async def play_pcm(self, pcm: bytes) -> None:
@@ -1072,6 +1084,7 @@ class RealtimeCall:
                 flags=flags or [],
                 directory=SHARED_AUDIO_DIR,
                 stt_provider=str(transcript.get("provider") or ""),
+                tts_provider=self.last_tts_provider if assistant_text else "",
             )
         except Exception as exc:
             logger.warning("Could not append turn review uuid=%s turn=%s: %s", self.call_uuid, turn, exc)
@@ -1533,7 +1546,7 @@ class RealtimeCall:
 
 
 async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                                  stt, llm, tts, memory) -> None:
+                                  stt, llm, tts, memory, tts_primary: str = "") -> None:
     peer_info = writer.get_extra_info("peername")
     try:
         packet_type, payload = await _read_packet(reader)
@@ -1542,16 +1555,22 @@ async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.
             writer.close()
             return
         call_uuid = str(uuid.UUID(bytes=payload))
-        await RealtimeCall(call_uuid, reader, writer, stt, llm, tts, memory).run()
+        await RealtimeCall(
+            call_uuid, reader, writer, stt, llm, tts, memory, tts_primary=tts_primary
+        ).run()
     except Exception as exc:
         logger.error("AudioSocket connection error from %s: %s", peer_info, exc, exc_info=True)
         writer.close()
 
 
-async def start_audiosocket_server(stt, llm, tts, memory, host: str = "0.0.0.0", port: int = 9019):
+async def start_audiosocket_server(stt, llm, tts, memory, host: str = "0.0.0.0", port: int = 9019,
+                                   tts_primary: str = ""):
     async def client_handler(reader, writer):
-        await handle_audiosocket_call(reader, writer, stt, llm, tts, memory)
+        await handle_audiosocket_call(reader, writer, stt, llm, tts, memory, tts_primary=tts_primary)
 
     server = await asyncio.start_server(client_handler, host, port)
-    logger.info("AudioSocket realtime server listening on %s:%s", host, port)
+    logger.info(
+        "AudioSocket realtime server listening on %s:%s tts_primary=%s",
+        host, port, tts_primary or "(global)",
+    )
     return server

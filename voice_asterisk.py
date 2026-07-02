@@ -36,6 +36,12 @@ ELEVENLABS_API_KEY = get_secret("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = get_secret("ELEVENLABS_VOICE_ID", "oC2pCZZWEDRe6lmZpaaw")
 ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or "eleven_flash_v2_5"
 TTS_PRIMARY = os.getenv("SABI_TTS_PRIMARY", "elevenlabs").strip().lower()
+# Self-hosted Chatterbox Turbo (per pilot/budget/Sabi Costs.md the phone path
+# should be Chatterbox at $0; ElevenLabs stays as paid fallback/last resort).
+# `chatterbox` resolves on the sabi-server_default docker network.
+CHATTERBOX_URL = os.getenv("SABI_CHATTERBOX_URL", "http://chatterbox:8001/tts").strip()
+CHATTERBOX_SPEAKER = os.getenv("SABI_CHATTERBOX_SPEAKER", "naomi").strip()
+CHATTERBOX_TIMEOUT_SECONDS = float(os.getenv("SABI_CHATTERBOX_TIMEOUT_SECONDS", "12"))
 
 MAX_TURNS = int(os.getenv("SABI_MAX_TURNS", "40"))
 WRAP_UP_AFTER_TURNS = int(os.getenv("SABI_WRAP_UP_AFTER_TURNS", "34"))
@@ -126,6 +132,32 @@ async def synthesize_elevenlabs(text: str, output_path: str) -> bool:
         return False
 
 
+async def synthesize_chatterbox(text: str, output_path: str) -> bool:
+    """Generate speech via the self-hosted Chatterbox Turbo container ($0/call)."""
+    if not CHATTERBOX_URL:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=CHATTERBOX_TIMEOUT_SECONDS) as client:
+            resp = await client.post(
+                CHATTERBOX_URL,
+                json={
+                    "text": text[:2000],
+                    "speaker_name": CHATTERBOX_SPEAKER,
+                    "format": "mp3",
+                },
+            )
+            resp.raise_for_status()
+            if len(resp.content) < 1024:
+                raise RuntimeError(f"suspiciously small audio ({len(resp.content)} bytes)")
+            with open(output_path, "wb") as f:
+                f.write(resp.content)
+            logger.info("Chatterbox TTS (%s): %d chars", CHATTERBOX_SPEAKER, len(text))
+            return True
+    except Exception as e:
+        logger.warning(f"Chatterbox TTS failed: {e}")
+        return False
+
+
 async def synthesize_yarngpt(tts, text: str, output_path: str) -> bool:
     """Generate speech via YarnGPT. Returns True on success."""
     try:
@@ -139,34 +171,58 @@ async def synthesize_yarngpt(tts, text: str, output_path: str) -> bool:
         return False
 
 
-async def synthesize_phone_tts(tts, text: str, output_path: str) -> bool:
-    """Generate phone audio with the configured cloud/free provider chain."""
-    if TTS_PRIMARY == "yarngpt":
-        return (
-            await synthesize_yarngpt(tts, text, output_path)
-            or await synthesize_elevenlabs(text, output_path)
-        )
-    if TTS_PRIMARY not in {"elevenlabs", "yarngpt"}:
-        logger.warning("Unsupported SABI_TTS_PRIMARY=%s; using ElevenLabs then YarnGPT", TTS_PRIMARY)
-    return (
-        await synthesize_elevenlabs(text, output_path)
-        or await synthesize_yarngpt(tts, text, output_path)
-    )
+async def synthesize_phone_tts(tts, text: str, output_path: str, primary: str | None = None) -> str | None:
+    """Generate phone audio with the configured provider chain.
+
+    Returns the provider name that produced the audio ("chatterbox",
+    "elevenlabs", "yarngpt") or None if every provider failed — truthy/falsy
+    compatible with the old bool return.
+
+    `primary` overrides the global SABI_TTS_PRIMARY for one call. The isolated
+    AudioSocket test lane uses this (SABI_TTS_TEST_PRIMARY) so Chatterbox can
+    be canaried on port 9020 while production keeps its known-good chain.
+    """
+    effective_primary = (primary or TTS_PRIMARY).strip().lower()
+
+    if effective_primary == "chatterbox":
+        if await synthesize_chatterbox(text, output_path):
+            return "chatterbox"
+        if await synthesize_elevenlabs(text, output_path):
+            return "elevenlabs"
+        if await synthesize_yarngpt(tts, text, output_path):
+            return "yarngpt"
+        return None
+
+    if effective_primary == "yarngpt":
+        if await synthesize_yarngpt(tts, text, output_path):
+            return "yarngpt"
+        if await synthesize_elevenlabs(text, output_path):
+            return "elevenlabs"
+        return None
+
+    if effective_primary not in {"elevenlabs", "yarngpt", "chatterbox"}:
+        logger.warning("Unsupported SABI_TTS_PRIMARY=%s; using ElevenLabs then YarnGPT", effective_primary)
+    if await synthesize_elevenlabs(text, output_path):
+        return "elevenlabs"
+    if await synthesize_yarngpt(tts, text, output_path):
+        return "yarngpt"
+    return None
 
 
-async def tts_and_convert(tts, text: str, label: str = "resp") -> str:
+async def tts_and_convert(tts, text: str, label: str = "resp", primary: str | None = None) -> tuple[str, str]:
     """Generate TTS audio and convert to Asterisk WAV format.
 
-    Returns path WITHOUT extension (Asterisk adds .wav/.ulaw automatically).
+    Returns (path WITHOUT extension, provider name). Asterisk adds .wav/.ulaw
+    to the path automatically; the provider feeds per-turn admin evidence.
     """
     audio_id = uuid.uuid4().hex
     mp3_path = str(SHARED_AUDIO_DIR / f"{label}_{audio_id}.mp3")
     wav_path = str(SHARED_AUDIO_DIR / f"{label}_{audio_id}.wav")
     clean_text = clean_text_for_tts(text)
 
-    ok = await synthesize_phone_tts(tts, clean_text, mp3_path)
+    provider = await synthesize_phone_tts(tts, clean_text, mp3_path, primary=primary)
 
-    if not ok:
+    if not provider:
         raise RuntimeError("All TTS providers failed")
 
     # Convert MP3 → 8kHz WAV
@@ -180,7 +236,7 @@ async def tts_and_convert(tts, text: str, label: str = "resp") -> str:
         pass
 
     # Return path without extension (Asterisk convention)
-    return wav_path.rsplit(".", 1)[0]
+    return wav_path.rsplit(".", 1)[0], provider
 
 
 def _latest_user_message(messages: list[dict]) -> str:
@@ -343,7 +399,7 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
         logger.info(f"Greeting: {greeting[:80]}...")
 
         # 3. TTS greeting → Asterisk WAV
-        greeting_path = await tts_and_convert(tts, greeting, "greeting")
+        greeting_path, _tts_provider = await tts_and_convert(tts, greeting, "greeting")
 
         # 4. Play greeting
         await agi_command(f'STREAM FILE "{greeting_path}" "#"')
@@ -385,7 +441,7 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
 
             # Handle low confidence
             if transcript["confidence"] < CONFIDENCE_THRESHOLD or not transcript["text"].strip():
-                retry_path = await tts_and_convert(
+                retry_path, _tts_provider = await tts_and_convert(
                     tts, "I didn't quite hear that. Can you say it again?", "retry"
                 )
                 await agi_command(f'STREAM FILE "{retry_path}" "#"')
@@ -484,7 +540,7 @@ async def handle_agi_call(reader: asyncio.StreamReader, writer: asyncio.StreamWr
 
             # TTS response
             tts_start = time.monotonic()
-            resp_path = await tts_and_convert(tts, response, "resp")
+            resp_path, _tts_provider = await tts_and_convert(tts, response, "resp")
             logger.info(f"Turn {turn}: tts={time.monotonic() - tts_start:.2f}s")
             await agi_command(f'STREAM FILE "{resp_path}" "#"')
 

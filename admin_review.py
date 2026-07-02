@@ -1,4 +1,16 @@
-"""Protected browser review console for Sabi learner/call QA."""
+"""Protected browser review console for Sabi learner/call QA.
+
+Board-facing operations console, rebuilt to Naomi's backend brief:
+  - Board members immediately understand what they are looking at.
+  - One row per learner; names + phone numbers always shown together.
+  - No "Unnamed learner", no raw flags — everything in human language.
+  - Real sort + filter controls (newest first is a labelled sort, not a pill).
+  - Call review shows full/child/Sabi audio, per-turn clips, raw vs cleaned
+    STT, confidence, provider, timings, exact TTS text, and feedback notes.
+  - Curriculum shown as a node/branch map with green, subtle support states.
+Visual identity follows the approved premium Sabi brand: warm ivory surfaces,
+ink sidebar, gold spark, Cormorant Garamond display + Lexend body.
+"""
 
 from __future__ import annotations
 
@@ -16,122 +28,158 @@ def render_admin_review_page() -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sabi Admin Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       color-scheme: light;
-      --green: #24933f;
-      --green-dark: #1d7432;
-      --green-soft: #e8f5ec;
-      --ink: #232b27;
-      --muted: #68746d;
-      --line: #e2e7e4;
-      --line-strong: #d4ddd7;
-      --header: #f6f8f7;
-      --row: #f0f0f0;
-      --panel: #ffffff;
+      --ink: #201a13;
+      --ink-soft: #4c4438;
+      --muted: #857a68;
+      --paper: #f7f2e7;
+      --card: #fffdf8;
+      --line: #e8dfc9;
+      --line-strong: #d9cdaf;
+      --gold: #cba868;
+      --gold-deep: #9a7536;
+      --gold-soft: #f4ead4;
+      --gold-wash: #faf4e6;
+      --green: #1e7b43;
+      --green-soft: #e6f3ea;
+      --green-line: #b9dcc6;
       --warn: #9b5b00;
-      --warn-bg: #fff4dc;
+      --warn-bg: #faf0da;
+      --warn-line: #ecd3a2;
       --bad: #b42318;
-      --bad-bg: #fff0ee;
-      --good: #147a3f;
-      --shadow: 0 18px 45px rgba(31, 43, 35, 0.12);
-      --soft-shadow: 0 8px 24px rgba(35, 43, 39, 0.06);
+      --bad-bg: #fbeeec;
+      --bad-line: #f0c1ba;
+      --side: #1b1610;
+      --side-soft: #2a2318;
+      --side-text: #d8cdb8;
+      --shadow: 0 24px 60px rgba(45, 36, 20, 0.16);
+      --soft-shadow: 0 6px 22px rgba(45, 36, 20, 0.06);
+      --serif: "Cormorant Garamond", Georgia, serif;
+      --sans: "Lexend", ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f6f8f6;
+      font-family: var(--sans);
+      font-weight: 300;
+      background:
+        radial-gradient(1200px 500px at 85% -10%, rgba(203, 168, 104, 0.10), transparent 60%),
+        var(--paper);
       color: var(--ink);
-      letter-spacing: 0;
+      font-size: 14px;
+      line-height: 1.5;
     }
+    h1, h2, h3 { margin: 0; font-weight: 600; }
+    h1 { font-family: var(--serif); font-size: 30px; line-height: 1.05; letter-spacing: .01em; }
+    h2 { font-size: 16px; font-weight: 500; }
+    h3 { font-size: 13px; font-weight: 600; letter-spacing: .02em; }
     button, input, select {
       font: inherit;
-      border: 1px solid var(--line);
-      border-radius: 5px;
-      background: #fff;
+      font-weight: 400;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      background: var(--card);
       color: var(--ink);
     }
     button {
       min-height: 38px;
-      padding: 8px 12px;
+      padding: 8px 14px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 7px;
+      transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
     }
-    button.primary {
-      background: var(--green);
-      border-color: var(--green);
-      color: #fff;
+    button:hover { border-color: var(--gold); background: var(--gold-wash); }
+    button:active { transform: translateY(1px); }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--gold);
+      outline-offset: 1px;
     }
-    input { min-height: 38px; padding: 8px 10px; min-width: 260px; }
-    h1, h2, h3 { margin: 0; }
-    h1 { font-size: 22px; font-weight: 620; }
-    h2 { font-size: 18px; font-weight: 620; }
-    h3 { font-size: 14px; font-weight: 650; }
-    audio { width: 100%; margin-top: 8px; }
-    .app {
-      min-height: 100vh;
-      display: grid;
-      grid-template-columns: 250px minmax(0, 1fr);
+    button.primary { background: var(--ink); border-color: var(--ink); color: #f6efe0; }
+    button.primary:hover { background: #33291c; }
+    input { min-height: 38px; padding: 8px 12px; min-width: 250px; }
+    input::placeholder { color: var(--muted); }
+    select { min-height: 38px; padding: 7px 10px; cursor: pointer; }
+    label.control {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
     }
+    audio { width: 100%; margin-top: 8px; height: 36px; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 246px minmax(0, 1fr); }
+
+    /* ---------- Sidebar ---------- */
     .sidebar {
-      background: #f1f3f2;
-      border-right: 1px solid var(--line);
-      padding: 18px 14px;
+      background: linear-gradient(180deg, var(--side) 0%, #221b12 100%);
+      color: var(--side-text);
+      padding: 22px 14px 16px;
       position: sticky;
       top: 0;
       height: 100vh;
-    }
-    .brand {
       display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 4px 6px 20px;
-      border-bottom: 1px solid var(--line);
-      margin-bottom: 16px;
+      flex-direction: column;
+      gap: 18px;
     }
-    .brand-mark {
-      width: 36px;
-      height: 36px;
-      border-radius: 7px;
-      display: grid;
-      place-items: center;
-      background: var(--green);
-      color: white;
-      font-weight: 800;
-    }
-    .brand-title { font-size: 19px; line-height: 1.05; font-weight: 750; color: var(--green-dark); }
-    .brand-subtitle { font-size: 12px; color: var(--muted); margin-top: 3px; }
-    .status-note {
-      display: inline-flex;
-      width: fit-content;
-      padding: 3px 7px;
-      border-radius: 5px;
-      background: #f4f5f4;
-      color: var(--muted);
-      font-size: 12px;
-      border: 1px solid var(--line);
-    }
-    .nav { display: grid; gap: 4px; }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 2px 8px 18px; border-bottom: 1px solid rgba(216, 205, 184, 0.16); }
+    .brand-spark { width: 34px; height: 34px; flex: none; filter: drop-shadow(0 0 10px rgba(203,168,104,.35)); }
+    .brand-title { font-family: var(--serif); font-size: 26px; font-weight: 600; color: #f1e6cd; line-height: 1; }
+    .brand-subtitle { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: rgba(216,205,184,.62); margin-top: 4px; }
+    .nav { display: grid; gap: 3px; }
     .nav button {
       border: 0;
       background: transparent;
       justify-content: flex-start;
       width: 100%;
-      color: #3d4741;
+      color: var(--side-text);
       padding: 10px 12px;
-      border-radius: 5px;
+      border-radius: 9px;
+      font-weight: 300;
+      font-size: 13.5px;
+      gap: 11px;
     }
-    .nav button[aria-selected="true"] { background: var(--green); color: #fff; }
+    .nav button svg { width: 16px; height: 16px; flex: none; opacity: .75; }
+    .nav button:hover { background: rgba(203, 168, 104, 0.12); color: #f1e6cd; }
+    .nav button[aria-selected="true"] {
+      background: linear-gradient(90deg, rgba(203,168,104,.22), rgba(203,168,104,.08));
+      color: #f6ecd6;
+      font-weight: 500;
+      box-shadow: inset 2.5px 0 0 var(--gold);
+    }
+    .nav-count {
+      margin-left: auto;
+      font-size: 10.5px;
+      background: rgba(203,168,104,.18);
+      color: #e6d3a8;
+      border-radius: 99px;
+      min-width: 20px;
+      padding: 2px 7px;
+      text-align: center;
+    }
+    .side-foot { margin-top: auto; display: grid; gap: 10px; padding: 12px 8px 0; border-top: 1px solid rgba(216,205,184,.14); font-size: 11.5px; color: rgba(216,205,184,.66); }
+    .health { display: flex; align-items: center; gap: 8px; }
+    .health-dot { width: 8px; height: 8px; border-radius: 99px; background: #6c6353; box-shadow: 0 0 0 3px rgba(108,99,83,.2); }
+    .health-dot.ok { background: #4dbd7d; box-shadow: 0 0 0 3px rgba(77,189,125,.18); }
+    .health-dot.down { background: #e0655a; box-shadow: 0 0 0 3px rgba(224,101,90,.18); }
+
+    /* ---------- Topbar + workspace ---------- */
     .content { min-width: 0; }
     .topbar {
-      min-height: 78px;
-      background: #fff;
+      min-height: 86px;
+      background: rgba(255, 253, 248, 0.86);
+      backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--line);
-      padding: 16px 24px;
+      padding: 18px 26px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -140,395 +188,324 @@ def render_admin_review_page() -> str:
       top: 0;
       z-index: 20;
     }
-    .topbar-copy { display: grid; gap: 4px; }
-    .subtitle { font-size: 13px; color: var(--muted); }
-    .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .workspace {
-      padding: 22px 24px 28px;
-      display: grid;
-      gap: 18px;
-    }
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(150px, 1fr));
-      gap: 12px;
-    }
+    .topbar-copy { display: grid; gap: 3px; }
+    .subtitle { font-size: 13px; color: var(--muted); font-weight: 300; }
+    .top-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+    .workspace { padding: 22px 26px 34px; display: grid; gap: 18px; }
+
+    .metrics { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 12px; }
     .metric {
-      background: #fff;
+      background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 14px;
+      border-radius: 13px;
+      padding: 14px 16px;
       display: grid;
-      gap: 4px;
+      gap: 2px;
+      box-shadow: var(--soft-shadow);
+      position: relative;
+      overflow: hidden;
     }
-    .metric-label { font-size: 12px; color: var(--muted); }
-    .metric-value { font-size: 23px; font-weight: 650; }
+    .metric::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 2.5px; background: linear-gradient(90deg, var(--gold), transparent 70%); opacity: .55; }
+    .metric-label { font-size: 11.5px; color: var(--muted); letter-spacing: .03em; }
+    .metric-value { font-family: var(--serif); font-size: 27px; font-weight: 600; line-height: 1.15; }
+    .metric-note { font-size: 11px; color: var(--muted); }
+
     .panel {
-      background: #fff;
+      background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 15px;
       overflow: hidden;
       box-shadow: var(--soft-shadow);
     }
     .panel-head {
-      padding: 14px 16px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
       flex-wrap: wrap;
+      background: linear-gradient(180deg, #fffdf8, #fdf9ef);
     }
-    .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .muted-button { background: #a7a7ad; color: white; border-color: #a7a7ad; }
-    .range { font-size: 14px; color: #2f3733; margin-left: auto; }
-    .table-wrap {
-      overflow: auto;
-      max-height: calc(100vh - 285px);
-      background: #fff;
-    }
-    table {
-      width: 100%;
-      min-width: 1060px;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }
+    .toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+    .range { font-size: 12.5px; color: var(--muted); margin-left: 4px; white-space: nowrap; }
+    .table-wrap { overflow: auto; max-height: calc(100vh - 300px); }
+    table { width: 100%; min-width: 1060px; border-collapse: collapse; table-layout: fixed; }
     thead th {
       position: sticky;
       top: 0;
       z-index: 2;
-      background: var(--green);
-      color: #fff;
+      background: #f4edda;
+      color: var(--ink-soft);
       text-align: left;
-      font-weight: 650;
-      padding: 14px 15px;
-      border-right: 2px solid #fff;
-      font-size: 15px;
+      font-weight: 600;
+      font-size: 11.5px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 12px 15px;
+      border-bottom: 2px solid var(--gold);
     }
-    tbody tr:nth-child(even) { background: #f6f7f6; }
-    tbody tr { cursor: pointer; }
-    tbody tr:hover { background: var(--green-soft); }
-    tbody tr.active { outline: 2px solid var(--green); outline-offset: -2px; background: #eaf7ef; }
-    td {
-      padding: 13px 15px;
-      border-right: 2px solid #fff;
-      vertical-align: middle;
-      overflow-wrap: anywhere;
-    }
-    .user-cell { display: grid; gap: 5px; }
-    .user-name { font-weight: 650; letter-spacing: 0; }
-    .user-phone { color: var(--muted); font-size: 12px; }
+    tbody tr { cursor: pointer; transition: background 120ms ease; }
+    tbody tr:nth-child(even) { background: #fbf7ec; }
+    tbody tr:hover { background: var(--gold-soft); }
+    tbody tr.active { outline: 2px solid var(--gold); outline-offset: -2px; background: var(--gold-soft); }
+    td { padding: 13px 15px; border-bottom: 1px solid #f1ead8; vertical-align: middle; overflow-wrap: anywhere; }
+    .user-cell { display: grid; gap: 4px; }
+    .user-name { font-weight: 500; font-size: 14px; }
+    .user-phone { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
     .identity-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .position-cell { display: grid; gap: 5px; font-size: 12.5px; }
+    .position-line { display: flex; gap: 7px; align-items: baseline; }
+    .position-tag { font-size: 10px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--gold-deep); min-width: 26px; }
+
     .pill {
       display: inline-flex;
       align-items: center;
-      min-height: 24px;
-      padding: 3px 8px;
-      border-radius: 5px;
-      font-size: 12px;
-      line-height: 1;
-      border: 1px solid var(--line);
+      gap: 5px;
+      min-height: 22px;
+      padding: 3px 9px;
+      border-radius: 99px;
+      font-size: 11.5px;
+      font-weight: 400;
+      line-height: 1.2;
+      border: 1px solid var(--line-strong);
       background: #fff;
-      color: var(--muted);
+      color: var(--ink-soft);
       white-space: nowrap;
     }
-    .pill.good { background: #e7f7ee; color: var(--good); border-color: #addcbe; }
-    .pill.warn { background: var(--warn-bg); color: var(--warn); border-color: #f0c27c; }
-    .pill.bad { background: var(--bad-bg); color: var(--bad); border-color: #f3b6ae; }
-    .pill.green { background: var(--green); color: #fff; border-color: var(--green); }
-    .pill.soft { background: #f7faf8; color: var(--muted); border-color: var(--line-strong); }
-    .call-status-cell .pill {
+    .pill.good { background: var(--green-soft); color: var(--green); border-color: var(--green-line); }
+    .pill.warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-line); }
+    .pill.bad { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-line); }
+    .pill.gold { background: var(--gold-soft); color: var(--gold-deep); border-color: #e0cd9f; }
+    .pill.ink { background: var(--ink); color: #f2e9d4; border-color: var(--ink); }
+    .pill.soft { background: #faf6ec; color: var(--muted); border-color: var(--line); }
+    .call-status-cell .pill, .flag-wrap .pill {
       max-width: 100%;
       white-space: normal;
       overflow-wrap: anywhere;
-      line-height: 1.2;
+      line-height: 1.25;
       justify-content: flex-start;
     }
-    .call-review-cell {
-      min-width: 0;
-    }
-    .review-title {
-      display: block;
-      font-weight: 620;
-      line-height: 1.25;
-    }
-    .review-id {
-      display: block;
-      margin-top: 3px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-    .action-button {
-      width: 34px;
-      min-height: 28px;
-      border: 0;
-      background: transparent;
-      font-size: 23px;
-      line-height: 1;
-    }
-    .progress-cell { min-width: 220px; }
-    .sparkline { width: 100%; max-width: 260px; height: 44px; display: block; }
-    .sparkline text { font-size: 9px; fill: var(--muted); }
+    .flag-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+    .call-review-cell { min-width: 0; }
+    .review-title { display: block; font-weight: 500; line-height: 1.3; font-size: 12.5px; }
+    .review-id { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; line-height: 1.25; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+    .chevron { color: var(--gold-deep); font-size: 17px; text-align: center; }
+    .progress-cell { min-width: 210px; }
+    .sparkline { width: 100%; max-width: 250px; height: 44px; display: block; }
+    .sparkline text { font-size: 9px; fill: var(--muted); font-family: var(--sans); }
+
+    /* ---------- Drawer ---------- */
     .drawer {
       position: fixed;
       right: 0;
       top: 0;
-      width: min(920px, calc(100vw - 260px));
+      width: min(980px, calc(100vw - 250px));
       height: 100vh;
-      background: #fbfcfb;
+      background: var(--paper);
       box-shadow: var(--shadow);
-      border-left: 1px solid var(--line);
+      border-left: 1px solid var(--line-strong);
       transform: translateX(105%);
-      transition: transform 180ms ease;
+      transition: transform 220ms cubic-bezier(.3,.7,.3,1);
       z-index: 50;
       display: grid;
       grid-template-rows: auto 1fr;
     }
     .drawer.open { transform: translateX(0); }
     .drawer-head {
-      padding: 18px 22px;
+      padding: 20px 24px;
       border-bottom: 1px solid var(--line);
-      background: #fff;
+      background: var(--card);
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: 12px;
     }
-    .drawer-body { overflow: auto; padding: 18px 22px 30px; display: grid; gap: 16px; }
-    .close-button { border: 0; background: #f0f0f0; width: 36px; padding: 0; font-size: 22px; }
+    .drawer-head h2 { font-family: var(--serif); font-size: 25px; font-weight: 600; }
+    .drawer-body { overflow: auto; padding: 20px 24px 40px; display: grid; gap: 18px; }
+    .close-button { border: 1px solid var(--line-strong); background: var(--card); width: 38px; padding: 0; font-size: 20px; border-radius: 99px; }
     .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .kv {
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      padding: 10px 11px;
+      border-radius: 11px;
+      background: var(--card);
+      padding: 11px 12px;
       min-width: 0;
-      box-shadow: 0 1px 0 rgba(35, 43, 39, 0.02);
+      box-shadow: 0 1px 0 rgba(45,36,20,.02);
     }
-    .kv-label { color: var(--muted); font-size: 12px; }
-    .kv-value { margin-top: 4px; font-weight: 560; overflow-wrap: anywhere; font-size: 14px; line-height: 1.3; }
+    .kv-label { color: var(--muted); font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 500; }
+    .kv-value { margin-top: 4px; font-weight: 400; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.35; }
     .section { display: grid; gap: 10px; }
-    .section-title-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .mini-table {
-      display: grid;
-      gap: 8px;
-    }
+    .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .section-caption { font-size: 12px; color: var(--muted); }
+    .mini-table { display: grid; gap: 8px; }
     .mini-row {
       display: grid;
-      grid-template-columns: minmax(260px, 1fr) 88px 132px 92px;
+      grid-template-columns: minmax(250px, 1fr) 90px 120px 88px;
       gap: 10px;
       align-items: center;
-      padding: 10px 12px;
+      padding: 11px 13px;
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
+      border-radius: 11px;
+      background: var(--card);
       cursor: pointer;
-      box-shadow: 0 1px 0 rgba(35, 43, 39, 0.02);
+      transition: border-color 120ms ease, background 120ms ease;
     }
-    .mini-row:hover { background: var(--green-soft); border-color: #b9d9c4; }
-    .conversation-date { font-size: 14px; font-weight: 620; }
-    .conversation-summary { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.35; }
-    .conversation-meta { display: grid; gap: 2px; font-size: 14px; font-weight: 560; }
-    .mini-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      color: var(--muted);
-      font-weight: 700;
-    }
+    .mini-row:hover { background: var(--gold-soft); border-color: var(--gold); }
+    .conversation-date { font-size: 13.5px; font-weight: 500; }
+    .conversation-summary { margin-top: 3px; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+    .conversation-meta { display: grid; gap: 2px; font-size: 13px; font-weight: 400; }
+    .mini-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; }
     .conversation-action {
       display: inline-flex;
       justify-content: center;
       align-items: center;
-      min-height: 32px;
-      border-radius: 5px;
-      font-size: 13px;
-      font-weight: 620;
-      border: 1px solid var(--line);
+      min-height: 30px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--line-strong);
       color: var(--muted);
-      background: #fff;
+      background: var(--card);
+      padding: 0 12px;
     }
-    .conversation-action.open { background: var(--green); border-color: var(--green); color: #fff; }
+    .conversation-action.open { background: var(--ink); border-color: var(--ink); color: #f2e9d4; }
     .quote {
-      background: #f6f8f7;
-      border-left: 3px solid var(--green);
-      padding: 9px;
-      border-radius: 4px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      font-size: 13px;
-      line-height: 1.45;
-    }
-    .conversation-timeline { display: grid; gap: 10px; }
-    .timeline-turn {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      overflow: hidden;
-      box-shadow: 0 1px 0 rgba(35, 43, 39, 0.02);
-    }
-    .timeline-turn-head {
-      padding: 9px 12px;
-      border-bottom: 1px solid var(--line);
-      background: #f7f8f7;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-      font-size: 13px;
-    }
-    .timeline-pair {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    }
-    .timeline-side {
-      padding: 12px;
-      display: grid;
-      gap: 8px;
-      border-right: 1px solid var(--line);
-      min-width: 0;
-    }
-    .timeline-side:last-child { border-right: 0; }
-    .timeline-role {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 620;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-    }
-    .timeline-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      color: var(--ink);
-      font-size: 13px;
-      font-weight: 620;
-      letter-spacing: 0;
-      text-transform: none;
-    }
-    .timeline-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--green);
-      display: inline-block;
-    }
-    .timeline-dot.sabi { background: var(--green-dark); }
-    .timeline-text {
-      font-size: 14px;
-      line-height: 1.45;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-      background: #fbfcfb;
-      border: 1px solid var(--line);
+      background: var(--gold-wash);
+      border-left: 3px solid var(--gold);
+      padding: 10px 12px;
       border-radius: 6px;
-      padding: 9px 10px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      line-height: 1.5;
     }
-    .timeline-note { color: var(--muted); font-size: 12px; line-height: 1.35; }
-    .audio-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .turn-card {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      overflow: hidden;
+    .callout {
+      border: 1px solid var(--warn-line);
+      background: var(--warn-bg);
+      color: var(--warn);
+      border-radius: 11px;
+      padding: 11px 13px;
+      font-size: 13px;
+      line-height: 1.45;
     }
-    .turn-head {
-      padding: 11px 12px;
-      background: #f7f8f7;
+
+    /* ---------- Conversation transcript ---------- */
+    .conversation-timeline { display: grid; gap: 12px; }
+    .timeline-turn { border: 1px solid var(--line); border-radius: 13px; background: var(--card); overflow: hidden; box-shadow: 0 1px 0 rgba(45,36,20,.02); }
+    .timeline-turn-head {
+      padding: 9px 14px;
       border-bottom: 1px solid var(--line);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    .turn-body { padding: 12px; display: grid; gap: 12px; }
-    .turn-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .curriculum-card {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      padding: 13px;
-      display: grid;
-      gap: 10px;
-    }
-    .curriculum-card.compact { padding: 16px; }
-    .curriculum-map { width: 100%; height: 138px; display: block; }
-    .curriculum-map text { font-size: 10px; fill: var(--muted); }
-    .curriculum-map .map-active-label { fill: var(--green-dark); font-weight: 650; }
-    .curriculum-map .map-branch-label { font-size: 9px; }
-    .map-caption {
+      background: #faf5e8;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
       flex-wrap: wrap;
-      padding-top: 2px;
-    }
-    .map-caption strong { font-size: 14px; font-weight: 620; }
-    .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    details.module {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      overflow: hidden;
-    }
-    details.module summary {
-      cursor: pointer;
-      padding: 11px 12px;
-      font-weight: 700;
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    .module-body {
-      border-top: 1px solid var(--line);
-      padding: 11px 12px;
-      display: grid;
-      gap: 8px;
-    }
-    .lesson {
-      display: grid;
-      grid-template-columns: 78px minmax(0, 1fr);
-      gap: 8px;
-      padding: 7px 8px;
-      background: #f7f8f7;
-      border: 1px solid var(--line);
-      border-radius: 5px;
       font-size: 12px;
     }
-    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--green-dark); font-weight: 750; }
+    .timings { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .timeline-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .timeline-side { padding: 13px; display: grid; gap: 8px; border-right: 1px solid var(--line); min-width: 0; align-content: start; }
+    .timeline-side:last-child { border-right: 0; background: var(--gold-wash); }
+    .timeline-role { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+    .timeline-label { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .timeline-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--green); display: inline-block; }
+    .timeline-dot.sabi { background: var(--gold-deep); }
+    .timeline-text { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; background: #fffdf8; border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; }
+    .timeline-note { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+    .audio-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .turn-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); overflow: hidden; }
+    .turn-head { padding: 11px 14px; background: #faf5e8; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .turn-body { padding: 13px; display: grid; gap: 12px; }
+    .turn-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .feedback-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); padding: 14px 16px; display: grid; gap: 9px; }
+    .feedback-card.gold { border-color: #e0cd9f; background: var(--gold-wash); }
+
+    /* ---------- Curriculum ---------- */
+    .curriculum-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); padding: 15px; display: grid; gap: 10px; }
+    .curriculum-card.compact { padding: 17px; }
+    .curriculum-map { width: 100%; height: 140px; display: block; }
+    .curriculum-map text { font-size: 10px; fill: var(--muted); font-family: var(--sans); }
+    .curriculum-map .map-active-label { fill: var(--gold-deep); font-weight: 600; }
+    .curriculum-map .map-branch-label { font-size: 9px; }
+    .map-caption { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
+    .map-caption strong { font-size: 13.5px; font-weight: 500; }
+    .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    details.module { border: 1px solid var(--line); border-radius: 11px; background: var(--card); overflow: hidden; }
+    details.module summary { cursor: pointer; padding: 11px 13px; font-weight: 500; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    details.module summary:hover { background: var(--gold-wash); }
+    .module-body { border-top: 1px solid var(--line); padding: 11px 13px; display: grid; gap: 8px; }
+    .lesson { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; padding: 7px 9px; background: #faf6ec; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--gold-deep); font-weight: 600; font-size: 11px; }
+
+    /* ---------- Overview ---------- */
+    .overview-layout { padding: 18px; display: grid; gap: 18px; }
+    .command-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .command-card {
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--card);
+      padding: 15px;
+      display: grid;
+      gap: 8px;
+      min-height: 118px;
+      align-content: start;
+      box-shadow: 0 1px 0 rgba(45,36,20,.02);
+    }
+    .command-card strong { font-family: var(--serif); font-size: 17.5px; font-weight: 600; }
+    .command-card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+    .review-list { display: grid; gap: 8px; }
+    .review-card {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) 110px 160px 130px;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--card);
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .review-card:hover { border-color: var(--gold); background: var(--gold-soft); }
+    .source-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .source-chip { border: 1px solid var(--line); background: #fbf7ec; border-radius: 11px; padding: 11px 12px; display: grid; gap: 5px; }
+    .source-chip strong { font-size: 12.5px; font-weight: 600; }
+    .gate-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .gate-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); padding: 15px; display: grid; gap: 10px; }
+    .gate-card.blocked { border-color: var(--bad-line); background: #fefaf9; }
+    .gate-card.pass { border-color: var(--green-line); background: #fbfdf9; }
+    .gate-card.watch, .gate-card.not_started { border-color: var(--warn-line); background: #fefcf5; }
+    .gate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .gate-head h3 { font-family: var(--serif); font-size: 17px; }
+    .gate-evidence { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
     .empty, .error {
       color: var(--muted);
-      padding: 24px;
+      padding: 30px 24px;
       text-align: center;
-      border: 1px dashed var(--line);
-      border-radius: 7px;
-      background: #fbfcfb;
+      border: 1px dashed var(--line-strong);
+      border-radius: 11px;
+      background: #fbf8ef;
+      font-size: 13px;
+      line-height: 1.5;
     }
-    .error { color: var(--bad); background: var(--bad-bg); border-color: #f3b6ae; }
-    .small { font-size: 12px; color: var(--muted); }
+    .error { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-line); }
+    .small { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
     .hidden { display: none !important; }
+    .skeleton { display: grid; gap: 10px; padding: 18px; }
+    .skeleton .bone { height: 52px; border-radius: 11px; background: linear-gradient(90deg, #f2ecdc 25%, #faf5e8 50%, #f2ecdc 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite linear; }
+    @keyframes shimmer { to { background-position: -200% 0; } }
+
     @media (max-width: 1100px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; }
       .nav { grid-template-columns: repeat(4, 1fr); }
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .detail-grid, .turn-columns, .audio-grid, .module-grid { grid-template-columns: 1fr; }
+      .detail-grid, .turn-columns, .audio-grid, .module-grid, .command-grid, .source-grid, .gate-grid { grid-template-columns: 1fr; }
+      .review-card, .mini-row { grid-template-columns: 1fr; }
       .drawer { width: 100vw; }
-      .mini-row { grid-template-columns: 1fr; }
       .timeline-pair { grid-template-columns: 1fr; }
       .timeline-side { border-right: 0; border-bottom: 1px solid var(--line); }
       .timeline-side:last-child { border-bottom: 0; }
@@ -541,43 +518,54 @@ def render_admin_review_page() -> str:
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">S</div>
+        <svg class="brand-spark" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M11 1.4 L13 8.6 L19.4 11 L13 13.4 L11 20.6 L9 13.4 L2.6 11 L9 8.6 Z" fill="#cba868"/>
+          <path d="M18.6 15.4 L19.5 18 L22 19 L19.5 20 L18.6 22.6 L17.7 20 L15.2 19 L17.7 18 Z" fill="#e2c88e"/>
+        </svg>
         <div>
           <div class="brand-title">Sabi</div>
           <div class="brand-subtitle">Education for Equality</div>
         </div>
       </div>
       <nav class="nav" aria-label="Sabi admin navigation">
-        <button id="nav-learners" aria-selected="true">Learners</button>
-        <button id="nav-kids" aria-selected="false">Kids</button>
-        <button id="nav-calls" aria-selected="false">Calls</button>
-        <button id="nav-curriculum" aria-selected="false">Curriculum</button>
+        <button id="nav-overview" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Overview<span class="nav-count" id="count-review"></span></button>
+        <button id="nav-learners" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>Learners<span class="nav-count" id="count-learners"></span></button>
+        <button id="nav-kids" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="9" r="3.4"/><circle cx="17" cy="10.5" r="2.6"/><path d="M3 20c1-3.4 3.6-5 6-5s5 1.6 6 5"/></svg>Kids<span class="nav-count" id="count-kids"></span></button>
+        <button id="nav-calls" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4h4l2 5-2.5 1.5a12 12 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>Calls<span class="nav-count" id="count-calls"></span></button>
+        <button id="nav-feedback" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/><path d="M9 11h6M9 14h4"/></svg>Feedback<span class="nav-count" id="count-feedback"></span></button>
+        <button id="nav-curriculum" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 5a3 3 0 0 1 3-3h13v18H7a3 3 0 0 0-3 3z"/><path d="M4 20V5"/></svg>Curriculum</button>
+        <button id="nav-gates" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Launch Gates</button>
       </nav>
+      <div class="side-foot">
+        <div class="health"><span class="health-dot" id="health-dot"></span><span id="health-text">Checking systems...</span></div>
+        <div>Board console &middot; read-only PIN</div>
+      </div>
     </aside>
     <div class="content">
       <header class="topbar">
         <div class="topbar-copy">
-          <h1 id="page-title">Learners</h1>
-          <div class="subtitle" id="page-subtitle">Students, levels, calls, transcripts, and progress.</div>
+          <h1 id="page-title">Overview</h1>
+          <div class="subtitle" id="page-subtitle">Launch readiness, review queue, and learning operations.</div>
         </div>
         <div class="top-actions">
-          <input id="search" placeholder="Filter learners or phone numbers" autocomplete="off">
-          <button class="muted-button" id="export">Download CSV</button>
-          <button class="muted-button" id="refresh">Refresh</button>
+          <input id="search" placeholder="Search learners or phone numbers" autocomplete="off">
+          <button id="export">Download CSV</button>
+          <button id="refresh" class="primary">Refresh</button>
         </div>
       </header>
       <main class="workspace">
         <section class="metrics" id="metrics"></section>
         <section class="panel">
           <div class="panel-head">
-            <h2 id="panel-title">Learner Database</h2>
+            <h2 id="panel-title">Launch Control</h2>
+            <div class="toolbar" id="view-toolbar"></div>
             <div class="toolbar">
               <span class="range" id="range">0 - 0</span>
-              <button id="prev-page" class="muted-button">Previous</button>
-              <button id="next-page" class="muted-button">Next</button>
+              <button id="prev-page">Previous</button>
+              <button id="next-page">Next</button>
             </div>
           </div>
-          <div class="table-wrap" id="table-wrap"><div class="empty">Loading...</div></div>
+          <div class="table-wrap" id="table-wrap"><div class="skeleton"><div class="bone"></div><div class="bone"></div><div class="bone"></div><div class="bone"></div></div></div>
         </section>
       </main>
     </div>
@@ -586,9 +574,9 @@ def render_admin_review_page() -> str:
     <div class="drawer-head">
       <div>
         <h2 id="drawer-title">Detail</h2>
-        <div id="drawer-subtitle" class="subtitle"></div>
+        <div id="drawer-subtitle" class="subtitle" style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;"></div>
       </div>
-      <button id="drawer-close" class="close-button" aria-label="Close">x</button>
+      <button id="drawer-close" class="close-button" aria-label="Close">&times;</button>
     </div>
     <div id="drawer-body" class="drawer-body"></div>
   </aside>
@@ -599,31 +587,33 @@ def render_admin_review_page() -> str:
     const headers = accessKey ? {"X-Admin-Pin": accessKey} : {};
     const authParamName = params.get("api_key") ? "api_key" : "key";
     const state = {
-      view: "learners",
+      view: "overview",
       learners: [],
       calls: [],
+      feedback: [],
       curriculum: null,
+      launchGates: null,
       selectedLearner: "",
       selectedCall: "",
+      selectedFeedback: "",
       page: 0,
       pageSize: 50,
+      sort: { learners: "recent", kids: "recent", calls: "newest", feedback: "newest" },
+      filters: { provider: "", status: "", course: "" },
+      localQuery: "",
     };
-    const moduleNames = {
-      1: "Counting",
-      2: "Addition",
-      3: "Subtraction",
-      4: "Multiply",
-      5: "Division",
-      6: "Problems",
-    };
+    const moduleNames = { 1: "Counting", 2: "Addition", 3: "Subtraction", 4: "Multiply", 5: "Division", 6: "Problems" };
+    const literacyModuleNames = { 1: "Sounds", 2: "Words", 3: "Stories", 4: "Grammar", 5: "Sound play" };
     const search = document.getElementById("search");
     const tableWrap = document.getElementById("table-wrap");
     const metrics = document.getElementById("metrics");
+    const viewToolbar = document.getElementById("view-toolbar");
     const drawer = document.getElementById("drawer");
     const drawerTitle = document.getElementById("drawer-title");
     const drawerSubtitle = document.getElementById("drawer-subtitle");
     const drawerBody = document.getElementById("drawer-body");
 
+    /* ---------------- formatting helpers ---------------- */
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, ch => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -647,15 +637,21 @@ def render_admin_review_page() -> str:
       if (Number.isNaN(date.getTime())) return String(value);
       return date.toLocaleString([], {month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"});
     }
+    function greetingWord() {
+      const h = new Date().getHours();
+      if (h < 12) return "Good morning";
+      if (h < 17) return "Good afternoon";
+      return "Good evening";
+    }
     function displayPhone(record) {
       const phone = record && (record.display_phone || record.phone_number_normalized || record.phone_number || (record.calling || {}).last_phone_number);
-      return phone || "No phone linked";
+      return phone || "Phone not captured yet";
     }
     function phoneNote(record) {
       const label = (record && record.identity_label) || "";
       if (!label) return "";
       const status = (record && record.identity_status) || "";
-      const kind = status === "named" ? "good" : (status === "phone_pending_name" ? "soft" : "");
+      const kind = status === "named" ? "good" : (status === "phone_pending_name" ? "soft" : "warn");
       return pill(label, kind);
     }
     function learnerName(record) {
@@ -667,7 +663,7 @@ def render_admin_review_page() -> str:
       const digits = phone.replace(/\\D/g, "");
       if (digits) return `Learner ${digits.slice(-4)}`;
       const id = String((record && (record.id || record.browser_id)) || "pending");
-      return `Learner ${id.slice(0, 8)}`;
+      return `Profile ${id.slice(0, 8)}`;
     }
     function digitsOnly(value) {
       return String(value || "").replace(/\\D/g, "");
@@ -694,11 +690,11 @@ def render_admin_review_page() -> str:
       const learner = learnerForCall(call);
       if (learner) return learnerName(learner);
       const digits = digitsOnly(call && call.phone_number);
-      return digits ? `Learner ${digits.slice(-4)}` : "Unknown caller";
+      return digits ? `Caller ${digits.slice(-4)}` : "Caller awaiting match";
     }
     function callDisplayPhone(call) {
       const learner = learnerForCall(call);
-      return (call && call.phone_number) || (learner && displayPhone(learner)) || "No phone linked";
+      return (call && call.phone_number) || (learner && displayPhone(learner)) || "Phone not captured yet";
     }
     function callerCell(call) {
       return `<div class="user-cell"><span class="user-name">${escapeHtml(callLearnerName(call))}</span><span class="user-phone">${escapeHtml(callDisplayPhone(call))}</span></div>`;
@@ -743,59 +739,230 @@ def render_admin_review_page() -> str:
     function scaffoldDepth(stateObj) {
       return Math.max(0, Math.min(3, Number((stateObj || {}).scaffold_depth || 0)));
     }
+
+    /* ---------------- human-language dictionaries ---------------- */
+    function callFlagLabel(value) {
+      const key = String(value || "").trim();
+      const labels = {
+        very_short_call: "Very short call",
+        short_call: "Short call",
+        ended_before_minimum_lesson_window: "Ended too soon",
+        no_child_turns: "No child speech",
+        no_sabi_turns: "Sabi never spoke",
+        no_usable_speech: "No usable speech",
+        carrier_or_voicemail_audio: "Voicemail or carrier message",
+        server_exception: "Server issue",
+        channel_closed: "Call closed",
+        sabi_wrap_up: "Lesson completed",
+        max_call_seconds: "Reached the time limit",
+        normal_loop_complete: "Completed",
+        no_utterance: "Caller went quiet",
+        asterisk_sent_hangup: "Caller hung up",
+        audiosocket_closed_by_asterisk_or_network: "Call ended",
+        channel_closed_during_greeting: "Dropped during greeting",
+        channel_closed_during_playback: "Dropped while Sabi spoke",
+        channel_closed_before_playback: "Dropped before Sabi spoke",
+        channel_closed_waiting_for_speech: "Dropped while listening",
+        channel_closed_waiting_for_optional_speech: "Dropped during feedback window",
+        channel_closed_collecting_utterance: "Dropped mid-answer",
+        Success: "Success",
+      };
+      if (labels[key]) return labels[key];
+      if (key.startsWith("exception:")) return "Server issue";
+      if (key.startsWith("dialstatus_")) return `Network: ${key.slice(11).replaceAll("_", " ")}`;
+      if (key.startsWith("hangup_cause_")) return `Hangup code ${key.slice(13)}`;
+      return key.replaceAll("_", " ");
+    }
+    function turnFlagLabel(value) {
+      const key = String(value || "").trim();
+      const labels = {
+        barge_in: "Child jumped in",
+        retry_prompt: "Asked to repeat",
+        low_confidence: "Unclear audio, accepted",
+        usable_low_confidence: "Unclear but usable",
+        low_confidence_rejected: "Too unclear, asked again",
+        empty_or_hallucinated_transcript: "Nothing usable heard",
+        transcript_normalized: "Transcript cleaned up",
+        literacy_stt: "Literacy listening mode",
+        numeric_stt: "Number listening mode",
+        literacy_short_answer: "Short literacy answer",
+        ignored_filler: "Ignored a filler sound",
+        carrier_or_voicemail_audio: "Voicemail detected",
+      };
+      return labels[key] || key.replaceAll("_", " ");
+    }
+    function turnFlagKind(flag) {
+      const key = String(flag || "");
+      if (key.includes("rejected") || key.includes("hallucinated") || key.includes("carrier")) return "warn";
+      if (key.includes("low") || key.includes("retry")) return "warn";
+      return "soft";
+    }
+    function providerLabel(value) {
+      const labels = {
+        groq: "Groq Whisper",
+        intron: "Intron",
+        local_whisper: "Local Whisper",
+        local_literacy_salvage: "Literacy salvage",
+      };
+      const key = String(value || "").trim();
+      return labels[key] || (key ? key.replaceAll("_", " ") : "");
+    }
+    function providerPills(call) {
+      const providers = (call && call.stt_providers_used) || [];
+      if (!providers.length) return pill("Not recorded", "soft");
+      return providers.map(p => pill(providerLabel(p), p === "intron" ? "gold" : "soft")).join(" ");
+    }
+    function timingsLine(timings) {
+      const t = timings || {};
+      const parts = [];
+      if (t.stt_seconds) parts.push(`Heard in ${Number(t.stt_seconds).toFixed(1)}s`);
+      if (t.llm_seconds) parts.push(`Thought in ${Number(t.llm_seconds).toFixed(1)}s`);
+      if (t.tts_seconds) parts.push(`Spoke in ${Number(t.tts_seconds).toFixed(1)}s`);
+      if (t.turn_total_seconds) parts.push(`Total ${Number(t.turn_total_seconds).toFixed(1)}s`);
+      return parts.join(" &middot; ");
+    }
+
+    /* ---------------- data loading ---------------- */
     async function getJson(path) {
       const res = await fetch(path, { headers });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       return res.json();
     }
+    async function checkHealth() {
+      const dot = document.getElementById("health-dot");
+      const text = document.getElementById("health-text");
+      try {
+        const health = await getJson("/health");
+        const ok = health && health.status === "ok";
+        dot.className = `health-dot ${ok ? "ok" : "down"}`;
+        text.textContent = ok ? "Live systems healthy" : "Systems degraded";
+      } catch (err) {
+        dot.className = "health-dot down";
+        text.textContent = "Cannot reach Sabi API";
+      }
+    }
     async function loadData() {
-      tableWrap.innerHTML = `<div class="empty">Loading...</div>`;
+      tableWrap.innerHTML = `<div class="skeleton"><div class="bone"></div><div class="bone"></div><div class="bone"></div><div class="bone"></div></div>`;
       const q = encodeURIComponent(search.value.trim());
       try {
-        const [learners, calls, curriculum] = await Promise.all([
+        const [learners, calls, feedback, curriculum, launchGates] = await Promise.all([
           getJson(`/admin/learners?limit=100${q ? `&q=${q}` : ""}`),
           getJson(`/admin/calls?limit=100${q ? `&q=${q}` : ""}`),
+          getJson(`/admin/feedback?limit=100${q ? `&q=${q}` : ""}`).catch(() => ({ items: [] })),
           state.curriculum ? Promise.resolve(state.curriculum) : getJson("/admin/curriculum-map"),
+          getJson("/admin/launch-gates").catch(() => null),
         ]);
         state.learners = learners.items || [];
         state.calls = calls.items || [];
+        state.feedback = feedback.items || [];
         state.curriculum = curriculum;
+        state.launchGates = launchGates;
         state.page = 0;
         render();
+        checkHealth();
       } catch (err) {
-        tableWrap.innerHTML = `<div class="error">Could not load Sabi admin data: ${escapeHtml(err.message)}</div>`;
+        tableWrap.innerHTML = `<div class="error">Could not load Sabi admin data: ${escapeHtml(err.message)}<br><span class="small">Check the PIN in your link, then press Refresh.</span></div>`;
       }
     }
+
+    /* ---------------- sorting + filtering ---------------- */
+    function localFilter(items, fields) {
+      const q = state.localQuery.trim().toLowerCase();
+      if (!q) return items;
+      return items.filter(item => fields.some(fn => String(fn(item) || "").toLowerCase().includes(q)));
+    }
+    function sortedLearners(list) {
+      const key = state.sort[state.view === "kids" ? "kids" : "learners"];
+      const items = [...list];
+      if (key === "sessions") items.sort((a, b) => Number(b.total_sessions || 0) - Number(a.total_sessions || 0));
+      else if (key === "help") items.sort((a, b) => Number(b.total_wrong || 0) - Number(a.total_wrong || 0));
+      else if (key === "name") items.sort((a, b) => learnerName(a).localeCompare(learnerName(b)));
+      else items.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+      return items;
+    }
+    function visibleLearners() {
+      let items = state.view === "kids" ? kidItems() : state.learners;
+      if (state.filters.course) {
+        items = items.filter(item => String((item.effective_state || {}).course || "numeracy") === state.filters.course);
+      }
+      items = localFilter(items, [learnerName, displayPhone, item => (item.effective_state || {}).active_skill]);
+      return sortedLearners(items);
+    }
+    function sortedCalls(list) {
+      const key = state.sort.calls;
+      const items = [...list];
+      if (key === "oldest") items.sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
+      else if (key === "longest") items.sort((a, b) => Number(b.duration_seconds || 0) - Number(a.duration_seconds || 0));
+      else if (key === "shortest") items.sort((a, b) => Number(a.duration_seconds || 0) - Number(b.duration_seconds || 0));
+      else if (key === "flagged") items.sort((a, b) => ((b.quality_flags || []).length - (a.quality_flags || []).length) || (Number(b.created_at || 0) - Number(a.created_at || 0)));
+      else items.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+      return items;
+    }
+    function visibleCalls() {
+      let items = state.calls;
+      if (state.filters.provider) {
+        items = items.filter(call => ((call.stt_providers_used || []).includes(state.filters.provider)));
+      }
+      if (state.filters.status === "flagged") items = items.filter(call => (call.quality_flags || []).length);
+      if (state.filters.status === "clean") items = items.filter(call => !(call.quality_flags || []).length);
+      items = localFilter(items, [callLearnerName, callDisplayPhone, call => call.call_uuid, call => (call.quality_flags || []).join(" ")]);
+      return sortedCalls(items);
+    }
+    function visibleFeedback() {
+      let items = [...state.feedback];
+      items = localFilter(items, [f => f.phone_number, f => f.redacted_transcript, f => f.call_uuid]);
+      items.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+      return items;
+    }
+
+    /* ---------------- shell rendering ---------------- */
     function setView(view) {
       state.view = view;
       state.page = 0;
+      state.localQuery = search.value;
       drawer.classList.remove("open");
-      document.getElementById("nav-learners").setAttribute("aria-selected", view === "learners");
-      document.getElementById("nav-kids").setAttribute("aria-selected", view === "kids");
-      document.getElementById("nav-calls").setAttribute("aria-selected", view === "calls");
-      document.getElementById("nav-curriculum").setAttribute("aria-selected", view === "curriculum");
+      ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates"].forEach(name => {
+        const el = document.getElementById(`nav-${name}`);
+        if (el) el.setAttribute("aria-selected", String(view === name));
+      });
       render();
     }
     function render() {
       renderHeader();
       renderMetrics();
+      renderToolbar();
+      renderNavCounts();
+      if (state.view === "overview") renderOverviewDashboard();
+      if (state.view === "gates") renderLaunchGatesView();
       if (state.view === "learners") renderLearnersTable();
       if (state.view === "kids") renderKidsTable();
       if (state.view === "calls") renderCallsTable();
+      if (state.view === "feedback") renderFeedbackList();
       if (state.view === "curriculum") renderCurriculumView();
     }
     function renderHeader() {
       const titles = {
-        learners: ["Learners", "Students, levels, calls, transcripts, and progress.", "Learner Database"],
-        kids: ["Kids", "Pre-pilot child profiles, consent, call readiness, and learning evidence.", "Kids Backend"],
-        calls: ["Calls", "Recent phone sessions and recording evidence.", "Voice Sessions"],
-        curriculum: ["Curriculum", "Structured learning path and bump-down rules.", "Curriculum Map"],
+        overview: [`${greetingWord()}, Naomi`, "Here is how the children are doing and what needs your eyes today.", "Launch Control"],
+        gates: ["Launch Gates", "Evidence gates for adult canaries, child canaries, and pre-pilot launch.", "Launch Gate Report"],
+        learners: ["Learners", "Every learner, their level, their journey, and their recent calls.", "Learner Database"],
+        kids: ["Kids", "Pre-pilot child profiles: consent, call readiness, and learning evidence.", "Kids Backend"],
+        calls: ["Calls", "Every phone lesson with audio, transcripts, and quality evidence.", "Voice Sessions"],
+        feedback: ["Feedback", "Open voice notes left by testers, caregivers, and children after calls.", "Voice Notes"],
+        curriculum: ["Curriculum", "The full learning path, lesson by lesson, and the support rules.", "Curriculum Map"],
       };
       const [title, subtitle, panel] = titles[state.view];
       document.getElementById("page-title").textContent = title;
       document.getElementById("page-subtitle").textContent = subtitle;
       document.getElementById("panel-title").textContent = panel;
-      search.placeholder = state.view === "calls" ? "Filter sessions or phone numbers" : "Filter learners, kids, or phone numbers";
+      search.placeholder = state.view === "calls" ? "Search calls, names, or numbers" : "Search learners or phone numbers";
+    }
+    function renderNavCounts() {
+      const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value || ""; };
+      set("count-learners", state.learners.length);
+      set("count-kids", kidItems().length);
+      set("count-calls", state.calls.length);
+      set("count-feedback", state.feedback.length);
+      set("count-review", reviewQueueCalls().length || "");
     }
     function renderMetrics() {
       const learnerCount = state.learners.length;
@@ -803,16 +970,79 @@ def render_admin_review_page() -> str:
       const callCount = state.calls.length;
       const totalMinutes = state.calls.reduce((sum, call) => sum + Number(call.duration_seconds || 0), 0) / 60;
       const flaggedCalls = state.calls.filter(call => (call.quality_flags || []).length).length;
+      const launchStatus = (state.launchGates && state.launchGates.overall_status) || "loading";
       metrics.innerHTML = [
-        metric("Learners", learnerCount),
-        metric("Kids", childCount),
-        metric("Recent calls", callCount),
-        metric("Call minutes", totalMinutes.toFixed(1)),
-        metric("Needs review", flaggedCalls),
+        metric("Learners", learnerCount, "profiles on record"),
+        metric("Kids", childCount, "pre-pilot children"),
+        metric("Recent calls", callCount, "in this window"),
+        metric("Learning minutes", totalMinutes.toFixed(0), "across recent calls"),
+        metric("Needs review", flaggedCalls, flaggedCalls ? "calls flagged" : "all clear"),
+        metric("Launch status", launchStatus.replaceAll("_", " "), "from evidence gates"),
       ].join("");
     }
-    function metric(label, value) {
-      return `<div class="metric"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div></div>`;
+    function metric(label, value, note) {
+      return `<div class="metric"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div><div class="metric-note">${escapeHtml(note || "")}</div></div>`;
+    }
+    function renderToolbar() {
+      if (state.view === "calls") {
+        const providers = [...new Set(state.calls.flatMap(call => call.stt_providers_used || []))];
+        viewToolbar.innerHTML = `
+          <label class="control">Sort
+            <select id="sort-select">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="longest">Longest first</option>
+              <option value="shortest">Shortest first</option>
+              <option value="flagged">Flagged first</option>
+            </select>
+          </label>
+          <label class="control">Heard by
+            <select id="provider-select">
+              <option value="">All providers</option>
+              ${providers.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(providerLabel(p))}</option>`).join("")}
+            </select>
+          </label>
+          <label class="control">Status
+            <select id="status-select">
+              <option value="">All calls</option>
+              <option value="flagged">Needs review</option>
+              <option value="clean">Clean</option>
+            </select>
+          </label>`;
+        document.getElementById("sort-select").value = state.sort.calls;
+        document.getElementById("provider-select").value = state.filters.provider;
+        document.getElementById("status-select").value = state.filters.status;
+        document.getElementById("sort-select").addEventListener("change", e => { state.sort.calls = e.target.value; state.page = 0; render(); });
+        document.getElementById("provider-select").addEventListener("change", e => { state.filters.provider = e.target.value; state.page = 0; render(); });
+        document.getElementById("status-select").addEventListener("change", e => { state.filters.status = e.target.value; state.page = 0; render(); });
+      } else if (state.view === "learners" || state.view === "kids") {
+        const sortKey = state.view === "kids" ? "kids" : "learners";
+        viewToolbar.innerHTML = `
+          <label class="control">Sort
+            <select id="sort-select">
+              <option value="recent">Recently active</option>
+              <option value="sessions">Most sessions</option>
+              <option value="help">Needs help first</option>
+              <option value="name">Name A to Z</option>
+            </select>
+          </label>
+          <label class="control">Course
+            <select id="course-select">
+              <option value="">All courses</option>
+              <option value="numeracy">Numeracy</option>
+              <option value="literacy">Literacy</option>
+            </select>
+          </label>`;
+        document.getElementById("sort-select").value = state.sort[sortKey];
+        document.getElementById("course-select").value = state.filters.course;
+        document.getElementById("sort-select").addEventListener("change", e => { state.sort[sortKey] = e.target.value; state.page = 0; render(); });
+        document.getElementById("course-select").addEventListener("change", e => { state.filters.course = e.target.value; state.page = 0; render(); });
+      } else if (state.view === "feedback") {
+        viewToolbar.innerHTML = `<label class="control">Sort
+          <select id="sort-select"><option value="newest">Newest first</option></select></label>`;
+      } else {
+        viewToolbar.innerHTML = "";
+      }
     }
     function pageSlice(items) {
       const start = state.page * state.pageSize;
@@ -825,42 +1055,247 @@ def render_admin_review_page() -> str:
       document.getElementById("prev-page").disabled = state.page <= 0;
       document.getElementById("next-page").disabled = end >= total;
     }
+    function staticRange(label) {
+      document.getElementById("range").textContent = label;
+      document.getElementById("prev-page").disabled = true;
+      document.getElementById("next-page").disabled = true;
+    }
+
+    /* ---------------- overview ---------------- */
+    function reviewQueueCalls() {
+      return state.calls.filter(call => {
+        const flags = call.quality_flags || [];
+        return flags.length || Number(call.user_turns || 0) === 0 || Number(call.duration_seconds || 0) < 60;
+      }).slice(0, 8);
+    }
+    function learnersNeedingAttention() {
+      return state.learners.filter(learner => {
+        const current = learner.effective_state || {};
+        const calling = learner.calling || {};
+        return scaffoldDepth(current) || Number(current.wrong_streak || 0) >= 3 || Number(calling.recent_call_count || 0) === 0;
+      }).slice(0, 8);
+    }
+    function learnersToCelebrate() {
+      return state.learners.filter(learner => {
+        const current = learner.effective_state || {};
+        return Number(current.correct_streak || 0) >= 2 && !scaffoldDepth(current);
+      }).slice(0, 6);
+    }
+    function learnerActionLabel(learner) {
+      const current = learner.effective_state || {};
+      const calling = learner.calling || {};
+      if (isChildProfile(learner) && !(learner.consent_status || learner.consent_recorded)) return "Get consent";
+      if (scaffoldDepth(current)) return "Review support path";
+      if (Number(current.wrong_streak || 0) >= 3) return "Check teaching move";
+      if (Number(calling.recent_call_count || 0) === 0) return "Needs first call";
+      return "Monitor";
+    }
+    function callActionLabel(call) {
+      const flags = call.quality_flags || [];
+      if (flags.includes("no_child_turns") || Number(call.user_turns || 0) === 0) return "Listen for audio";
+      if (flags.includes("ended_before_minimum_lesson_window") || Number(call.duration_seconds || 0) < 60) return "Check why ended";
+      if (!Number(call.turn_count || 0)) return "Full-call only";
+      return "Review turns";
+    }
+    function statusKind(status) {
+      if (status === "pass") return "good";
+      if (status === "blocked") return "bad";
+      if (status === "watch" || status === "not_started") return "warn";
+      return "soft";
+    }
+    function renderOverviewDashboard() {
+      staticRange("Board view");
+      const reviewCalls = reviewQueueCalls();
+      const attentionLearners = learnersNeedingAttention();
+      const celebrate = learnersToCelebrate();
+      const feedbackCount = state.feedback.length;
+      const gateReport = state.launchGates || {};
+      tableWrap.innerHTML = `<div class="overview-layout">
+        <div class="command-grid">
+          <div class="command-card">
+            ${pill(reviewCalls.length ? `${reviewCalls.length} to review` : "Clear", reviewCalls.length ? "warn" : "good")}
+            <strong>Call evidence</strong>
+            <p>Open flagged calls first. Every review shows the child audio, what Sabi heard, the cleaned lesson text, Sabi's reply, the exact TTS text, and why the call ended.</p>
+          </div>
+          <div class="command-card">
+            ${pill(feedbackCount ? `${feedbackCount} voice note${feedbackCount === 1 ? "" : "s"}` : "No notes yet", feedbackCount ? "gold" : "soft")}
+            <strong>Feedback notes</strong>
+            <p>Testers and families can leave an open voice note after each call. Listen to them in the Feedback tab; each note links back to its call.</p>
+          </div>
+          <div class="command-card">
+            ${pill((gateReport.overall_status || "loading").replaceAll("_", " "), statusKind(gateReport.overall_status))}
+            <strong>Launch posture</strong>
+            <p>${escapeHtml(gateReport.summary || "The launch-gate report shows whether Sabi should keep testing, proceed, or pause.")}</p>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row">
+            <h3>Review Queue</h3>
+            <span class="section-caption">Flagged, short, or speech-light calls &mdash; newest first</span>
+          </div>
+          <div class="review-list">
+            ${reviewCalls.length ? reviewCalls.map(call => `<div class="review-card" data-call="${escapeHtml(call.call_uuid)}">
+              <div>${callerCell(call)}<div class="conversation-summary">${escapeHtml(callFlagLabel((call.quality_flags || [])[0] || call.end_reason || "Review"))}</div></div>
+              <div class="conversation-meta"><span class="mini-label">Length</span>${fmtSeconds(call.duration_seconds)}</div>
+              <div class="conversation-meta"><span class="mini-label">Evidence</span>${escapeHtml(call.turn_count || 0)} clips &middot; ${escapeHtml(call.user_turns || 0)} child turns</div>
+              <div>${pill(callActionLabel(call), (call.quality_flags || []).length ? "warn" : "soft")}</div>
+            </div>`).join("") : `<div class="empty">Nothing waiting for review. Every recent call looks healthy.</div>`}
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row">
+            <h3>Learners Needing Attention</h3>
+            <span class="section-caption">No first call yet, on a support branch, or repeated misses</span>
+          </div>
+          <div class="review-list">
+            ${attentionLearners.length ? attentionLearners.map(learner => `<div class="review-card" data-learner="${escapeHtml(learner.id)}">
+              <div><div class="user-name">${escapeHtml(learnerName(learner))}</div><div class="user-phone">${escapeHtml(displayPhone(learner))}</div></div>
+              <div class="conversation-meta"><span class="mini-label">Calls</span>${escapeHtml((learner.calling || {}).recent_call_count || 0)}</div>
+              <div class="conversation-meta"><span class="mini-label">Learning</span>${escapeHtml(learner.total_correct || 0)} correct &middot; ${escapeHtml(learner.total_wrong || 0)} needs help</div>
+              <div>${pill(learnerActionLabel(learner), "warn")}</div>
+            </div>`).join("") : `<div class="empty">No learners need attention right now.</div>`}
+          </div>
+        </div>
+        ${celebrate.length ? `<div class="section">
+          <div class="section-title-row">
+            <h3>Worth Celebrating</h3>
+            <span class="section-caption">Learners on a correct streak and moving up</span>
+          </div>
+          <div class="review-list">
+            ${celebrate.map(learner => `<div class="review-card" data-learner="${escapeHtml(learner.id)}">
+              <div><div class="user-name">${escapeHtml(learnerName(learner))}</div><div class="user-phone">${escapeHtml(displayPhone(learner))}</div></div>
+              <div class="conversation-meta"><span class="mini-label">Streak</span>${escapeHtml((learner.effective_state || {}).correct_streak || 0)} correct</div>
+              <div class="conversation-meta"><span class="mini-label">Position</span>Module ${escapeHtml((learner.effective_state || {}).current_module ?? "?")}</div>
+              <div>${pill("Moving up", "good")}</div>
+            </div>`).join("")}
+          </div>
+        </div>` : ""}
+        <div class="section">
+          <div class="section-title-row">
+            <h3>Backend Model We Are Copying</h3>
+            <span class="section-caption">Learning evidence + AI launch evidence</span>
+          </div>
+          <div class="source-grid">
+            <div class="source-chip"><strong>Khan style</strong><span class="small">Student rows, session evidence, responses, completion, export.</span></div>
+            <div class="source-chip"><strong>Lexia style</strong><span class="small">Who needs help, who needs more time, who to celebrate, recommended next action.</span></div>
+            <div class="source-chip"><strong>IXL style</strong><span class="small">Diagnostics, skills practiced, questions answered, cohort progress.</span></div>
+            <div class="source-chip"><strong>OpenAI style</strong><span class="small">Do not launch without evals, red-team results, launch gates, monitoring, and rollback.</span></div>
+          </div>
+        </div>
+      </div>`;
+      tableWrap.querySelectorAll("[data-call]").forEach(row => row.addEventListener("click", () => openCall(row.dataset.call)));
+      tableWrap.querySelectorAll("[data-learner]").forEach(row => row.addEventListener("click", () => openLearner(row.dataset.learner)));
+    }
+
+    /* ---------------- launch gates ---------------- */
+    function renderLaunchGatesView() {
+      staticRange("Evidence gates");
+      const report = state.launchGates || {};
+      const gates = report.gates || [];
+      const reportMetrics = report.metrics || {};
+      const config = report.config || {};
+      tableWrap.innerHTML = `<div class="overview-layout">
+        <div class="command-grid">
+          <div class="command-card">
+            ${pill((report.overall_status || "loading").replaceAll("_", " "), statusKind(report.overall_status))}
+            <strong>Overall launch posture</strong>
+            <p>${escapeHtml(report.summary || "Loading launch-gate evidence.")}</p>
+          </div>
+          <div class="command-card">
+            ${pill(`${reportMetrics.recent_calls || 0} calls`, "soft")}
+            <strong>Evidence window</strong>
+            <p>${escapeHtml(reportMetrics.calls_with_turn_evidence || 0)} calls have per-turn evidence; ${escapeHtml(reportMetrics.flagged_calls || 0)} calls are flagged for review.</p>
+          </div>
+          <div class="command-card">
+            ${pill(config.intron_api_key_present ? "Intron key present" : "Intron key missing", config.intron_api_key_present ? "good" : "bad")}
+            <strong>Provider canary</strong>
+            <p>Production stays on AudioSocket 9019. The test provider canary stays isolated on 9020 until evidence beats baseline.</p>
+          </div>
+        </div>
+        <div class="gate-grid">
+          ${gates.length ? gates.map(gateCard).join("") : `<div class="empty">No launch-gate report loaded.</div>`}
+        </div>
+      </div>`;
+    }
+    function gateCard(gate) {
+      const status = gate.status || "not_started";
+      return `<div class="gate-card ${escapeHtml(status)}">
+        <div class="gate-head">
+          <div>
+            <h3>${escapeHtml(gate.name || gate.key || "Gate")}</h3>
+            <div class="small">${escapeHtml(gate.summary || "")}</div>
+          </div>
+          ${pill(status.replaceAll("_", " "), statusKind(status))}
+        </div>
+        <ul class="gate-evidence">${(gate.evidence || []).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <div class="quote">Next action: ${escapeHtml(gate.next_action || "")}</div>
+      </div>`;
+    }
+
+    /* ---------------- learners + kids ---------------- */
+    function positionCell(item) {
+      const current = item.effective_state || {};
+      const lit = current.literacy || {};
+      const position = item.curriculum_position || {};
+      const numeracy = position.numeracy || {};
+      const literacy = position.literacy || {};
+      return `<div class="position-cell">
+        <div class="position-line"><span class="position-tag">Num</span><span>M${escapeHtml(current.current_module ?? "?")} &middot; ${escapeHtml(preview(numeracy.title || current.active_skill || "not placed yet", 34))}</span></div>
+        <div class="position-line"><span class="position-tag">Lit</span><span>M${escapeHtml(lit.current_module ?? "?")} &middot; ${escapeHtml(preview(literacy.title || lit.active_skill || "not placed yet", 34))}</span></div>
+      </div>`;
+    }
     function renderLearnersTable() {
-      updateRange(state.learners.length);
-      const rows = pageSlice(state.learners).map(learnerRow).join("");
+      const items = visibleLearners();
+      updateRange(items.length);
+      const rows = pageSlice(items).map(learnerRow).join("");
       tableWrap.innerHTML = `<table>
         <thead>
           <tr>
-            <th style="width: 230px;">User</th>
-            <th style="width: 150px;">Course</th>
-            <th style="width: 180px;">Current Level</th>
-            <th style="width: 260px;">Progress Map</th>
-            <th style="width: 110px;">Sessions</th>
+            <th style="width: 225px;">User</th>
+            <th style="width: 105px;">Course</th>
+            <th style="width: 235px;">Current Level</th>
+            <th style="width: 250px;">Progress Map</th>
             <th style="width: 130px;">Recent Calls</th>
-            <th style="width: 150px;">Learning</th>
-            <th style="width: 120px;">Status</th>
-            <th style="width: 90px;">Actions</th>
+            <th style="width: 145px;">Learning</th>
+            <th style="width: 125px;">Status</th>
+            <th style="width: 52px;"></th>
           </tr>
         </thead>
-        <tbody>${rows || `<tr><td colspan="9"><div class="empty">No learners found.</div></td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="8"><div class="empty">No learners match this view yet. Clear the search or filters to see everyone.</div></td></tr>`}</tbody>
       </table>`;
       tableWrap.querySelectorAll("[data-learner]").forEach(row => row.addEventListener("click", () => openLearner(row.dataset.learner)));
     }
+    function learnerRow(item) {
+      const current = item.effective_state || {};
+      const calling = item.calling || {};
+      const status = scaffoldDepth(current) ? pill("Support branch", "good") : (Number(current.correct_streak || 0) >= 2 ? pill("Moving up", "good") : pill("On level", "soft"));
+      const active = state.selectedLearner === item.id ? " active" : "";
+      return `<tr class="${active}" data-learner="${escapeHtml(item.id)}">
+        <td><div class="user-cell"><span class="user-name">${escapeHtml(learnerName(item))}</span><span class="user-phone">${escapeHtml(displayPhone(item))}</span><div class="identity-row">${phoneNote(item)}</div></div></td>
+        <td>${pill(current.course || "numeracy", "gold")}</td>
+        <td>${positionCell(item)}</td>
+        <td class="progress-cell">${progressSparkline(current)}</td>
+        <td>${escapeHtml(calling.recent_call_count || 0)} calls<div class="small">${fmtSeconds(calling.recent_call_seconds)} &middot; ${escapeHtml(item.total_sessions || 0)} sessions</div></td>
+        <td>${escapeHtml(item.total_correct || 0)} correct<div class="small">${escapeHtml(item.total_wrong || 0)} needs help</div></td>
+        <td>${status}</td>
+        <td class="chevron">&rsaquo;</td>
+      </tr>`;
+    }
     function renderKidsTable() {
-      const kids = kidItems();
+      const kids = visibleLearners();
       updateRange(kids.length);
       const rows = pageSlice(kids).map(kidRow).join("");
       tableWrap.innerHTML = `<table>
         <thead>
           <tr>
-            <th style="width: 230px;">Child</th>
-            <th style="width: 150px;">Consent</th>
-            <th style="width: 150px;">Network</th>
-            <th style="width: 180px;">Call readiness</th>
-            <th style="width: 260px;">Progress Map</th>
-            <th style="width: 150px;">Recent practice</th>
-            <th style="width: 150px;">Learning</th>
-            <th style="width: 90px;">Actions</th>
+            <th style="width: 225px;">Child</th>
+            <th style="width: 145px;">Consent</th>
+            <th style="width: 110px;">Network</th>
+            <th style="width: 165px;">Call readiness</th>
+            <th style="width: 250px;">Progress Map</th>
+            <th style="width: 140px;">Recent practice</th>
+            <th style="width: 140px;">Learning</th>
+            <th style="width: 52px;"></th>
           </tr>
         </thead>
         <tbody>${rows || `<tr><td colspan="8"><div class="empty">No child profiles registered yet. Adult tester calls stay in Learners and Calls until a pre-pilot child has consent, caregiver details, or child-profile fields.</div></td></tr>`}</tbody>
@@ -883,44 +1318,29 @@ def render_admin_review_page() -> str:
         <td class="progress-cell">${progressSparkline(current)}</td>
         <td>${escapeHtml(calling.recent_call_count || 0)} calls<div class="small">${fmtSeconds(calling.recent_call_seconds)}</div></td>
         <td>${escapeHtml(item.total_correct || 0)} correct<div class="small">${escapeHtml(item.total_wrong || 0)} needs help</div></td>
-        <td><button class="action-button" title="Open child">...</button></td>
+        <td class="chevron">&rsaquo;</td>
       </tr>`;
     }
-    function learnerRow(item) {
-      const current = item.effective_state || {};
-      const calling = item.calling || {};
-      const position = item.curriculum_position || {};
-      const numeracy = position.numeracy || {};
-      const status = scaffoldDepth(current) ? pill("Support branch", "green") : pill("On level", "good");
-      const active = state.selectedLearner === item.id ? " active" : "";
-      return `<tr class="${active}" data-learner="${escapeHtml(item.id)}">
-        <td><div class="user-cell"><span class="user-name">${escapeHtml(learnerName(item))}</span><span class="user-phone">${escapeHtml(displayPhone(item))}</span><div class="identity-row">${phoneNote(item)}</div></div></td>
-        <td>${pill(current.course || "numeracy", "green")}</td>
-        <td>Module ${escapeHtml(current.current_module ?? "?")}<div class="small">${escapeHtml(preview(numeracy.title || current.active_skill || ""))}</div></td>
-        <td class="progress-cell">${progressSparkline(current)}</td>
-        <td>${escapeHtml(item.total_sessions || 0)}</td>
-        <td>${escapeHtml(calling.recent_call_count || 0)} calls<div class="small">${fmtSeconds(calling.recent_call_seconds)}</div></td>
-        <td>${escapeHtml(item.total_correct || 0)} correct<div class="small">${escapeHtml(item.total_wrong || 0)} needs help</div></td>
-        <td>${status}</td>
-        <td><button class="action-button" title="Open learner">...</button></td>
-      </tr>`;
-    }
+
+    /* ---------------- calls ---------------- */
     function renderCallsTable() {
-      updateRange(state.calls.length);
-      const rows = pageSlice(state.calls).map(callRow).join("");
+      const items = visibleCalls();
+      updateRange(items.length);
+      const rows = pageSlice(items).map(callRow).join("");
       tableWrap.innerHTML = `<table>
         <thead>
           <tr>
-            <th style="width: 180px;">Date</th>
-            <th style="width: 220px;">Learner / Number</th>
-            <th style="width: 130px;">Duration</th>
-            <th style="width: 130px;">Turns</th>
-            <th style="width: 170px;">Status</th>
+            <th style="width: 145px;">When</th>
+            <th style="width: 210px;">Learner / Number</th>
+            <th style="width: 95px;">Length</th>
+            <th style="width: 115px;">Turns</th>
+            <th style="width: 145px;">Heard by</th>
+            <th style="width: 175px;">Status</th>
             <th>Review</th>
-            <th style="width: 90px;">Actions</th>
+            <th style="width: 52px;"></th>
           </tr>
         </thead>
-        <tbody>${rows || `<tr><td colspan="7"><div class="empty">No calls found.</div></td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="8"><div class="empty">No calls match this view. Try clearing the filters above.</div></td></tr>`}</tbody>
       </table>`;
       tableWrap.querySelectorAll("[data-call]").forEach(row => row.addEventListener("click", () => openCall(row.dataset.call)));
     }
@@ -931,41 +1351,52 @@ def render_admin_review_page() -> str:
       const review = hasClips ? "Turn audio and transcript ready" : "Full-call recording only";
       const active = state.selectedCall === item.call_uuid ? " active" : "";
       return `<tr class="${active}" data-call="${escapeHtml(item.call_uuid)}">
-        <td>${escapeHtml(fmtDate(item.created_at) || item.call_uuid || "")}</td>
+        <td>${escapeHtml(fmtDate(item.created_at) || "")}<div class="small">${escapeHtml(item.mode || "")}</div></td>
         <td>${callerCell(item)}</td>
         <td>${fmtSeconds(item.duration_seconds)}</td>
         <td>${escapeHtml(item.user_turns || 0)} child<div class="small">${escapeHtml(item.turn_count || 0)} clips</div></td>
-        <td class="call-status-cell">${status}</td>
+        <td class="flag-wrap">${providerPills(item)}</td>
+        <td class="call-status-cell">${status}${flags.length > 1 ? `<div class="small">+${flags.length - 1} more flag${flags.length > 2 ? "s" : ""}</div>` : ""}</td>
         <td class="call-review-cell"><span class="review-title">${escapeHtml(review)}</span><span class="review-id">${escapeHtml(item.call_uuid || "")}</span></td>
-        <td><button class="action-button" title="Open call">...</button></td>
+        <td class="chevron">&rsaquo;</td>
       </tr>`;
     }
-    function callFlagLabel(value) {
-      const key = String(value || "").trim();
-      const labels = {
-        no_child_turns: "No child speech",
-        ended_before_minimum_lesson_window: "Ended too soon",
-        short_call: "Short call",
-        no_usable_speech: "No usable speech",
-        server_exception: "Server issue",
-        channel_closed: "Call closed",
-        sabi_wrap_up: "Completed",
-        audiosocket_closed_by_asterisk_or_network: "Call ended",
-        Success: "Success",
-      };
-      return labels[key] || key.replaceAll("_", " ");
+
+    /* ---------------- feedback ---------------- */
+    function renderFeedbackList() {
+      const items = visibleFeedback();
+      updateRange(items.length);
+      const cards = pageSlice(items).map(feedbackCard).join("");
+      tableWrap.innerHTML = `<div class="overview-layout">
+        ${cards || `<div class="empty">No voice notes yet. When a caller leaves an open feedback note after a lesson, it appears here with its audio and transcript.</div>`}
+      </div>`;
+      tableWrap.querySelectorAll("[data-open-call]").forEach(el => el.addEventListener("click", () => openCall(el.dataset.openCall)));
     }
+    function feedbackCard(item) {
+      const hasAudio = Boolean(item.has_audio);
+      const tags = (item.tags || []).map(tag => pill(tag.startsWith("no_audio") ? `No audio: ${callFlagLabel(tag.split(":")[1] || "")}` : tag.replaceAll("_", " "), tag.startsWith("no_audio") ? "warn" : "gold")).join(" ");
+      return `<div class="feedback-card ${hasAudio ? "gold" : ""}">
+        <div class="section-title-row">
+          <div class="user-cell"><span class="user-name">${escapeHtml(item.phone_number || "Phone not captured yet")}</span><span class="user-phone">${escapeHtml(fmtTimestamp(item.created_at))} &middot; ${fmtSeconds(item.duration_seconds)}</span></div>
+          <div class="flag-wrap">${tags}</div>
+        </div>
+        ${hasAudio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(item.audio_endpoint))}"></audio>` : `<div class="small">No audio was captured for this note.</div>`}
+        ${item.transcript_preview ? `<div class="quote">${escapeHtml(item.transcript_preview)}</div>` : ""}
+        ${item.call_uuid ? `<div><button data-open-call="${escapeHtml(item.call_uuid)}">Open the call this note came from</button></div>` : ""}
+      </div>`;
+    }
+
+    /* ---------------- curriculum view ---------------- */
     function renderCurriculumView() {
-      document.getElementById("range").textContent = "Map view";
-      document.getElementById("prev-page").disabled = true;
-      document.getElementById("next-page").disabled = true;
+      staticRange("Map view");
       const curriculum = state.curriculum || {};
       const numeracy = (curriculum.numeracy || {}).modules || [];
       const literacy = (curriculum.literacy || {}).modules || [];
-      tableWrap.innerHTML = `<div style="padding: 16px; display: grid; gap: 16px;">
+      tableWrap.innerHTML = `<div class="overview-layout">
         <div class="curriculum-card">
-          <h3>Full Curriculum Line</h3>
+          <h3>Full Curriculum Line &mdash; Numeracy</h3>
           ${bigCurriculumMap({current_module: 4, scaffold_depth: 0, correct_streak: 0})}
+          <div class="small">Six modules from counting to mixed word problems. The green line is a learner's progress; a support branch appears below when Sabi bumps down to rebuild a skill.</div>
         </div>
         <div class="module-grid">
           <div class="curriculum-card">
@@ -979,6 +1410,7 @@ def render_admin_review_page() -> str:
         </div>
         <div class="curriculum-card">
           <h3>Bump-Down Rules</h3>
+          <div class="small">When a child struggles, Sabi never jumps them to a random level. It steps down within the same skill, rebuilds, then climbs back.</div>
           ${policyHtml(curriculum.bump_down_policy || {})}
         </div>
       </div>`;
@@ -986,17 +1418,16 @@ def render_admin_review_page() -> str:
     function progressSparkline(current) {
       const module = safeModule(current);
       const depth = scaffoldDepth(current);
-      const streak = Number(current.correct_streak || 0);
+      const streak = Number((current || {}).correct_streak || 0);
       const x = 24 + (module - 1) * 38;
       const trackY = 22;
-      const y = trackY;
       const label = depth ? `support ${depth}` : (streak >= 2 ? "moving up" : `M${module}`);
-      const color = streak >= 2 ? "#147a3f" : "#24933f";
+      const color = streak >= 2 ? "#146334" : "#1e7b43";
       return `<svg class="sparkline" viewBox="0 0 240 44" role="img" aria-label="curriculum progress map">
-        <line x1="24" y1="${trackY}" x2="216" y2="${trackY}" stroke="#d7ded9" stroke-width="4" stroke-linecap="round"/>
-        ${[1,2,3,4,5,6].map(n => `<circle cx="${24 + (n - 1) * 38}" cy="${trackY}" r="4" fill="${n <= module ? "#24933f" : "#cfd8d2"}"/>`).join("")}
+        <line x1="24" y1="${trackY}" x2="216" y2="${trackY}" stroke="#e3dac2" stroke-width="4" stroke-linecap="round"/>
+        ${[1,2,3,4,5,6].map(n => `<circle cx="${24 + (n - 1) * 38}" cy="${trackY}" r="4" fill="${n <= module ? "#1e7b43" : "#d8cfb6"}"/>`).join("")}
         <line x1="24" y1="${trackY}" x2="${x}" y2="${trackY}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>
-        <circle cx="${x}" cy="${y}" r="5" fill="#fff" stroke="${color}" stroke-width="2.5"/>
+        <circle cx="${x}" cy="${trackY}" r="5" fill="#fffdf8" stroke="${color}" stroke-width="2.5"/>
         <text x="${Math.max(6, x - 20)}" y="41">${escapeHtml(label)}</text>
       </svg>`;
     }
@@ -1004,52 +1435,67 @@ def render_admin_review_page() -> str:
       const module = safeModule(current);
       const depth = scaffoldDepth(current);
       if (depth) return `Needs extra support in Module ${module}`;
-      if (Number(current.correct_streak || 0) >= 2) return `Ready to move up from Module ${module}`;
+      if (Number((current || {}).correct_streak || 0) >= 2) return `Ready to move up from Module ${module}`;
       return `Currently learning Module ${module}`;
     }
     function curriculumHelpText(current) {
       const depth = scaffoldDepth(current);
       if (depth) return "The branch shows the support path Sabi is using before returning to the main module path.";
-      if (Number(current.correct_streak || 0) >= 2) return "The line rises when the child is showing mastery.";
-      return "The green line shows how far the child has reached in the numeracy path.";
+      if (Number((current || {}).correct_streak || 0) >= 2) return "The line rises when the child is showing mastery.";
+      return "The green line shows how far the child has reached in this path.";
     }
-    function bigCurriculumMap(current) {
-      const module = safeModule(current);
+    function bigCurriculumMap(current, names) {
+      const labels = names || moduleNames;
+      const keys = Object.keys(labels).map(Number).sort((a, b) => a - b);
+      const count = keys.length;
+      const module = Math.max(1, Math.min(count, Number((current || {}).current_module || 1)));
       const depth = scaffoldDepth(current);
-      const streak = Number(current.correct_streak || 0);
-      const x = 50 + (module - 1) * 96;
+      const streak = Number((current || {}).correct_streak || 0);
+      const step = count > 1 ? (480 / (count - 1)) : 0;
+      const nodeX = n => 50 + (n - 1) * step;
+      const x = nodeX(module);
       const trackY = 34;
-      const branchY = 82;
-      const color = streak >= 2 ? "#147a3f" : "#24933f";
+      const branchY = 84;
+      const color = streak >= 2 ? "#146334" : "#1e7b43";
       const supportNodes = [-48, 0, 48].map((offset, index) => ({
         x: Math.max(38, Math.min(542, x + offset)),
         label: `Support ${index + 1}`,
         level: index + 1,
       }));
-      return `<svg class="curriculum-map" viewBox="0 0 580 138" role="img" aria-label="learner curriculum node map">
-        <line x1="50" y1="${trackY}" x2="530" y2="${trackY}" stroke="#d7ded9" stroke-width="5" stroke-linecap="round"/>
+      return `<svg class="curriculum-map" viewBox="0 0 580 140" role="img" aria-label="learner curriculum node map">
+        <line x1="50" y1="${trackY}" x2="530" y2="${trackY}" stroke="#e3dac2" stroke-width="5" stroke-linecap="round"/>
         <line x1="50" y1="${trackY}" x2="${x}" y2="${trackY}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
-        ${[1,2,3,4,5,6].map(n => {
-          const cx = 50 + (n - 1) * 96;
+        ${keys.map(n => {
+          const cx = nodeX(n);
           const done = n <= module;
           const active = n === module;
-          return `<circle cx="${cx}" cy="${trackY}" r="${active ? 8 : 6}" fill="${active ? "#fff" : (done ? "#24933f" : "#cfd8d2")}" stroke="${active ? color : "transparent"}" stroke-width="3"/><text class="${active ? "map-active-label" : ""}" x="${cx}" y="63" text-anchor="middle">${escapeHtml(moduleNames[n])}</text>`;
+          return `<circle cx="${cx}" cy="${trackY}" r="${active ? 8 : 6}" fill="${active ? "#fffdf8" : (done ? "#1e7b43" : "#d8cfb6")}" stroke="${active ? color : "transparent"}" stroke-width="3"/><text class="${active ? "map-active-label" : ""}" x="${cx}" y="63" text-anchor="middle">${escapeHtml(labels[n])}</text>`;
         }).join("")}
         ${depth ? `
-          <path d="M ${x} ${trackY + 8} C ${x} ${trackY + 28}, ${supportNodes[1].x} ${branchY - 18}, ${supportNodes[1].x} ${branchY}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>
-          <line x1="${supportNodes[0].x}" y1="${branchY}" x2="${supportNodes[2].x}" y2="${branchY}" stroke="#d7ded9" stroke-width="4" stroke-linecap="round"/>
+          <path d="M ${x} ${trackY + 8} C ${x} ${trackY + 28}, ${supportNodes[1].x} ${branchY - 18}, ${supportNodes[1].x} ${branchY}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+          <line x1="${supportNodes[0].x}" y1="${branchY}" x2="${supportNodes[2].x}" y2="${branchY}" stroke="#e3dac2" stroke-width="4" stroke-linecap="round"/>
           <line x1="${supportNodes[0].x}" y1="${branchY}" x2="${supportNodes[Math.max(0, depth - 1)].x}" y2="${branchY}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
-          ${supportNodes.map(node => `<circle cx="${node.x}" cy="${branchY}" r="${node.level === depth ? 8 : 6}" fill="${node.level === depth ? "#fff" : (node.level < depth ? "#24933f" : "#cfd8d2")}" stroke="${node.level <= depth ? color : "transparent"}" stroke-width="3"/><text class="map-branch-label ${node.level === depth ? "map-active-label" : ""}" x="${node.x}" y="111" text-anchor="middle">${escapeHtml(node.label)}</text>`).join("")}
+          ${supportNodes.map(node => `<circle cx="${node.x}" cy="${branchY}" r="${node.level === depth ? 8 : 6}" fill="${node.level === depth ? "#fffdf8" : (node.level < depth ? "#1e7b43" : "#d8cfb6")}" stroke="${node.level <= depth ? color : "transparent"}" stroke-width="3"/><text class="map-branch-label ${node.level === depth ? "map-active-label" : ""}" x="${node.x}" y="112" text-anchor="middle">${escapeHtml(node.label)}</text>`).join("")}
         ` : ""}
       </svg>`;
     }
+    function literacyMapState(current) {
+      const lit = (current || {}).literacy || {};
+      return {
+        current_module: Math.max(1, Math.min(5, Number(lit.current_module || 1))),
+        scaffold_depth: 0,
+        correct_streak: 0,
+      };
+    }
+
+    /* ---------------- learner detail ---------------- */
     async function openLearner(id) {
       state.selectedLearner = id;
       state.selectedCall = "";
       render();
       drawerTitle.textContent = "Learner";
       drawerSubtitle.textContent = "Loading...";
-      drawerBody.innerHTML = `<div class="empty">Loading learner...</div>`;
+      drawerBody.innerHTML = `<div class="skeleton"><div class="bone"></div><div class="bone"></div><div class="bone"></div></div>`;
       drawer.classList.add("open");
       try {
         const data = await getJson(`/admin/learners/${encodeURIComponent(id)}?limit=24`);
@@ -1065,48 +1511,63 @@ def render_admin_review_page() -> str:
       const numeracy = position.numeracy || {};
       const literacy = position.literacy || {};
       const calling = student.calling || {};
+      const depth = scaffoldDepth(current);
       drawerTitle.textContent = learnerName(student);
-      drawerSubtitle.innerHTML = `${escapeHtml(displayPhone(student))} ${phoneNote(student)} ${pill(current.course || "course", "green")} ${scaffoldDepth(current) ? pill("support branch", "green") : pill("on level", "good")}`;
-      drawerBody.innerHTML = `<div class="section">
+      drawerSubtitle.innerHTML = `${pill(displayPhone(student), "ink")} ${phoneNote(student)} ${pill(current.course || "course", "gold")} ${depth ? pill(`Support level ${depth}`, "good") : pill("On level", "soft")}`;
+      drawerBody.innerHTML = `
+      ${depth || Number(current.wrong_streak || 0) >= 3 ? `<div class="callout">This learner is on a support branch. Sabi's next move: ${escapeHtml(preview(current.next_step || "rebuild the current skill with smaller steps.", 220))}</div>` : ""}
+      <div class="section">
         <div class="curriculum-card compact">
-          <h3>Curriculum Position</h3>
+          <div class="section-title-row"><h3>Numeracy Journey</h3><span class="section-caption">${escapeHtml(curriculumStatusText(current))}</span></div>
           ${bigCurriculumMap(current)}
           <div class="map-caption">
-            <strong>${escapeHtml(curriculumStatusText(current))}</strong>
+            <strong>Module ${escapeHtml(current.current_module ?? "?")}, Week ${escapeHtml(current.current_week ?? "?")}, Lesson ${escapeHtml(current.current_lesson ?? "?")}</strong>
             <span class="small">${escapeHtml(curriculumHelpText(current))}</span>
           </div>
         </div>
+        <div class="curriculum-card compact">
+          <div class="section-title-row"><h3>Literacy Journey</h3><span class="section-caption">Phase ${escapeHtml(lit.current_phase ?? 1)} &middot; oral foundations</span></div>
+          ${bigCurriculumMap(literacyMapState(current), literacyModuleNames)}
+          <div class="map-caption">
+            <strong>Module ${escapeHtml(lit.current_module ?? "?")}, Week ${escapeHtml(lit.current_week ?? "?")}, Lesson ${escapeHtml(lit.current_lesson ?? "?")}</strong>
+            <span class="small">Literacy runs as its own path and never collides with numeracy progress.</span>
+          </div>
+        </div>
         <div class="detail-grid">
-          ${kv("Numeracy", `Module ${current.current_module ?? "?"}, Week ${current.current_week ?? "?"}, Lesson ${current.current_lesson ?? "?"}`)}
-          ${kv("Literacy", `Module ${lit.current_module ?? "?"}, Week ${lit.current_week ?? "?"}, Lesson ${lit.current_lesson ?? "?"}`)}
           ${kv("Current numeracy lesson", numeracy.title || "not placed yet")}
           ${kv("Current literacy lesson", literacy.title || "not placed yet")}
-          ${kv("Learning evidence", `${student.total_correct || 0} correct · ${student.total_wrong || 0} needs help`)}
-          ${kv("Recent practice", `${calling.recent_call_count || 0} calls · ${fmtSeconds(calling.recent_call_seconds)}`)}
           ${kv("Active skill", current.active_skill || "")}
-          ${kv("Next step", current.next_step || "")}
-          ${kv("Recent struggles", current.wrong_streak ?? 0)}
-          ${kv("Support level", scaffoldDepth(current) ? `Level ${scaffoldDepth(current)} support` : "On level")}
+          ${kv("Learning evidence", `${student.total_correct || 0} correct &middot; ${student.total_wrong || 0} needs help`, true)}
+          ${kv("Recent practice", `${calling.recent_call_count || 0} calls &middot; ${fmtSeconds(calling.recent_call_seconds)}`, true)}
+          ${kv("Sessions saved", student.total_sessions || 0)}
+          ${kv("Recent struggles", `${current.wrong_streak ?? 0} in a row`)}
+          ${kv("Correct streak", `${current.correct_streak ?? 0} in a row`)}
+          ${kv("Support level", depth ? `Level ${depth} support` : "On level")}
+          ${kv("Next step", preview(current.next_step || "", 160))}
+          ${kv("Last call", calling.last_call_at ? fmtTimestamp(calling.last_call_at) : "No calls yet")}
+          ${kv("Consent", student.consent_status || (student.consent_recorded ? "consented" : "not recorded"))}
         </div>
       </div>
       <div class="section">
         <div class="section-title-row">
           <h3>Recent Conversations</h3>
-          <span class="status-note">Newest first</span>
+          <span class="section-caption">Newest first &middot; open any row for the full call review</span>
         </div>
-        <div class="mini-table">${(student.recent_sessions || []).map(sessionRow).join("") || `<div class="empty">No sessions.</div>`}</div>
+        <div class="mini-table">${(student.recent_sessions || []).map(sessionRow).join("") || `<div class="empty">No sessions saved yet for this learner.</div>`}</div>
       </div>`;
       drawerBody.querySelectorAll("[data-open-call]").forEach(el => el.addEventListener("click", () => openCall(el.dataset.openCall)));
     }
     function sessionRow(session) {
       const childTurns = Number(session.child_turns || 0);
       return `<div class="mini-row" ${session.call_sid ? `data-open-call="${escapeHtml(session.call_sid)}"` : ""}>
-        <div><strong class="conversation-date">${escapeHtml(fmtTimestamp(session.created_at))}</strong><div class="conversation-summary">${escapeHtml(preview(session.summary || "", 105))}</div></div>
+        <div><strong class="conversation-date">${escapeHtml(fmtTimestamp(session.created_at))}</strong><div class="conversation-summary">${escapeHtml(preview(session.summary || "", 110))}</div></div>
         <div class="conversation-meta"><span class="mini-label">Length</span>${fmtSeconds(session.duration_seconds)}</div>
         <div class="conversation-meta"><span class="mini-label">Child turns</span>${escapeHtml(childTurns)} turn${childTurns === 1 ? "" : "s"}</div>
         <div><span class="conversation-action ${session.call_sid ? "open" : ""}">${session.call_sid ? "Open" : "Saved"}</span></div>
       </div>`;
     }
+
+    /* ---------------- call detail ---------------- */
     async function openCall(id) {
       if (!id) return;
       state.selectedCall = id;
@@ -1114,34 +1575,61 @@ def render_admin_review_page() -> str:
       render();
       drawerTitle.textContent = "Call";
       drawerSubtitle.textContent = id;
-      drawerBody.innerHTML = `<div class="empty">Loading call...</div>`;
+      drawerBody.innerHTML = `<div class="skeleton"><div class="bone"></div><div class="bone"></div><div class="bone"></div></div>`;
       drawer.classList.add("open");
       try {
-        const call = await getJson(`/admin/calls/${encodeURIComponent(id)}`);
-        renderCallDetail(call);
+        const [call, feedback] = await Promise.all([
+          getJson(`/admin/calls/${encodeURIComponent(id)}`),
+          getJson(`/admin/feedback/${encodeURIComponent(id)}`).catch(() => null),
+        ]);
+        renderCallDetail(call, feedback);
       } catch (err) {
         drawerBody.innerHTML = `<div class="error">Could not load call: ${escapeHtml(err.message)}</div>`;
       }
     }
-    function renderCallDetail(call) {
+    function renderCallDetail(call, feedback) {
       const progression = call.learning_progression || {};
+      const flags = call.quality_flags || [];
       drawerTitle.textContent = callLearnerName(call);
-      drawerSubtitle.innerHTML = `${escapeHtml(callDisplayPhone(call))} · ${escapeHtml(call.call_uuid || "")} ${pill(call.end_reason || "unknown", (call.quality_flags || []).length ? "warn" : "good")}`;
-      drawerBody.innerHTML = `<div class="section">
+      drawerSubtitle.innerHTML = `${pill(callDisplayPhone(call), "ink")} ${pill(callFlagLabel(call.end_reason || "unknown"), flags.length ? "warn" : "good")} ${providerPills(call)} <span class="small">${escapeHtml(call.call_uuid || "")}</span>`;
+      drawerBody.innerHTML = `
+      ${flags.length ? `<div class="callout"><strong>Why this call is flagged:</strong> ${flags.map(f => escapeHtml(callFlagLabel(f))).join(" &middot; ")}</div>` : ""}
+      <div class="section">
         <div class="detail-grid">
+          ${kv("When", fmtDate(call.created_at) || "Not recorded")}
           ${kv("Duration", fmtSeconds(call.duration_seconds))}
           ${kv("Child turns", call.user_turns || 0)}
           ${kv("Sabi turns", call.assistant_turns || 0)}
           ${kv("Review clips", call.turn_count || 0)}
-          ${kv("Quality flags", (call.quality_flags || []).join(", ") || "none")}
+          ${kv("How it ended", callFlagLabel(call.end_reason || "unknown"))}
+          ${kv("Call mode", call.mode || "")}
+          ${kv("Heard by", ((call.stt_providers_used || []).map(providerLabel).join(", ")) || "Not recorded")}
           ${kv("Progression evidence", progression.has_turn_evidence ? "turn evidence available" : "full-call audio only")}
         </div>
       </div>
       ${recordingBlock(call.recordings || {})}
       ${conversationTranscriptBlock(call.turns || [])}
       <div class="section">
-        <h3>Turn Evidence</h3>
+        <div class="section-title-row">
+          <h3>Turn Evidence</h3>
+          <span class="section-caption">Learning state, timings, and support moves per turn</span>
+        </div>
         ${(call.turns || []).length ? (call.turns || []).map(turnBlock).join("") : `<div class="empty">No per-turn clips on this older call. New calls show child audio, STT transcript, lesson text, Sabi audio, and TTS text here.</div>`}
+      </div>
+      ${feedbackBlock(feedback)}`;
+    }
+    function feedbackBlock(feedback) {
+      if (!feedback) {
+        return `<div class="section"><h3>Feedback Note</h3><div class="empty">No voice note was left after this call.</div></div>`;
+      }
+      const tags = (feedback.tags || []).map(tag => pill(tag.startsWith("no_audio") ? `No audio: ${callFlagLabel(tag.split(":")[1] || "")}` : tag.replaceAll("_", " "), tag.startsWith("no_audio") ? "warn" : "gold")).join(" ");
+      return `<div class="section">
+        <div class="section-title-row"><h3>Feedback Note</h3><div class="flag-wrap">${tags}</div></div>
+        <div class="feedback-card gold">
+          <div class="small">${escapeHtml(fmtTimestamp(feedback.created_at))} &middot; ${fmtSeconds(feedback.duration_seconds)} &middot; ${escapeHtml(feedback.participant_type || "tester")}</div>
+          ${feedback.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(feedback.audio_endpoint))}"></audio>` : `<div class="small">No audio captured for this note.</div>`}
+          ${feedback.redacted_transcript ? `<div class="quote">${escapeHtml(feedback.redacted_transcript)}</div>` : ""}
+        </div>
       </div>`;
     }
     function recordingBlock(recordings) {
@@ -1162,7 +1650,7 @@ def render_admin_review_page() -> str:
       return `<div class="section">
         <div class="section-title-row">
           <h3>Conversation Transcript</h3>
-          <span class="status-note">Child audio + STT + Sabi reply</span>
+          <span class="section-caption">Child audio + what Sabi heard + Sabi's reply, turn by turn</span>
         </div>
         <div class="conversation-timeline">
           ${turns.length ? turns.map(transcriptTurn).join("") : `<div class="empty">No per-turn transcript was saved for this older call. New calls show exactly what the child said, what Sabi heard, and what Sabi replied.</div>`}
@@ -1172,18 +1660,21 @@ def render_admin_review_page() -> str:
     function transcriptTurn(turn) {
       const user = turn.user || {};
       const assistant = turn.assistant || {};
-      const flags = (turn.flags || []).map(flag => pill(flag, flag.includes("low") || flag.includes("retry") ? "warn" : "")).join(" ");
+      const flags = (turn.flags || []).map(flag => pill(turnFlagLabel(flag), turnFlagKind(flag))).join(" ");
       const childText = user.stt_transcript || "No transcript saved.";
       const lessonText = user.normalized_transcript || "";
       const sabiText = assistant.text || "No Sabi reply saved for this turn.";
       const ttsText = assistant.tts_text || "";
+      const provider = providerLabel(user.stt_provider);
       const confidence = user.stt_confidence === undefined || user.stt_confidence === null || user.stt_confidence === ""
         ? ""
-        : ` Confidence: ${user.stt_confidence}.`;
+        : ` Confidence ${user.stt_confidence}.`;
+      const timing = timingsLine(turn.timings);
       return `<div class="timeline-turn">
         <div class="timeline-turn-head">
-          <span>Turn ${escapeHtml(turn.turn_index)}</span>
-          <span>${flags}</span>
+          <span><strong>Turn ${escapeHtml(turn.turn_index)}</strong>${provider ? ` &middot; heard by ${escapeHtml(provider)}` : ""}</span>
+          <span class="flag-wrap">${flags}</span>
+          ${timing ? `<span class="timings">${timing}</span>` : ""}
         </div>
         <div class="timeline-pair">
           <div class="timeline-side">
@@ -1193,7 +1684,7 @@ def render_admin_review_page() -> str:
             </div>
             ${user.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(user.audio_endpoint))}"></audio>` : `<div class="small">No child clip.</div>`}
             <div class="timeline-text">${escapeHtml(childText)}</div>
-            <div class="timeline-note">This is what Sabi transcribed from the child-audio clip above.${escapeHtml(confidence)}</div>
+            <div class="timeline-note">This is what Sabi transcribed from the clip above.${escapeHtml(confidence)}</div>
             ${lessonText && lessonText !== childText ? `<div class="timeline-note">Lesson text after cleanup: ${escapeHtml(lessonText)}</div>` : ""}
           </div>
           <div class="timeline-side">
@@ -1214,10 +1705,11 @@ def render_admin_review_page() -> str:
       const before = turn.learning_state_before || {};
       const after = turn.learning_state_after || {};
       const bump = turn.bump_down || {};
+      const bumpReasons = (bump.reasons || []).map(r => r.replaceAll("_", " ")).join(", ");
       return `<div class="turn-card">
         <div class="turn-head">
           <strong>Turn ${escapeHtml(turn.turn_index)}</strong>
-          <span>${(turn.flags || []).map(flag => pill(flag, flag.includes("low") || flag.includes("retry") ? "warn" : "")).join(" ")} ${bump.detected ? pill("bump-down", "warn") : ""}</span>
+          <span class="flag-wrap">${(turn.flags || []).map(flag => pill(turnFlagLabel(flag), turnFlagKind(flag))).join(" ")} ${bump.detected ? pill("bump-down", "gold") : ""}</span>
         </div>
         <div class="turn-body">
           <div class="turn-columns">
@@ -1226,33 +1718,37 @@ def render_admin_review_page() -> str:
               ${user.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(user.audio_endpoint))}"></audio>` : `<div class="small">No child clip.</div>`}
               <div class="quote">Transcribed: ${escapeHtml(user.stt_transcript || "")}</div>
               <div class="quote">Lesson text: ${escapeHtml(user.normalized_transcript || "")}</div>
-              <div class="small">Confidence ${escapeHtml(user.stt_confidence ?? "")} · ${fmtSeconds(user.audio_seconds)}</div>
+              <div class="small">Confidence ${escapeHtml(user.stt_confidence ?? "")} &middot; ${fmtSeconds(user.audio_seconds)}${user.stt_provider ? ` &middot; heard by ${escapeHtml(providerLabel(user.stt_provider))}` : ""}</div>
             </div>
             <div class="section">
               <h3>Sabi</h3>
               ${assistant.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(assistant.audio_endpoint))}"></audio>` : `<div class="small">No Sabi clip.</div>`}
               <div class="quote">Sabi said: ${escapeHtml(assistant.text || "")}</div>
               <div class="quote">Sent to TTS: ${escapeHtml(assistant.tts_text || "")}</div>
-              <div class="small">TTS changed ${assistant.tts_text_changed ? "yes" : "no"} · ${fmtSeconds(assistant.audio_seconds)}</div>
+              <div class="small">TTS changed ${assistant.tts_text_changed ? "yes" : "no"} &middot; ${fmtSeconds(assistant.audio_seconds)}</div>
             </div>
           </div>
           <div class="detail-grid">
-            ${kv("Before", `M${before.current_module ?? "?"} · scaffold ${before.scaffold_depth ?? 0}`)}
-            ${kv("After", `M${after.current_module ?? "?"} · scaffold ${after.scaffold_depth ?? 0}`)}
-            ${kv("Bump-down reasons", (bump.reasons || []).join(", ") || "none")}
+            ${kv("Before this turn", `Module ${before.current_module ?? "?"} &middot; support ${before.scaffold_depth ?? 0}`, true)}
+            ${kv("After this turn", `Module ${after.current_module ?? "?"} &middot; support ${after.scaffold_depth ?? 0}`, true)}
+            ${kv("Bump-down reasons", bumpReasons || "none")}
             ${kv("Teacher move", (bump.to || {}).teacher_move || (after.scaffold_ladder || {}).teacher_move || "")}
+            ${kv("Timings", timingsLine(turn.timings) || "not recorded", true)}
           </div>
         </div>
       </div>`;
     }
+
+    /* ---------------- curriculum modules ---------------- */
     function modulesHtml(modules, kind) {
       if (!modules.length) return `<div class="empty">No modules defined.</div>`;
       return modules.map((module, index) => `<details class="module" ${index === 0 ? "open" : ""}>
-        <summary><span>Module ${escapeHtml(module.module)}: ${escapeHtml(module.module_name || "")}</span>${pill(`${(module.lessons || []).length} lessons`)}</summary>
+        <summary><span>Module ${escapeHtml(module.module)}: ${escapeHtml(module.module_name || "")}</span>${pill(`${(module.lessons || []).length} lessons`, "soft")}</summary>
         <div class="module-body">
-          <div class="small">Skill: ${escapeHtml(module.active_skill || "")} · starts week ${escapeHtml(module.start_week || "?")}</div>
+          <div class="small">Skill: ${escapeHtml(module.active_skill || "")} &middot; starts week ${escapeHtml(module.start_week || "?")}</div>
           <div class="quote">${escapeHtml(module.principle || "")}</div>
           ${(module.lessons || []).slice(0, 12).map(lesson => lessonRow(lesson, kind)).join("")}
+          ${(module.lessons || []).length > 12 ? `<div class="small">+ ${(module.lessons || []).length - 12} more lessons in this module.</div>` : ""}
         </div>
       </details>`).join("");
     }
@@ -1261,17 +1757,27 @@ def render_admin_review_page() -> str:
       return `<div class="lesson"><span class="code">${escapeHtml(code)}</span><span>Week ${escapeHtml(lesson.week || "?")}, Lesson ${escapeHtml(lesson.lesson || "?")}: ${escapeHtml(lesson.title || "")}</span></div>`;
     }
     function policyHtml(policy) {
-      return `<div class="detail-grid">${Object.entries(policy).map(([label, value]) => kv(label, value)).join("")}</div>`;
+      return `<div class="detail-grid">${Object.entries(policy).map(([label, value]) => kv(label.replaceAll("_", " "), value)).join("")}</div>`;
     }
-    function kv(label, value) {
-      return `<div class="kv"><div class="kv-label">${escapeHtml(label)}</div><div class="kv-value">${escapeHtml(value)}</div></div>`;
+    function kv(label, value, raw) {
+      const body = raw ? String(value ?? "") : escapeHtml(value);
+      return `<div class="kv"><div class="kv-label">${escapeHtml(label)}</div><div class="kv-value">${body}</div></div>`;
     }
+
+    /* ---------------- export ---------------- */
     function exportCsv() {
-      const items = state.view === "calls" ? state.calls : state.learners;
-      const keys = state.view === "calls"
-        ? ["call_uuid", "phone_number", "duration_seconds", "end_reason", "turn_count", "user_turns", "assistant_turns"]
-        : ["id", "display_name", "name", "display_phone", "phone_number", "total_sessions", "total_correct", "total_wrong", "current_module"];
-      const rows = [keys.join(",")].concat(items.map(item => keys.map(key => `"${String(item[key] ?? "").replace(/"/g, '""')}"`).join(",")));
+      let items, keys;
+      if (state.view === "calls") {
+        items = visibleCalls();
+        keys = ["call_uuid", "phone_number", "duration_seconds", "end_reason", "turn_count", "user_turns", "assistant_turns", "stt_providers_used", "quality_flags"];
+      } else if (state.view === "feedback") {
+        items = visibleFeedback();
+        keys = ["call_uuid", "phone_number", "duration_seconds", "created_at", "tags", "transcript_preview"];
+      } else {
+        items = visibleLearners().length ? visibleLearners() : state.learners;
+        keys = ["id", "display_name", "name", "display_phone", "phone_number", "total_sessions", "total_correct", "total_wrong", "current_module"];
+      }
+      const rows = [keys.join(",")].concat(items.map(item => keys.map(key => `"${String(Array.isArray(item[key]) ? item[key].join("; ") : (item[key] ?? "")).replace(/"/g, '""')}"`).join(",")));
       const blob = new Blob([rows.join("\\n")], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -1280,16 +1786,23 @@ def render_admin_review_page() -> str:
       a.click();
       URL.revokeObjectURL(url);
     }
+
+    /* ---------------- wiring ---------------- */
+    document.getElementById("nav-overview").addEventListener("click", () => setView("overview"));
+    document.getElementById("nav-gates").addEventListener("click", () => setView("gates"));
     document.getElementById("nav-learners").addEventListener("click", () => setView("learners"));
     document.getElementById("nav-kids").addEventListener("click", () => setView("kids"));
     document.getElementById("nav-calls").addEventListener("click", () => setView("calls"));
+    document.getElementById("nav-feedback").addEventListener("click", () => setView("feedback"));
     document.getElementById("nav-curriculum").addEventListener("click", () => setView("curriculum"));
     document.getElementById("refresh").addEventListener("click", loadData);
     document.getElementById("export").addEventListener("click", exportCsv);
     document.getElementById("prev-page").addEventListener("click", () => { state.page = Math.max(0, state.page - 1); render(); });
     document.getElementById("next-page").addEventListener("click", () => { state.page += 1; render(); });
     document.getElementById("drawer-close").addEventListener("click", () => drawer.classList.remove("open"));
+    document.addEventListener("keydown", event => { if (event.key === "Escape") drawer.classList.remove("open"); });
     search.addEventListener("keydown", event => { if (event.key === "Enter") loadData(); });
+    search.addEventListener("input", () => { state.localQuery = search.value; state.page = 0; if (["learners", "kids", "calls", "feedback"].includes(state.view)) render(); });
     loadData();
   </script>
 </body>

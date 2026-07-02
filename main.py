@@ -51,11 +51,14 @@ from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server, synthesize_phone_tts
 from voice_realtime import record_hangup_event, register_call, start_audiosocket_server
 from secret_loader import get_secret
+from sentry_setup import init_sentry
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sabi")
+
+init_sentry()
 
 # Audio file storage
 AUDIO_DIR = Path("audio_cache")

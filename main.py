@@ -45,6 +45,7 @@ from feedback_admin import (
 )
 from admin_review import render_admin_review_page
 from curriculum_review import build_curriculum_review_map
+from launch_gates import build_launch_gate_report
 from voice import router as voice_router
 from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server, synthesize_phone_tts
@@ -138,6 +139,9 @@ async def lifespan(app: FastAPI):
         tts=app.state.tts,
         memory=app.state.memory,
         port=int(os.getenv("SABI_INTRON_AUDIOSOCKET_PORT", "9020")),
+        # The isolated lane can also canary a different TTS provider
+        # (e.g. chatterbox) without touching the production chain on 9019.
+        tts_primary=os.getenv("SABI_TTS_TEST_PRIMARY", ""),
     )
 
     logger.info("All models loaded. Sabi is ready.")
@@ -570,6 +574,19 @@ async def admin_review_console():
 async def admin_curriculum_map():
     """Protected structured map of Sabi levels, lessons, and scaffold ladders."""
     return JSONResponse(build_curriculum_review_map())
+
+
+@app.get("/admin/launch-gates")
+async def admin_launch_gates():
+    """Protected launch-readiness gate report for Sabi product changes."""
+    calls_result = list_call_records(limit=100)
+    learners_result = await app.state.memory.review_learners(limit=100)
+    report = build_launch_gate_report(
+        calls=calls_result.get("items") or [],
+        learners=learners_result.get("items") or [],
+        intron_api_key_present=bool(get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY")),
+    )
+    return JSONResponse(report)
 
 
 @app.get("/admin/calls/{call_uuid}")

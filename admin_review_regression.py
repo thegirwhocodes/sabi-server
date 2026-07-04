@@ -165,6 +165,16 @@ def main() -> int:
     )
     ok &= check("celebrates_progress", "Worth Celebrating" in html and "learnersToCelebrate" in html)
     ok &= check(
+        "supports_deep_link_urls",
+        "applyHashFrom" in html
+        and "writeHash" in html
+        and "hashchange" in html
+        and "history.replaceState" in html
+        and "loadData().then(() => applyHashFrom(bootHash))" in html,
+    )
+    ok &= check("remembers_sort_and_filter_prefs", "savePrefs" in html and "sabi_admin_sort" in html and "sabi_admin_filters" in html)
+    ok &= check("debounces_search", "searchTimer" in html and "clearTimeout" in html)
+    ok &= check(
         "renders_launch_gate_cards",
         "renderLaunchGatesView" in html
         and "Overall launch posture" in html

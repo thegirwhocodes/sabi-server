@@ -602,6 +602,10 @@ def render_admin_review_page() -> str:
       filters: { provider: "", status: "", course: "" },
       localQuery: "",
     };
+    // Remember the board member's sort + filter choices across refreshes.
+    try { Object.assign(state.sort, JSON.parse(localStorage.getItem("sabi_admin_sort") || "{}")); } catch (e) {}
+    try { Object.assign(state.filters, JSON.parse(localStorage.getItem("sabi_admin_filters") || "{}")); } catch (e) {}
+    const bootHash = window.location.hash;
     const moduleNames = { 1: "Counting", 2: "Addition", 3: "Subtraction", 4: "Multiply", 5: "Division", 6: "Problems" };
     const literacyModuleNames = { 1: "Sounds", 2: "Words", 3: "Stories", 4: "Grammar", 5: "Sound play" };
     const search = document.getElementById("search");
@@ -916,10 +920,40 @@ def render_admin_review_page() -> str:
     }
 
     /* ---------------- shell rendering ---------------- */
+    function savePrefs() {
+      try {
+        localStorage.setItem("sabi_admin_sort", JSON.stringify(state.sort));
+        localStorage.setItem("sabi_admin_filters", JSON.stringify(state.filters));
+      } catch (e) {}
+    }
+    function writeHash() {
+      let target = state.view;
+      if (state.selectedLearner) target = `learners/${encodeURIComponent(state.selectedLearner)}`;
+      else if (state.selectedCall) target = `calls/${encodeURIComponent(state.selectedCall)}`;
+      const next = `#${target}`;
+      if (window.location.hash !== next) history.replaceState(null, "", next);
+    }
+    function applyHashFrom(hash) {
+      const raw = decodeURIComponent(String(hash || "").replace(/^#\\/?/, ""));
+      if (!raw) return;
+      const [seg, id] = raw.split("/");
+      if (id && seg === "learners") { setView("learners"); openLearner(id); return; }
+      if (id && seg === "calls") { setView("calls"); openCall(id); return; }
+      const views = ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates"];
+      if (views.includes(seg)) setView(seg);
+    }
+    function closeDrawer() {
+      drawer.classList.remove("open");
+      state.selectedLearner = "";
+      state.selectedCall = "";
+      writeHash();
+    }
     function setView(view) {
       state.view = view;
       state.page = 0;
       state.localQuery = search.value;
+      state.selectedLearner = "";
+      state.selectedCall = "";
       drawer.classList.remove("open");
       ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates"].forEach(name => {
         const el = document.getElementById(`nav-${name}`);
@@ -928,6 +962,8 @@ def render_admin_review_page() -> str:
       render();
     }
     function render() {
+      savePrefs();
+      writeHash();
       renderHeader();
       renderMetrics();
       renderToolbar();
@@ -1799,11 +1835,18 @@ def render_admin_review_page() -> str:
     document.getElementById("export").addEventListener("click", exportCsv);
     document.getElementById("prev-page").addEventListener("click", () => { state.page = Math.max(0, state.page - 1); render(); });
     document.getElementById("next-page").addEventListener("click", () => { state.page += 1; render(); });
-    document.getElementById("drawer-close").addEventListener("click", () => drawer.classList.remove("open"));
-    document.addEventListener("keydown", event => { if (event.key === "Escape") drawer.classList.remove("open"); });
+    document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+    document.addEventListener("keydown", event => { if (event.key === "Escape" && drawer.classList.contains("open")) closeDrawer(); });
     search.addEventListener("keydown", event => { if (event.key === "Enter") loadData(); });
-    search.addEventListener("input", () => { state.localQuery = search.value; state.page = 0; if (["learners", "kids", "calls", "feedback"].includes(state.view)) render(); });
-    loadData();
+    let searchTimer;
+    search.addEventListener("input", () => {
+      state.localQuery = search.value;
+      state.page = 0;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { if (["learners", "kids", "calls", "feedback"].includes(state.view)) render(); }, 140);
+    });
+    window.addEventListener("hashchange", () => applyHashFrom(window.location.hash));
+    loadData().then(() => applyHashFrom(bootHash));
   </script>
 </body>
 </html>"""

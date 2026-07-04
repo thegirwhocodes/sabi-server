@@ -811,6 +811,27 @@ def render_admin_review_page() -> str:
       const key = String(value || "").trim();
       return labels[key] || (key ? key.replaceAll("_", " ") : "");
     }
+    const REVIEW_STATUS_LABELS = {
+      unreviewed: "Not reviewed",
+      reviewed: "Reviewed",
+      follow_up: "Needs follow-up",
+      safety_escalation: "Safety escalation",
+    };
+    function reviewStatusOf(call) {
+      const s = String((call && call.review_status) || "unreviewed");
+      return REVIEW_STATUS_LABELS[s] ? s : "unreviewed";
+    }
+    function reviewStatusKind(status) {
+      if (status === "reviewed") return "good";
+      if (status === "safety_escalation") return "bad";
+      if (status === "follow_up") return "warn";
+      return "soft";
+    }
+    function reviewStatusPill(call) {
+      const s = reviewStatusOf(call);
+      if (s === "unreviewed") return "";
+      return pill(REVIEW_STATUS_LABELS[s], reviewStatusKind(s));
+    }
     function providerPills(call) {
       const providers = (call && call.stt_providers_used) || [];
       if (!providers.length) return pill("Not recorded", "soft");
@@ -826,11 +847,82 @@ def render_admin_review_page() -> str:
       return parts.join(" &middot; ");
     }
 
+    /* ---------------- toast ---------------- */
+    let toastTimer;
+    function toast(message, kind) {
+      let el = document.getElementById("toast");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "toast";
+        el.style.cssText = "position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:80;padding:11px 18px;border-radius:99px;font-size:13px;font-weight:500;box-shadow:0 10px 30px rgba(45,36,20,.22);border:1px solid;max-width:min(560px,90vw);text-align:center;transition:opacity 180ms ease,transform 180ms ease;";
+        document.body.appendChild(el);
+      }
+      const palette = kind === "bad"
+        ? "background:#fbeeec;color:#b42318;border-color:#f0c1ba;"
+        : kind === "warn"
+          ? "background:#faf0da;color:#9b5b00;border-color:#ecd3a2;"
+          : "background:#1b1610;color:#f1e6cd;border-color:#1b1610;";
+      el.style.cssText += palette;
+      el.textContent = message;
+      el.style.opacity = "1";
+      el.style.transform = "translateX(-50%) translateY(0)";
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.style.opacity = "0"; el.style.transform = "translateX(-50%) translateY(8px)"; }, 3600);
+    }
+
     /* ---------------- data loading ---------------- */
     async function getJson(path) {
       const res = await fetch(path, { headers });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       return res.json();
+    }
+    async function postForm(path, fields) {
+      const body = new URLSearchParams(fields || {});
+      const res = await fetch(path, { method: "POST", headers, body });
+      if (res.status === 401 || res.status === 403) {
+        const e = new Error("needs_full_key"); e.code = 401; throw e;
+      }
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json();
+    }
+    async function setReviewStatus(callUuid, status) {
+      try {
+        const updated = await postForm(`/admin/calls/${encodeURIComponent(callUuid)}/review-status`, { status });
+        const idx = state.calls.findIndex(c => c.call_uuid === callUuid);
+        if (idx >= 0) state.calls[idx] = { ...state.calls[idx], review_status: updated.review_status, reviewed_at: updated.reviewed_at };
+        toast(status === "unreviewed" ? "Marked as not reviewed." : `Marked ${REVIEW_STATUS_LABELS[status].toLowerCase()}.`, status === "safety_escalation" ? "bad" : "");
+        render();
+        if (state.selectedCall === callUuid) openCall(callUuid);
+      } catch (err) {
+        if (err.code === 401) toast("To change review status, open the console with your full admin key (not the read-only PIN).", "warn");
+        else toast(`Could not save: ${err.message}`, "bad");
+      }
+    }
+    async function compareStt(callUuid, turnIndex, buttonEl) {
+      const target = document.getElementById(`stt-compare-${turnIndex}`);
+      if (target) target.innerHTML = `<div class="small">Replaying this clip through both speech systems...</div>`;
+      if (buttonEl) buttonEl.disabled = true;
+      try {
+        const data = await postForm(`/admin/calls/${encodeURIComponent(callUuid)}/turns/${turnIndex}/stt-compare`, {});
+        if (target) target.innerHTML = sttCompareHtml(data);
+      } catch (err) {
+        if (err.code === 401) { if (target) target.innerHTML = `<div class="small">This needs the full admin key. Open the console with your full key to run the Groq-vs-Intron comparison.</div>`; }
+        else if (target) target.innerHTML = `<div class="small">Could not compare: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        if (buttonEl) buttonEl.disabled = false;
+      }
+    }
+    function sttCompareHtml(data) {
+      const b = data.baseline || {};
+      const i = data.intron || {};
+      const note = data.intron_key_present
+        ? (data.match ? "Both systems heard the same thing." : "The two systems disagreed — worth a listen.")
+        : "Intron key is not set yet, so the Intron lane fell back to Groq/Whisper. Set INTRON_API_KEY to run a real comparison.";
+      return `<div class="compare-grid">
+        <div class="compare-col"><div class="mini-label">Production (${escapeHtml(providerLabel(b.provider) || "baseline")})</div><div class="compare-text">${escapeHtml(b.text || "(nothing heard)")}</div><div class="small">Confidence ${escapeHtml(b.confidence ?? "?")} &middot; ${escapeHtml(b.latency_ms ?? "?")}ms</div></div>
+        <div class="compare-col"><div class="mini-label">Intron lane (${escapeHtml(providerLabel(i.provider) || "test")})</div><div class="compare-text">${escapeHtml(i.text || "(nothing heard)")}</div><div class="small">Confidence ${escapeHtml(i.confidence ?? "?")} &middot; ${escapeHtml(i.latency_ms ?? "?")}ms</div></div>
+        <div class="compare-note ${data.intron_key_present ? (data.match ? "good" : "warn") : "soft"}">${escapeHtml(note)}</div>
+      </div>`;
     }
     async function checkHealth() {
       const dot = document.getElementById("health-dot");

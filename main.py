@@ -31,11 +31,13 @@ from tts import TextToSpeech
 from llm import SabiLLM
 from memory import StudentMemory
 from call_admin import (
+    REVIEW_STATUSES,
     call_recording_path,
     call_sidecar_path,
     call_turn_audio_path,
     list_call_records,
     load_call_record,
+    set_call_review_status,
 )
 from feedback_admin import (
     feedback_audio_path,
@@ -553,6 +555,7 @@ async def admin_call_index(
     call_id: str = "",
     flag: str = "",
     q: str = "",
+    review_status: str = "",
 ):
     """Protected phone-call QA index for pre-pilot monitoring."""
     return JSONResponse(
@@ -563,6 +566,7 @@ async def admin_call_index(
             call_id=call_id,
             flag=flag,
             q=q,
+            review_status=review_status,
         )
     )
 
@@ -602,6 +606,66 @@ async def admin_call_detail(call_uuid: str):
     if not record:
         return JSONResponse({"error": "call_unreadable"}, status_code=422)
     return JSONResponse(record)
+
+
+@app.post("/admin/calls/{call_uuid}/review-status")
+async def admin_set_call_review_status(
+    call_uuid: str,
+    status: str = Form(...),
+    reviewer: str = Form(""),
+):
+    """Board triage: mark a call reviewed / follow-up / safety-escalation.
+
+    Writes sidecar metadata only. Requires the full SABI_API_KEY (the
+    read-only PIN cannot POST), so board members can view triage state while
+    only a full-key operator can change it.
+    """
+    normalized = str(status or "").strip().lower()
+    if normalized not in REVIEW_STATUSES:
+        return JSONResponse(
+            {"error": "invalid_status", "allowed": list(REVIEW_STATUSES)},
+            status_code=400,
+        )
+    record = set_call_review_status(call_uuid, normalized, reviewer=reviewer)
+    if not record:
+        return JSONResponse({"error": "call_not_found"}, status_code=404)
+    return JSONResponse(record)
+
+
+@app.post("/admin/calls/{call_uuid}/turns/{turn_index}/stt-compare")
+async def admin_stt_compare(call_uuid: str, turn_index: int):
+    """Offline replay (QA playbook Stage 1): run one saved child clip through
+    the production STT lane and the Intron test lane, side by side.
+
+    Reads a saved turn WAV only; does not affect any live call. If
+    INTRON_API_KEY is not configured, the Intron lane falls back to Groq/Whisper
+    and the response's `provider` field will show that transparently.
+    """
+    audio_path = call_turn_audio_path(call_uuid, turn_index, "user")
+    if not audio_path or not audio_path.exists():
+        return JSONResponse({"error": "turn_audio_not_found"}, status_code=404)
+
+    async def run(engine) -> dict:
+        start = time.time()
+        result = await asyncio.to_thread(engine.transcribe, str(audio_path))
+        result = dict(result or {})
+        result["latency_ms"] = int((time.time() - start) * 1000)
+        return result
+
+    baseline = await run(app.state.stt)
+    intron = await run(app.state.intron_stt)
+    match = (
+        str(baseline.get("text", "")).strip().lower()
+        == str(intron.get("text", "")).strip().lower()
+    )
+    return JSONResponse({
+        "call_uuid": call_uuid,
+        "turn_index": turn_index,
+        "baseline": baseline,
+        "intron": intron,
+        "match": match,
+        "intron_key_present": bool(get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY")),
+    })
 
 
 @app.get("/admin/calls/{call_uuid}/audio/{kind}")

@@ -16,6 +16,7 @@ from call_admin import (
     load_call_record,
     merge_call_hangup_event,
     quality_flags,
+    set_call_review_status,
     write_call_review_record,
 )
 
@@ -207,6 +208,35 @@ def main() -> int:
             flagged["total"] == 1
             and flagged["items"][0]["call_uuid"] == "call-qa-002",
             flagged,
+        )
+
+        ok &= check(
+            "load_call_record_defaults_review_status_unreviewed",
+            load_call_record(root / "call_call-qa-001.json").get("review_status") == "unreviewed",
+        )
+        reviewed = set_call_review_status(call_uuid, "reviewed", reviewer="Naomi", directory=root)
+        ok &= check(
+            "set_review_status_marks_reviewed_with_timestamp",
+            reviewed is not None
+            and reviewed["review_status"] == "reviewed"
+            and reviewed.get("reviewed_at")
+            and reviewed.get("reviewed_by") == "Naomi",
+            reviewed,
+        )
+        ok &= check(
+            "set_review_status_rejects_invalid",
+            set_call_review_status(call_uuid, "nonsense", directory=root) is None,
+        )
+        ok &= check(
+            "index_filters_by_review_status",
+            list_call_records(root, review_status="reviewed")["total"] == 1
+            and list_call_records(root, review_status="unreviewed")["total"] == 1,
+        )
+        cleared = set_call_review_status(call_uuid, "unreviewed", directory=root)
+        ok &= check(
+            "set_review_status_unreviewed_clears_timestamp",
+            cleared is not None and cleared["review_status"] == "unreviewed" and cleared.get("reviewed_at") is None,
+            cleared,
         )
 
     return 0 if ok else 1

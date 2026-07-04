@@ -17,6 +17,10 @@ SAFE_CALL_UUID_RE = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
 SAFE_TURN_ROLE_RE = re.compile(r"^(user|assistant)$")
 MIN_LESSON_SECONDS = int(os.getenv("SABI_MIN_LESSON_SECONDS", "300"))
 
+# Board triage workflow: a reviewer can mark each call so the review queue
+# shrinks as work is done and safety concerns are visible.
+REVIEW_STATUSES = ("unreviewed", "reviewed", "follow_up", "safety_escalation")
+
 
 def shared_audio_dir() -> Path:
     return Path(os.getenv("SABI_SHARED_AUDIO_DIR", "/shared/audio"))
@@ -135,6 +139,32 @@ def write_call_review_record(
         record["hangup_event"] = hangup_event
     path.write_text(json.dumps(record, ensure_ascii=True, indent=2, sort_keys=True))
     return record
+
+
+def set_call_review_status(
+    call_uuid: str,
+    status: str,
+    reviewer: str = "",
+    directory: Path | None = None,
+) -> dict[str, Any] | None:
+    """Set the board triage status on one call sidecar (metadata only).
+
+    Returns the refreshed call record, or None if the status is invalid or the
+    call has no sidecar. This never touches call audio or the phone pipeline.
+    """
+    if status not in REVIEW_STATUSES:
+        return None
+    path = call_sidecar_path(call_uuid, directory)
+    if not path or not path.exists():
+        return None
+    record = _load_json(path) or {}
+    record["review_status"] = status
+    record["reviewed_at"] = int(time.time()) if status != "unreviewed" else None
+    if reviewer:
+        record["reviewed_by"] = str(reviewer)[:120]
+    record["updated_at"] = int(time.time())
+    path.write_text(json.dumps(record, ensure_ascii=True, indent=2, sort_keys=True, default=str))
+    return load_call_record(path, include_artifacts=False)
 
 
 def append_call_turn_review(
@@ -297,6 +327,8 @@ def load_call_record(path: Path, *, include_artifacts: bool = True) -> dict[str,
     data["sidecar_updated_at"] = int(path.stat().st_mtime)
     data.setdefault("turns", [])
     data["turn_count"] = len(data.get("turns") or [])
+    data.setdefault("review_status", "unreviewed")
+    data.setdefault("reviewed_at", None)
     data["learning_progression"] = _call_learning_progression(data)
     if include_artifacts:
         data["recordings"] = _recording_review_paths(data, path.parent)
@@ -316,6 +348,7 @@ def list_call_records(
     call_id: str = "",
     flag: str = "",
     q: str = "",
+    review_status: str = "",
 ) -> dict[str, Any]:
     root = directory or shared_audio_dir()
     safe_limit = max(1, min(int(limit or 25), 100))
@@ -323,6 +356,7 @@ def list_call_records(
     phone_digits = _digits(phone)
     call_filter = str(call_id or "").strip()
     flag_filter = str(flag or "").strip()
+    review_filter = str(review_status or "").strip()
     text_filter = str(q or "").strip().lower()
 
     paths = sorted(
@@ -343,6 +377,8 @@ def list_call_records(
         if call_filter and call_filter not in str(record.get("call_id") or ""):
             continue
         if flag_filter and flag_filter not in set(record.get("quality_flags") or []):
+            continue
+        if review_filter and review_filter != str(record.get("review_status") or "unreviewed"):
             continue
         if text_filter:
             haystack = " ".join(

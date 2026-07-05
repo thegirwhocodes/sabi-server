@@ -1108,6 +1108,7 @@ def render_admin_review_page() -> str:
       renderNavCounts();
       if (state.view === "overview") renderOverviewDashboard();
       if (state.view === "gates") renderLaunchGatesView();
+      if (state.view === "evidence") renderPilotEvidenceView();
       if (state.view === "learners") renderLearnersTable();
       if (state.view === "kids") renderKidsTable();
       if (state.view === "calls") renderCallsTable();
@@ -1123,6 +1124,7 @@ def render_admin_review_page() -> str:
         calls: ["Calls", "Every phone lesson with audio, transcripts, and quality evidence.", "Voice Sessions"],
         feedback: ["Feedback", "Open voice notes left by testers, caregivers, and children after calls.", "Voice Notes"],
         curriculum: ["Curriculum", "The full learning path, lesson by lesson, and the support rules.", "Curriculum Map"],
+        evidence: ["Pilot Evidence", "Cohort learning gains for NGO due diligence: TaRL movement, probe effect size, dosage, and cost.", "Pilot Proof Report"],
       };
       const [title, subtitle, panel] = titles[state.view];
       document.getElementById("page-title").textContent = title;
@@ -1225,6 +1227,10 @@ def render_admin_review_page() -> str:
       } else if (state.view === "feedback") {
         viewToolbar.innerHTML = `<label class="control">Sort
           <select id="sort-select"><option value="newest">Newest first</option></select></label>`;
+      } else if (state.view === "evidence") {
+        viewToolbar.innerHTML = `<button class="btn secondary" id="evidence-csv" type="button">Download cohort CSV</button>`;
+        const btn = document.getElementById("evidence-csv");
+        if (btn) btn.addEventListener("click", exportPilotEvidenceCsv);
       } else {
         viewToolbar.innerHTML = "";
       }
@@ -1415,6 +1421,109 @@ def render_admin_review_page() -> str:
         <ul class="gate-evidence">${(gate.evidence || []).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
         <div class="quote">Next action: ${escapeHtml(gate.next_action || "")}</div>
       </div>`;
+    }
+
+    /* ---------------- pilot evidence (Layer C) ---------------- */
+    function pctLabel(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+      return `${Math.round(Number(value) * 100)}%`;
+    }
+    function distHtml(dist) {
+      const entries = Object.entries(dist || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+      if (!entries.length) return `<span class="small">No baseline/current pairs yet.</span>`;
+      return entries.map(([level, count]) => `<span class="skill-chip">L${escapeHtml(level)}: ${escapeHtml(count)}</span>`).join("");
+    }
+    function renderPilotEvidenceView() {
+      staticRange("Cohort evidence");
+      const report = state.pilotEvidence || {};
+      const cohort = report.cohort || {};
+      const num = cohort.tarl_movement?.numeracy || {};
+      const lit = cohort.tarl_movement?.literacy || {};
+      const probe = cohort.probe || {};
+      const dosage = cohort.dosage || {};
+      const cost = cohort.cost || {};
+      const benchmarks = report.benchmarks || {};
+      const children = report.children || [];
+      const rows = children.map(child => {
+        const numC = child.numeracy || {};
+        const litC = child.literacy || {};
+        const dose = child.dosage || {};
+        const gain = child.probe?.gain;
+        return `<tr>
+          <td><div class="user-name">${escapeHtml(child.name || child.id || "Child")}</div></td>
+          <td>${pill(child.consented ? "consented" : "pending", child.consented ? "good" : "warn")}</td>
+          <td>${escapeHtml(numC.baseline_level ?? "—")} → ${escapeHtml(numC.current_level ?? "—")}${numC.levels_gained != null ? ` (${numC.levels_gained >= 0 ? "+" : ""}${escapeHtml(numC.levels_gained)})` : ""}</td>
+          <td>${escapeHtml(litC.baseline_level ?? "—")} → ${escapeHtml(litC.current_level ?? "—")}</td>
+          <td>${escapeHtml(dose.calls || 0)} / ${escapeHtml(dose.hours || 0)}h</td>
+          <td>${gain != null ? escapeHtml(gain) : "—"}</td>
+        </tr>`;
+      }).join("");
+      tableWrap.innerHTML = `<div class="overview-layout">
+        <div class="command-grid">
+          <div class="command-card">
+            ${pill(`${cohort.children || 0} children`, "gold")}
+            <strong>Cohort size</strong>
+            <p>${escapeHtml(cohort.consented || 0)} consented · ${escapeHtml(cohort.with_calls || 0)} with calls. Adult testers excluded.</p>
+          </div>
+          <div class="command-card">
+            ${pill(pctLabel(num.pct_up_one_plus_level), num.pct_up_one_plus_level >= 0.5 ? "good" : "soft")}
+            <strong>TaRL movement (numeracy)</strong>
+            <p>${escapeHtml(num.children_up_one_plus_level || 0)} of ${escapeHtml(num.children_with_baseline_and_current || 0)} children up ≥1 level.</p>
+          </div>
+          <div class="command-card">
+            ${pill(probe.effect_size_d != null ? `d=${probe.effect_size_d}` : "probe pending", probe.effect_size_d >= 0.3 ? "good" : "soft")}
+            <strong>Probe effect size</strong>
+            <p>${escapeHtml(probe.n_paired || 0)} paired probes · mean gain ${escapeHtml(probe.mean_gain ?? "—")} · target d ≥ 0.30.</p>
+          </div>
+        </div>
+        <div class="command-grid">
+          <div class="command-card">
+            <strong>Dosage</strong>
+            <p>Median ${escapeHtml(dosage.median_calls ?? "—")} calls · ${escapeHtml(dosage.median_hours ?? "—")} hours · second-call return ${pctLabel(dosage.second_call_return_rate)}.</p>
+          </div>
+          <div class="command-card">
+            <strong>Mastery velocity</strong>
+            <p>${escapeHtml((cohort.mastery || {}).skills_mastered_total || 0)} skill-modules mastered across the cohort.</p>
+          </div>
+          <div class="command-card">
+            <strong>Cost framing</strong>
+            <p>${cost.cost_per_child_usd != null ? `$${escapeHtml(cost.cost_per_child_usd)}/child` : "Set SABI_COST_PER_CHILD_USD"} · SD/$ ${escapeHtml(cost.sd_per_dollar ?? "—")}. Compare ConnectEd ${escapeHtml(benchmarks.connected?.cost_per_child_usd || 12)}/child, d≈${escapeHtml(benchmarks.connected?.effect_sd || 0.33)}.</p>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row"><h3>TaRL level distributions</h3><span class="section-caption">Baseline vs current (children only)</span></div>
+          <div class="detail-grid">
+            <div class="feedback-card"><strong>Numeracy baseline</strong><div class="skill-chips">${distHtml(num.baseline_distribution)}</div></div>
+            <div class="feedback-card"><strong>Numeracy current</strong><div class="skill-chips">${distHtml(num.current_distribution)}</div></div>
+            <div class="feedback-card"><strong>Literacy baseline</strong><div class="skill-chips">${distHtml(lit.baseline_distribution)}</div></div>
+            <div class="feedback-card"><strong>Literacy current</strong><div class="skill-chips">${distHtml(lit.current_distribution)}</div></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row"><h3>Per-child evidence</h3><span class="section-caption">${escapeHtml(children.length)} rows · export for funder due diligence</span></div>
+          <table>
+            <thead><tr>
+              <th>Child</th><th>Consent</th><th>Num level</th><th>Lit level</th><th>Dosage</th><th>Probe gain</th>
+            </tr></thead>
+            <tbody>${rows || `<tr><td colspan="6"><div class="empty">No child evidence yet. Enroll consented children and complete diagnostics first.</div></td></tr>`}</tbody>
+          </table>
+        </div>
+        <div class="quote">${escapeHtml((report.notes || {}).primary_outcome || "")} ${escapeHtml((report.notes || {}).child_only || "")}</div>
+      </div>`;
+    }
+    async function exportPilotEvidenceCsv() {
+      try {
+        const response = await fetch("/admin/pilot-evidence?fmt=csv", { headers });
+        if (!response.ok) throw new Error(`Export failed (${response.status})`);
+        const blob = await response.blob();
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "sabi-pilot-evidence.csv";
+        link.click();
+        URL.revokeObjectURL(link.href);
+      } catch (err) {
+        alert(`Could not export pilot evidence: ${err.message}`);
+      }
     }
 
     /* ---------------- learners + kids ---------------- */
@@ -2086,6 +2195,7 @@ def render_admin_review_page() -> str:
     document.getElementById("nav-calls").addEventListener("click", () => setView("calls"));
     document.getElementById("nav-feedback").addEventListener("click", () => setView("feedback"));
     document.getElementById("nav-curriculum").addEventListener("click", () => setView("curriculum"));
+    document.getElementById("nav-evidence").addEventListener("click", () => setView("evidence"));
     document.getElementById("refresh").addEventListener("click", loadData);
     document.getElementById("export").addEventListener("click", exportCsv);
     document.getElementById("prev-page").addEventListener("click", () => { state.page = Math.max(0, state.page - 1); render(); });

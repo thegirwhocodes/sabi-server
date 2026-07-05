@@ -32,6 +32,7 @@ from learning_state import (
     merge_learning_state,
     route_next_course_after_session,
 )
+from mastery_probe import probe_capture_payload, session_probe_score
 from teacher_notes import generate_teacher_note
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
@@ -72,6 +73,12 @@ OPTIONAL_STUDENT_COLUMNS = {
     "baseline_tarl_level",
     "baseline_reading_level",
     "baseline_recorded_at",
+    "baseline_probe_score",
+    "baseline_probe_at",
+    "baseline_probe_source",
+    "latest_probe_score",
+    "latest_probe_at",
+    "probe_history",
 }
 
 OPTIONAL_SESSION_COLUMNS = {
@@ -317,6 +324,12 @@ class StudentMemory:
                 merged_skills[skill] = max(float(merged_skills.get(skill, 0) or 0), float(score))
 
             identity_name = stats.child_name or spoken_child_name or student.get("name")
+            probe_score, probe_source = session_probe_score(
+                learning_state=persisted_learning_state,
+                scorecard=call_scorecard,
+                correct_count=stats.correct_count,
+                wrong_count=stats.wrong_count,
+            )
             update_payload = {
                 **_identity_payload_for_existing_row(student, normalized_phone, identity_name),
                 "name": identity_name,
@@ -340,6 +353,7 @@ class StudentMemory:
                 "last_session_summary": summary,
                 "last_teacher_note": teacher_note,
                 **_baseline_capture_payload(student, persisted_learning_state),
+                **probe_capture_payload(student, session_score=probe_score, source=probe_source),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             update_payload = {key: value for key, value in update_payload.items() if value is not None}
@@ -1568,6 +1582,9 @@ def _student_review_record(student: dict, effective_state: dict, sessions: list[
         "baseline_tarl_level": student.get("baseline_tarl_level"),
         "baseline_reading_level": student.get("baseline_reading_level"),
         "baseline_recorded_at": student.get("baseline_recorded_at"),
+        "baseline_probe_score": student.get("baseline_probe_score"),
+        "latest_probe_score": student.get("latest_probe_score"),
+        "probe_history": student.get("probe_history"),
         "consent_status": student.get("consent_status"),
         "consent_recorded": student.get("consent_recorded"),
         "participant_type": student.get("participant_type"),

@@ -356,6 +356,33 @@ def render_admin_review_page() -> str:
     .conversation-summary { margin-top: 3px; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
     .conversation-meta { display: grid; gap: 2px; font-size: 13px; font-weight: 400; }
     .mini-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; }
+    /* Board triage: review-status controls in the call drawer. */
+    .review-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .review-btn {
+      min-height: 32px; padding: 6px 14px; border-radius: 99px; font-size: 12.5px; font-weight: 500;
+      border: 1px solid var(--line-strong); color: var(--ink); background: var(--card); cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+    }
+    .review-btn:hover { border-color: var(--gold); background: var(--gold-soft); }
+    .review-btn.active { background: #1b1610; color: #f1e6cd; border-color: #1b1610; }
+    .review-btn.active.bad { background: #b42318; border-color: #b42318; color: #fff; }
+    .review-btn.active.warn { background: #9b5b00; border-color: #9b5b00; color: #fff; }
+    .review-btn:disabled { opacity: .55; cursor: default; }
+    /* Offline STT replay (Groq vs Intron) inside a turn. */
+    .stt-compare-btn {
+      margin-top: 8px; min-height: 30px; padding: 5px 13px; border-radius: 99px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--line-strong); color: var(--muted); background: var(--card); cursor: pointer;
+    }
+    .stt-compare-btn:hover { border-color: var(--gold); color: var(--ink); background: var(--gold-soft); }
+    .stt-compare-btn:disabled { opacity: .55; cursor: default; }
+    .compare-grid { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .compare-col { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); }
+    .compare-text { margin: 4px 0 6px; font-size: 13.5px; font-weight: 500; line-height: 1.4; }
+    .compare-note { grid-column: 1 / -1; border-radius: 10px; padding: 8px 12px; font-size: 12.5px; border: 1px solid var(--line); background: var(--paper); }
+    .compare-note.good { background: #eef7ee; border-color: #cfe6cf; color: #226b2b; }
+    .compare-note.warn { background: #faf0da; border-color: #ecd3a2; color: #9b5b00; }
+    .compare-note.soft { color: var(--muted); }
     .conversation-action {
       display: inline-flex;
       justify-content: center;
@@ -599,7 +626,7 @@ def render_admin_review_page() -> str:
       page: 0,
       pageSize: 50,
       sort: { learners: "recent", kids: "recent", calls: "newest", feedback: "newest" },
-      filters: { provider: "", status: "", course: "" },
+      filters: { provider: "", status: "", course: "", reviewStatus: "" },
       localQuery: "",
     };
     // Remember the board member's sort + filter choices across refreshes.
@@ -1001,6 +1028,7 @@ def render_admin_review_page() -> str:
       }
       if (state.filters.status === "flagged") items = items.filter(call => (call.quality_flags || []).length);
       if (state.filters.status === "clean") items = items.filter(call => !(call.quality_flags || []).length);
+      if (state.filters.reviewStatus) items = items.filter(call => reviewStatusOf(call) === state.filters.reviewStatus);
       items = localFilter(items, [callLearnerName, callDisplayPhone, call => call.call_uuid, call => (call.quality_flags || []).join(" ")]);
       return sortedCalls(items);
     }
@@ -1136,13 +1164,24 @@ def render_admin_review_page() -> str:
               <option value="flagged">Needs review</option>
               <option value="clean">Clean</option>
             </select>
+          </label>
+          <label class="control">Review
+            <select id="review-status-select">
+              <option value="">Any review state</option>
+              <option value="unreviewed">Not reviewed</option>
+              <option value="reviewed">Reviewed</option>
+              <option value="follow_up">Needs follow-up</option>
+              <option value="safety_escalation">Safety escalation</option>
+            </select>
           </label>`;
         document.getElementById("sort-select").value = state.sort.calls;
         document.getElementById("provider-select").value = state.filters.provider;
         document.getElementById("status-select").value = state.filters.status;
+        document.getElementById("review-status-select").value = state.filters.reviewStatus;
         document.getElementById("sort-select").addEventListener("change", e => { state.sort.calls = e.target.value; state.page = 0; render(); });
         document.getElementById("provider-select").addEventListener("change", e => { state.filters.provider = e.target.value; state.page = 0; render(); });
         document.getElementById("status-select").addEventListener("change", e => { state.filters.status = e.target.value; state.page = 0; render(); });
+        document.getElementById("review-status-select").addEventListener("change", e => { state.filters.reviewStatus = e.target.value; state.page = 0; render(); });
       } else if (state.view === "learners" || state.view === "kids") {
         const sortKey = state.view === "kids" ? "kids" : "learners";
         viewToolbar.innerHTML = `
@@ -1485,7 +1524,7 @@ def render_admin_review_page() -> str:
         <td>${escapeHtml(item.user_turns || 0)} child<div class="small">${escapeHtml(item.turn_count || 0)} clips</div></td>
         <td class="flag-wrap">${providerPills(item)}</td>
         <td class="call-status-cell">${status}${flags.length > 1 ? `<div class="small">+${flags.length - 1} more flag${flags.length > 2 ? "s" : ""}</div>` : ""}</td>
-        <td class="call-review-cell"><span class="review-title">${escapeHtml(review)}</span><span class="review-id">${escapeHtml(item.call_uuid || "")}</span></td>
+        <td class="call-review-cell">${(() => { const p = reviewStatusPill(item); return p ? `<div class="flag-wrap" style="margin-bottom:4px;">${p}</div>` : ""; })()}<span class="review-title">${escapeHtml(review)}</span><span class="review-id">${escapeHtml(item.call_uuid || "")}</span></td>
         <td class="chevron">&rsaquo;</td>
       </tr>`;
     }
@@ -1719,9 +1758,11 @@ def render_admin_review_page() -> str:
       const progression = call.learning_progression || {};
       const flags = call.quality_flags || [];
       drawerTitle.textContent = callLearnerName(call);
-      drawerSubtitle.innerHTML = `${pill(callDisplayPhone(call), "ink")} ${pill(callFlagLabel(call.end_reason || "unknown"), flags.length ? "warn" : "good")} ${providerPills(call)} <span class="small">${escapeHtml(call.call_uuid || "")}</span>`;
+      const statusPill = reviewStatusPill(call);
+      drawerSubtitle.innerHTML = `${pill(callDisplayPhone(call), "ink")} ${pill(callFlagLabel(call.end_reason || "unknown"), flags.length ? "warn" : "good")} ${providerPills(call)}${statusPill ? " " + statusPill : ""} <span class="small">${escapeHtml(call.call_uuid || "")}</span>`;
       drawerBody.innerHTML = `
       ${flags.length ? `<div class="callout"><strong>Why this call is flagged:</strong> ${flags.map(f => escapeHtml(callFlagLabel(f))).join(" &middot; ")}</div>` : ""}
+      ${reviewControlsHtml(call)}
       <div class="section">
         <div class="detail-grid">
           ${kv("When", fmtDate(call.created_at) || "Not recorded")}
@@ -1745,6 +1786,37 @@ def render_admin_review_page() -> str:
         ${(call.turns || []).length ? (call.turns || []).map(turnBlock).join("") : `<div class="empty">No per-turn clips on this older call. New calls show child audio, STT transcript, lesson text, Sabi audio, and TTS text here.</div>`}
       </div>
       ${feedbackBlock(feedback)}`;
+      wireCallDetailActions(call);
+    }
+    function reviewControlsHtml(call) {
+      const current = reviewStatusOf(call);
+      const options = [
+        ["reviewed", "Mark reviewed", ""],
+        ["follow_up", "Needs follow-up", "warn"],
+        ["safety_escalation", "Safety escalation", "bad"],
+        ["unreviewed", "Not reviewed", ""],
+      ];
+      const buttons = options.map(([value, label, kind]) => {
+        const active = current === value ? ` active ${kind}`.trimEnd() : "";
+        return `<button class="review-btn${active}" data-review-status="${value}">${escapeHtml(label)}</button>`;
+      }).join("");
+      const reviewedAt = call.reviewed_at ? ` &middot; last set ${escapeHtml(fmtTimestamp(call.reviewed_at))}` : "";
+      return `<div class="section">
+        <div class="section-title-row">
+          <h3>Board Triage</h3>
+          <span class="section-caption">Mark where this call stands. Changing status needs your full admin key.${reviewedAt}</span>
+        </div>
+        <div class="review-panel"><div class="review-actions">${buttons}</div></div>
+      </div>`;
+    }
+    function wireCallDetailActions(call) {
+      const callUuid = call.call_uuid;
+      drawerBody.querySelectorAll("[data-review-status]").forEach(btn => {
+        btn.addEventListener("click", () => setReviewStatus(callUuid, btn.dataset.reviewStatus));
+      });
+      drawerBody.querySelectorAll("[data-stt-compare]").forEach(btn => {
+        btn.addEventListener("click", () => compareStt(callUuid, Number(btn.dataset.sttCompare), btn));
+      });
     }
     function feedbackBlock(feedback) {
       if (!feedback) {
@@ -1814,6 +1886,7 @@ def render_admin_review_page() -> str:
             <div class="timeline-text">${escapeHtml(childText)}</div>
             <div class="timeline-note">This is what Sabi transcribed from the clip above.${escapeHtml(confidence)}</div>
             ${lessonText && lessonText !== childText ? `<div class="timeline-note">Lesson text after cleanup: ${escapeHtml(lessonText)}</div>` : ""}
+            ${user.has_audio ? `<button class="stt-compare-btn" data-stt-compare="${escapeHtml(turn.turn_index)}">Compare Groq vs Intron on this clip</button><div id="stt-compare-${escapeHtml(turn.turn_index)}"></div>` : ""}
           </div>
           <div class="timeline-side">
             <div class="timeline-role">

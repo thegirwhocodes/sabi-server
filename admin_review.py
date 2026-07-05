@@ -576,6 +576,7 @@ def render_admin_review_page() -> str:
         <button id="nav-feedback" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/><path d="M9 11h6M9 14h4"/></svg>Feedback<span class="nav-count" id="count-feedback"></span></button>
         <button id="nav-curriculum" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 5a3 3 0 0 1 3-3h13v18H7a3 3 0 0 0-3 3z"/><path d="M4 20V5"/></svg>Curriculum</button>
         <button id="nav-gates" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Launch Gates</button>
+        <button id="nav-evidence" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19V5"/><path d="M4 19h16"/><rect x="7" y="11" width="3" height="6"/><rect x="12" y="7" width="3" height="10"/><rect x="17" y="13" width="3" height="4"/></svg>Pilot Evidence</button>
       </nav>
       <div class="side-foot">
         <div class="health"><span class="health-dot" id="health-dot"></span><span id="health-text">Checking systems...</span></div>
@@ -634,6 +635,7 @@ def render_admin_review_page() -> str:
       feedback: [],
       curriculum: null,
       launchGates: null,
+      pilotEvidence: null,
       selectedLearner: "",
       selectedCall: "",
       selectedFeedback: "",
@@ -982,18 +984,20 @@ def render_admin_review_page() -> str:
       tableWrap.innerHTML = `<div class="skeleton"><div class="bone"></div><div class="bone"></div><div class="bone"></div><div class="bone"></div></div>`;
       const q = encodeURIComponent(search.value.trim());
       try {
-        const [learners, calls, feedback, curriculum, launchGates] = await Promise.all([
+        const [learners, calls, feedback, curriculum, launchGates, pilotEvidence] = await Promise.all([
           getJson(`/admin/learners?limit=100${q ? `&q=${q}` : ""}`),
           getJson(`/admin/calls?limit=100${q ? `&q=${q}` : ""}`),
           getJson(`/admin/feedback?limit=100${q ? `&q=${q}` : ""}`).catch(() => ({ items: [] })),
           state.curriculum ? Promise.resolve(state.curriculum) : getJson("/admin/curriculum-map"),
           getJson("/admin/launch-gates").catch(() => null),
+          getJson("/admin/pilot-evidence").catch(() => null),
         ]);
         state.learners = learners.items || [];
         state.calls = calls.items || [];
         state.feedback = feedback.items || [];
         state.curriculum = curriculum;
         state.launchGates = launchGates;
+        state.pilotEvidence = pilotEvidence;
         state.page = 0;
         render();
         checkHealth();
@@ -1073,7 +1077,7 @@ def render_admin_review_page() -> str:
       const [seg, id] = raw.split("/");
       if (id && seg === "learners") { setView("learners"); openLearner(id); return; }
       if (id && seg === "calls") { setView("calls"); openCall(id); return; }
-      const views = ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates"];
+      const views = ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates", "evidence"];
       if (views.includes(seg)) setView(seg);
     }
     function closeDrawer() {
@@ -1089,7 +1093,7 @@ def render_admin_review_page() -> str:
       state.selectedLearner = "";
       state.selectedCall = "";
       drawer.classList.remove("open");
-      ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates"].forEach(name => {
+      ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates", "evidence"].forEach(name => {
         const el = document.getElementById(`nav-${name}`);
         if (el) el.setAttribute("aria-selected", String(view === name));
       });

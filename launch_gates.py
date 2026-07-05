@@ -12,6 +12,7 @@ def build_launch_gate_report(
     calls: list[dict[str, Any]],
     learners: list[dict[str, Any]],
     intron_api_key_present: bool = False,
+    pilot_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compute a conservative launch-readiness report from existing evidence."""
     call_count = len(calls)
@@ -42,6 +43,23 @@ def build_launch_gate_report(
     total_user_turns = sum(int(call.get("user_turns") or 0) for call in calls)
     total_assistant_turns = sum(int(call.get("assistant_turns") or 0) for call in calls)
     max_duration = max([int(call.get("duration_seconds") or 0) for call in calls] or [0])
+
+    # Learning-movement evidence for the 10-child pre-pilot gate (Layer C).
+    movement_evidence: list[str] = []
+    learning_movement_ok = True
+    if pilot_evidence is not None:
+        cohort = pilot_evidence.get("cohort") or {}
+        tarl = cohort.get("tarl_movement") or {}
+        num_move = tarl.get("numeracy") or {}
+        lit_move = tarl.get("literacy") or {}
+        moved_up = int(num_move.get("children_up_one_plus_level") or 0) + int(lit_move.get("children_up_one_plus_level") or 0)
+        learning_movement_ok = moved_up >= 1
+        movement_evidence = [
+            f"{num_move.get('children_up_one_plus_level') or 0} children up 1+ numeracy level (pct {num_move.get('pct_up_one_plus_level')})",
+            f"{lit_move.get('children_up_one_plus_level') or 0} children up 1+ literacy level (pct {lit_move.get('pct_up_one_plus_level')})",
+            f"{(cohort.get('mastery') or {}).get('skills_mastered_total', 0)} skill-modules mastered across cohort",
+            f"probe effect size d={ (cohort.get('probe') or {}).get('effect_size_d') }",
+        ]
 
     gates = [
         _gate(
@@ -125,17 +143,18 @@ def build_launch_gate_report(
             key="ten_child_prepilot",
             name="10-child pre-pilot",
             status="pass"
-            if len(consented_children) >= 10 and len(children_with_calls) >= 8
+            if len(consented_children) >= 10 and len(children_with_calls) >= 8 and learning_movement_ok
             else ("watch" if len(consented_children) >= 2 else "not_started"),
-            summary="10-child pre-pilot has enough enrolled and active children."
-            if len(consented_children) >= 10 and len(children_with_calls) >= 8
+            summary="10-child pre-pilot has enough enrolled, active children and measured learning movement."
+            if len(consented_children) >= 10 and len(children_with_calls) >= 8 and learning_movement_ok
             else "The full pre-pilot is not ready yet.",
             evidence=[
                 f"{len(consented_children)} consented/caregiver-linked children",
                 f"{len(children_with_calls)} children with calls",
                 "Target: 10 consented children, 80% first-call completion, 50% second-call return",
+                *movement_evidence,
             ],
-            next_action="Finish consent, child profile linkage, first-call reviews, and second-call return tracking.",
+            next_action="Finish consent, child profile linkage, first-call reviews, second-call return, and show measurable TaRL level movement (see /admin/pilot-evidence).",
         ),
     ]
 

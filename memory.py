@@ -69,6 +69,9 @@ OPTIONAL_STUDENT_COLUMNS = {
     "child_name_normalized",
     "learner_key",
     "last_teacher_note",
+    "baseline_tarl_level",
+    "baseline_reading_level",
+    "baseline_recorded_at",
 }
 
 OPTIONAL_SESSION_COLUMNS = {
@@ -336,6 +339,7 @@ class StudentMemory:
                 "tarl_level": persisted_learning_state.get("tarl_level", 0),
                 "last_session_summary": summary,
                 "last_teacher_note": teacher_note,
+                **_baseline_capture_payload(student, persisted_learning_state),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             update_payload = {key: value for key, value in update_payload.items() if value is not None}
@@ -836,6 +840,24 @@ class StudentMemory:
             "status": "ok",
             "student": record,
         }
+
+    async def get_pilot_evidence(self, limit: int = 200) -> dict:
+        """Cohort pilot-proof learning-gains report (children only)."""
+        from pilot_evidence import build_pilot_evidence_report
+
+        cost_env = os.getenv("SABI_COST_PER_CHILD_USD")
+        try:
+            cost_per_child = float(cost_env) if cost_env else None
+        except ValueError:
+            cost_per_child = None
+        learners = await self.review_learners(limit=limit)
+        report = build_pilot_evidence_report(
+            learners.get("items") or [],
+            cost_per_child=cost_per_child,
+        )
+        report["generated_at"] = datetime.now(timezone.utc).isoformat()
+        report["source_learner_total"] = learners.get("total", 0)
+        return report
 
     def _recent_sessions_for_student(self, student_id: str | None, limit: int = 5) -> list[dict]:
         if not student_id:
@@ -1431,6 +1453,25 @@ def _resolve_lesson_for_state(state: dict | None) -> dict | None:
     return resolve_numeracy_lesson(state)
 
 
+def _baseline_capture_payload(student: dict, state: dict) -> dict:
+    """Freeze the child's TaRL/reading level the first time the diagnostic completes.
+
+    This is the baseline anchor the pilot-proof report measures learning gain
+    against. It is written once (never overwritten) so baseline-to-current
+    movement stays honest even as the child advances.
+    """
+    if str((state or {}).get("diagnostic_status")) != "done":
+        return {}
+    if student.get("baseline_tarl_level") is not None:
+        return {}
+    literacy = (state or {}).get("literacy") or {}
+    return {
+        "baseline_tarl_level": int(state.get("tarl_level") or 0),
+        "baseline_reading_level": int(literacy.get("tarl_reading_level") or 0),
+        "baseline_recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def build_learner_mastery_map(student: dict, effective_state: dict | None) -> dict:
     """Per-module/skill mastery status across the numeracy and literacy curricula.
 
@@ -1524,6 +1565,12 @@ def _student_review_record(student: dict, effective_state: dict, sessions: list[
         "curriculum_position": resolve_position_review(effective_state),
         "mastery_map": build_learner_mastery_map(student, effective_state),
         "last_teacher_note": student.get("last_teacher_note"),
+        "baseline_tarl_level": student.get("baseline_tarl_level"),
+        "baseline_reading_level": student.get("baseline_reading_level"),
+        "baseline_recorded_at": student.get("baseline_recorded_at"),
+        "consent_status": student.get("consent_status"),
+        "consent_recorded": student.get("consent_recorded"),
+        "participant_type": student.get("participant_type"),
         "recent_sessions": [_session_review_record(session) for session in sessions],
     }
 

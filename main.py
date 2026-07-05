@@ -48,6 +48,7 @@ from feedback_admin import (
 from admin_review import render_admin_review_page
 from curriculum_review import build_curriculum_review_map
 from launch_gates import build_launch_gate_report
+from pilot_evidence import build_pilot_evidence_report
 from voice import router as voice_router
 from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server, synthesize_phone_tts
@@ -588,12 +589,57 @@ async def admin_launch_gates():
     """Protected launch-readiness gate report for Sabi product changes."""
     calls_result = list_call_records(limit=100)
     learners_result = await app.state.memory.review_learners(limit=100)
+    learner_items = learners_result.get("items") or []
+    pilot_evidence = build_pilot_evidence_report(learner_items)
     report = build_launch_gate_report(
         calls=calls_result.get("items") or [],
-        learners=learners_result.get("items") or [],
+        learners=learner_items,
         intron_api_key_present=bool(get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY")),
+        pilot_evidence=pilot_evidence,
     )
     return JSONResponse(report)
+
+
+@app.get("/admin/pilot-evidence")
+async def admin_pilot_evidence(limit: int = 200, fmt: str = "json"):
+    """Cohort pilot-proof learning-gains report (children only).
+
+    fmt=csv returns one row per child for funder due diligence / RCT analysis.
+    """
+    report = await app.state.memory.get_pilot_evidence(limit=limit)
+    if str(fmt or "").lower() == "csv":
+        return Response(content=_pilot_evidence_csv(report), media_type="text/csv")
+    return JSONResponse(report)
+
+
+def _pilot_evidence_csv(report: dict) -> str:
+    import csv
+    import io
+
+    fields = [
+        "id", "name", "consented",
+        "numeracy_baseline", "numeracy_current", "numeracy_levels_gained", "numeracy_mastered_modules",
+        "literacy_baseline", "literacy_current", "literacy_levels_gained", "literacy_mastered_modules",
+        "calls", "minutes", "hours", "second_call_returned",
+        "correct", "wrong", "sessions", "probe_gain",
+    ]
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(fields)
+    for child in report.get("children") or []:
+        num = child.get("numeracy") or {}
+        lit = child.get("literacy") or {}
+        dosage = child.get("dosage") or {}
+        totals = child.get("totals") or {}
+        probe = child.get("probe") or {}
+        writer.writerow([
+            child.get("id"), child.get("name"), child.get("consented"),
+            num.get("baseline_level"), num.get("current_level"), num.get("levels_gained"), num.get("mastered_modules"),
+            lit.get("baseline_level"), lit.get("current_level"), lit.get("levels_gained"), lit.get("mastered_modules"),
+            dosage.get("calls"), dosage.get("minutes"), dosage.get("hours"), dosage.get("second_call_returned"),
+            totals.get("correct"), totals.get("wrong"), totals.get("sessions"), probe.get("gain"),
+        ])
+    return buffer.getvalue()
 
 
 @app.get("/admin/calls/{call_uuid}")

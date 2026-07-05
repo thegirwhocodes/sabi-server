@@ -12,9 +12,19 @@ from typing import Optional
 
 from supabase import create_client
 
-from curriculum_path import advance_learning_state_after_mastery, build_curriculum_path_prompt
+from curriculum_path import (
+    LITERACY_MODULE_NAMES,
+    LITERACY_MODULE_SKILLS,
+    advance_learning_state_after_mastery,
+    build_curriculum_path_prompt,
+    resolve_literacy_lesson,
+    resolve_numeracy_lesson,
+)
 from curriculum_review import resolve_position_review
+from curriculum_mastery import build_call_scorecard, cross_session_signal, mastery_label
 from learning_state import (
+    MODULE_NAMES as NUMERACY_SKILL_NAMES,
+    MODULE_SKILLS as NUMERACY_MODULE_SKILLS,
     analyze_session,
     build_learning_state_prompt,
     default_learning_state,
@@ -22,6 +32,7 @@ from learning_state import (
     merge_learning_state,
     route_next_course_after_session,
 )
+from teacher_notes import generate_teacher_note
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
 
@@ -57,6 +68,7 @@ OPTIONAL_STUDENT_COLUMNS = {
     "phone_household_key",
     "child_name_normalized",
     "learner_key",
+    "last_teacher_note",
 }
 
 OPTIONAL_SESSION_COLUMNS = {
@@ -65,6 +77,7 @@ OPTIONAL_SESSION_COLUMNS = {
     "phone_number",
     "call_sid",
     "channel",
+    "teacher_note",
 }
 
 OPTIONAL_FEEDBACK_COLUMNS = {
@@ -232,6 +245,44 @@ class StudentMemory:
                 _learning_state_snapshot_message(persisted_learning_state),
             ]
 
+            # Curriculum-aligned scorecard for this call, tied to the lesson that
+            # was actually attempted (the state at call start, before any advance).
+            lesson_state = (
+                starting_learning_state
+                if isinstance(starting_learning_state, dict) and starting_learning_state
+                else persisted_learning_state
+            )
+            call_course = str(lesson_state.get("course") or "numeracy")
+            call_lesson = _resolve_lesson_for_state(lesson_state)
+            call_scorecard = build_call_scorecard(
+                course=call_course,
+                lesson=call_lesson,
+                correct_count=stats.correct_count,
+                wrong_count=stats.wrong_count,
+                skills=stats.skills,
+                learning_state_before=lesson_state,
+                learning_state_after=persisted_learning_state,
+                should_advance=stats.should_advance,
+            )
+
+            # Sabi's qualitative teacher note (post-call LLM pass, heuristic fallback).
+            teacher_note = None
+            try:
+                teacher_note = await generate_teacher_note(
+                    messages=cleaned_messages,
+                    correct_count=stats.correct_count,
+                    wrong_count=stats.wrong_count,
+                    skills=stats.skills,
+                    summary=summary,
+                    current_level=stats.current_level,
+                    lesson=call_lesson,
+                    learning_state=persisted_learning_state,
+                    user_turns=user_turns,
+                    duration_seconds=duration_seconds,
+                )
+            except Exception as note_exc:
+                logger.warning("Teacher-note generation failed call_id=%s: %s", call_id, note_exc)
+
             session_payload = {
                 "student_id": student_id,
                 "messages": persisted_messages,
@@ -245,6 +296,8 @@ class StudentMemory:
                 "call_sid": call_id,
                 "channel": channel,
             }
+            if teacher_note:
+                session_payload["teacher_note"] = teacher_note
 
             try:
                 self._insert_with_optional_fallback(
@@ -282,6 +335,7 @@ class StudentMemory:
                 "current_lesson": persisted_learning_state.get("current_lesson", 1),
                 "tarl_level": persisted_learning_state.get("tarl_level", 0),
                 "last_session_summary": summary,
+                "last_teacher_note": teacher_note,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             update_payload = {key: value for key, value in update_payload.items() if value is not None}
@@ -298,8 +352,10 @@ class StudentMemory:
                 stats.wrong_count,
                 persisted_module,
             )
+            return {"scorecard": call_scorecard, "teacher_note": teacher_note}
         except Exception as e:
             logger.error("Failed to save phone session call_id=%s: %s", call_id, e)
+        return None
 
     async def save_call_feedback(
         self,
@@ -1367,6 +1423,77 @@ def _is_zero_evidence_unlinked_demo(row: dict) -> bool:
     return has_placeholder_name or has_demo_browser_id
 
 
+def _resolve_lesson_for_state(state: dict | None) -> dict | None:
+    """Resolve the concrete lesson record for the course active in this state."""
+    state = state or {}
+    if str(state.get("course")) == "literacy":
+        return resolve_literacy_lesson(state)
+    return resolve_numeracy_lesson(state)
+
+
+def build_learner_mastery_map(student: dict, effective_state: dict | None) -> dict:
+    """Per-module/skill mastery status across the numeracy and literacy curricula.
+
+    Combines the child's rolling per-skill scores (the `skills` JSONB) with their
+    current curriculum position to label each module: mastered (already past it),
+    in progress (current), or not started (ahead of them). This is what the board
+    console renders as a child's mastery map across the 96 numeracy / 48 literacy
+    lessons.
+    """
+    state = effective_state or {}
+    skills = student.get("skills") if isinstance(student.get("skills"), dict) else {}
+    skills = skills or {}
+
+    def _module_row(module: int, name: str, skill: str, current_module: int) -> dict:
+        score = skills.get(skill)
+        score_value = float(score) if score is not None else None
+        if current_module and module < int(current_module):
+            position = "completed"
+        elif current_module and module == int(current_module):
+            position = "in_progress"
+        else:
+            position = "not_started"
+        mastery = cross_session_signal(score_value) if score_value is not None else "insufficient"
+        return {
+            "module": module,
+            "module_name": name,
+            "skill": skill,
+            "score": round(score_value, 3) if score_value is not None else None,
+            "mastery": mastery,
+            "mastery_label": mastery_label(mastery),
+            "position": position,
+        }
+
+    numeracy_current = int(state.get("current_module") or student.get("current_module") or 0)
+    numeracy_modules = [
+        _module_row(module, NUMERACY_SKILL_NAMES.get(module, skill), skill, numeracy_current)
+        for module, skill in sorted(NUMERACY_MODULE_SKILLS.items())
+        if module not in (0, 7)
+    ]
+
+    literacy_state = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
+    literacy_current = int(literacy_state.get("current_module") or 0)
+    literacy_modules = [
+        _module_row(module, LITERACY_MODULE_NAMES.get(module, skill), skill, literacy_current)
+        for module, skill in sorted(LITERACY_MODULE_SKILLS.items())
+    ]
+
+    return {
+        "numeracy": {
+            "current_module": numeracy_current,
+            "tarl_level": state.get("tarl_level"),
+            "mastered_modules": sum(1 for row in numeracy_modules if row["mastery"] == "mastered"),
+            "modules": numeracy_modules,
+        },
+        "literacy": {
+            "current_module": literacy_current,
+            "tarl_reading_level": literacy_state.get("tarl_reading_level"),
+            "mastered_modules": sum(1 for row in literacy_modules if row["mastery"] == "mastered"),
+            "modules": literacy_modules,
+        },
+    }
+
+
 def _student_review_record(student: dict, effective_state: dict, sessions: list[dict]) -> dict:
     identity = _student_display_identity(student)
     return {
@@ -1395,6 +1522,8 @@ def _student_review_record(student: dict, effective_state: dict, sessions: list[
         "created_at": student.get("created_at"),
         "effective_state": _learning_state_review(effective_state),
         "curriculum_position": resolve_position_review(effective_state),
+        "mastery_map": build_learner_mastery_map(student, effective_state),
+        "last_teacher_note": student.get("last_teacher_note"),
         "recent_sessions": [_session_review_record(session) for session in sessions],
     }
 
@@ -1445,6 +1574,7 @@ def _session_review_record(session: dict) -> dict:
         "channel": session.get("channel"),
         "duration_seconds": session.get("duration_seconds"),
         "summary": session.get("summary"),
+        "teacher_note": session.get("teacher_note"),
         "correct_count": session.get("correct_count") or 0,
         "wrong_count": session.get("wrong_count") or 0,
         "recommended_module": session.get("recommended_module"),

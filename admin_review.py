@@ -383,6 +383,20 @@ def render_admin_review_page() -> str:
     .compare-note.good { background: #eef7ee; border-color: #cfe6cf; color: #226b2b; }
     .compare-note.warn { background: #faf0da; border-color: #ecd3a2; color: #9b5b00; }
     .compare-note.soft { color: var(--muted); }
+    /* Per-call learning scoreboard + teacher note + mastery map. */
+    .scorecard { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--card); display: grid; gap: 8px; }
+    .scorecard-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .scorecard-big { font-size: 22px; font-weight: 600; }
+    .scorecard-big .small { font-size: 13px; font-weight: 400; color: var(--muted); }
+    .skill-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .skill-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; border: 1px solid var(--line); border-radius: 99px; padding: 3px 9px; background: var(--paper); }
+    .note-list { margin: 3px 0 8px; padding-left: 18px; display: grid; gap: 2px; font-size: 13.5px; }
+    .mastery-list { display: grid; gap: 4px; margin-top: 6px; }
+    .mastery-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); }
+    .mastery-row.mastery-in_progress { border-color: var(--gold); background: var(--gold-soft); }
+    .mastery-row.mastery-not_started { opacity: .6; }
+    .mastery-name { font-size: 13px; font-weight: 500; }
+    .mastery-state { display: inline-flex; align-items: center; gap: 6px; }
     .conversation-action {
       display: inline-flex;
       justify-content: center;
@@ -1521,7 +1535,7 @@ def render_admin_review_page() -> str:
         <td>${escapeHtml(fmtDate(item.created_at) || "")}<div class="small">${escapeHtml(item.mode || "")}</div></td>
         <td>${callerCell(item)}</td>
         <td>${fmtSeconds(item.duration_seconds)}</td>
-        <td>${escapeHtml(item.user_turns || 0)} child<div class="small">${escapeHtml(item.turn_count || 0)} clips</div></td>
+        <td>${escapeHtml(item.user_turns || 0)} child<div class="small">${escapeHtml(item.turn_count || 0)} clips</div>${(() => { const p = accuracyPill(item.learning_summary); return p ? `<div class="flag-wrap" style="margin-top:3px;">${p}</div>` : ""; })()}</td>
         <td class="flag-wrap">${providerPills(item)}</td>
         <td class="call-status-cell">${status}${flags.length > 1 ? `<div class="small">+${flags.length - 1} more flag${flags.length > 2 ? "s" : ""}</div>` : ""}</td>
         <td class="call-review-cell">${(() => { const p = reviewStatusPill(item); return p ? `<div class="flag-wrap" style="margin-bottom:4px;">${p}</div>` : ""; })()}<span class="review-title">${escapeHtml(review)}</span><span class="review-id">${escapeHtml(item.call_uuid || "")}</span></td>
@@ -1683,6 +1697,7 @@ def render_admin_review_page() -> str:
       drawerSubtitle.innerHTML = `${pill(displayPhone(student), "ink")} ${phoneNote(student)} ${pill(current.course || "course", "gold")} ${depth ? pill(`Support level ${depth}`, "good") : pill("On level", "soft")}`;
       drawerBody.innerHTML = `
       ${depth || Number(current.wrong_streak || 0) >= 3 ? `<div class="callout">This learner is on a support branch. Sabi's next move: ${escapeHtml(preview(current.next_step || "rebuild the current skill with smaller steps.", 220))}</div>` : ""}
+      ${teacherNoteHtml(student.last_teacher_note)}
       <div class="section">
         <div class="curriculum-card compact">
           <div class="section-title-row"><h3>Numeracy Journey</h3><span class="section-caption">${escapeHtml(curriculumStatusText(current))}</span></div>
@@ -1715,6 +1730,7 @@ def render_admin_review_page() -> str:
           ${kv("Consent", student.consent_status || (student.consent_recorded ? "consented" : "not recorded"))}
         </div>
       </div>
+      ${masteryMapHtml(student.mastery_map)}
       <div class="section">
         <div class="section-title-row">
           <h3>Recent Conversations</h3>
@@ -1726,8 +1742,9 @@ def render_admin_review_page() -> str:
     }
     function sessionRow(session) {
       const childTurns = Number(session.child_turns || 0);
+      const noteText = session.teacher_note && session.teacher_note.narrative ? session.teacher_note.narrative : (session.summary || "");
       return `<div class="mini-row" ${session.call_sid ? `data-open-call="${escapeHtml(session.call_sid)}"` : ""}>
-        <div><strong class="conversation-date">${escapeHtml(fmtTimestamp(session.created_at))}</strong><div class="conversation-summary">${escapeHtml(preview(session.summary || "", 110))}</div></div>
+        <div><strong class="conversation-date">${escapeHtml(fmtTimestamp(session.created_at))}</strong><div class="conversation-summary">${escapeHtml(preview(noteText, 110))}</div></div>
         <div class="conversation-meta"><span class="mini-label">Length</span>${fmtSeconds(session.duration_seconds)}</div>
         <div class="conversation-meta"><span class="mini-label">Child turns</span>${escapeHtml(childTurns)} turn${childTurns === 1 ? "" : "s"}</div>
         <div><span class="conversation-action ${session.call_sid ? "open" : ""}">${session.call_sid ? "Open" : "Saved"}</span></div>
@@ -1754,6 +1771,73 @@ def render_admin_review_page() -> str:
         drawerBody.innerHTML = `<div class="error">Could not load call: ${escapeHtml(err.message)}</div>`;
       }
     }
+    /* ---------------- learning scoreboard + teacher note + mastery ---------------- */
+    const MASTERY_PILL_KIND = { mastered: "good", near: "gold", needs_practice: "warn", insufficient: "soft" };
+    function masteryPill(signal, label) {
+      const s = String(signal || "insufficient");
+      return pill(label || s.replaceAll("_", " "), MASTERY_PILL_KIND[s] || "soft");
+    }
+    function accuracyPill(summary) {
+      if (!summary || summary.questions_total == null || Number(summary.questions_total) <= 0) return "";
+      const pct = summary.accuracy == null ? "" : ` &middot; ${Math.round(Number(summary.accuracy) * 100)}%`;
+      return pill(`${summary.questions_correct}/${summary.questions_total}${pct}`, MASTERY_PILL_KIND[summary.mastery_signal] || "soft");
+    }
+    function callScorecardHtml(call) {
+      const s = call.learning_summary;
+      if (!s) return "";
+      const skills = s.per_skill || {};
+      const skillChips = Object.keys(skills).map(name =>
+        `<span class="skill-chip">${escapeHtml(name.replaceAll("_", " "))} ${masteryPill(skills[name].mastery)}</span>`).join(" ");
+      const total = Number(s.questions_total || 0);
+      const advance = s.should_advance ? pill("Ready to advance", "good") : "";
+      const lessonPass = s.lesson_passed === true ? pill("Passed lesson line", "good")
+        : (s.lesson_passed === false ? pill("Below lesson line", "warn") : "");
+      const tarl = (s.tarl_level_before != null || s.tarl_level_after != null)
+        ? `<div class="conversation-meta"><span class="mini-label">TaRL level</span>${escapeHtml(s.tarl_level_before ?? "?")} &rarr; ${escapeHtml(s.tarl_level_after ?? "?")}</div>` : "";
+      return `<div class="section">
+        <div class="section-title-row"><h3>This Call: Learning Scoreboard</h3><span class="section-caption">${escapeHtml(s.course || "")}${s.lesson_title ? " &middot; " + escapeHtml(s.lesson_title) : ""}</span></div>
+        <div class="scorecard">
+          <div class="scorecard-head">
+            ${total ? `<span class="scorecard-big">${escapeHtml(s.questions_correct)} <span class="small">of</span> ${escapeHtml(total)}</span><span class="small">questions correct</span>` : `<span class="small">No graded questions on this call.</span>`}
+            <span class="flag-wrap">${masteryPill(s.mastery_signal, s.mastery_label)} ${lessonPass} ${advance}</span>
+          </div>
+          ${skillChips ? `<div class="skill-chips">${skillChips}</div>` : ""}
+          ${tarl}
+          ${s.lesson_mastery_line && s.lesson_mastery_line.note ? `<div class="small">${escapeHtml(s.lesson_mastery_line.note)}</div>` : ""}
+        </div>
+      </div>`;
+    }
+    function teacherNoteHtml(note) {
+      if (!note) return "";
+      const list = (arr) => (arr && arr.length) ? `<ul class="note-list">${arr.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>` : "";
+      const src = note.source === "heuristic" ? pill("auto-summary", "soft") : pill("Sabi's note", "gold");
+      return `<div class="section">
+        <div class="section-title-row"><h3>Sabi's Teacher Note</h3><div class="flag-wrap">${note.engagement ? pill(note.engagement, "ink") : ""} ${src}</div></div>
+        <div class="feedback-card gold">
+          ${note.narrative ? `<div class="quote">${escapeHtml(note.narrative)}</div>` : ""}
+          ${note.recommended_focus ? `<div class="timeline-note"><strong>Focus next:</strong> ${escapeHtml(note.recommended_focus)}</div>` : ""}
+          ${(note.strengths && note.strengths.length) ? `<div class="mini-label">Strengths</div>${list(note.strengths)}` : ""}
+          ${(note.struggles && note.struggles.length) ? `<div class="mini-label">Struggles</div>${list(note.struggles)}` : ""}
+          ${(note.misconceptions && note.misconceptions.length) ? `<div class="mini-label">Misconceptions</div>${list(note.misconceptions)}` : ""}
+        </div>
+      </div>`;
+    }
+    function masteryMapHtml(map) {
+      if (!map) return "";
+      const courseCard = (label, data) => {
+        if (!data || !data.modules || !data.modules.length) return "";
+        const rows = data.modules.map(m => `<div class="mastery-row mastery-${escapeHtml(m.position)}">
+          <span class="mastery-name">M${escapeHtml(m.module)} ${escapeHtml((m.module_name || m.skill || "").replaceAll("_", " "))}</span>
+          <span class="mastery-state">${m.score != null ? `<span class="small">${Math.round(Number(m.score) * 100)}%</span>` : ""}${masteryPill(m.mastery)}</span>
+        </div>`).join("");
+        return `<div class="curriculum-card compact">
+          <div class="section-title-row"><h3>${escapeHtml(label)} Mastery</h3><span class="section-caption">${escapeHtml(data.mastered_modules || 0)} mastered</span></div>
+          <div class="mastery-list">${rows}</div>
+        </div>`;
+      };
+      const cards = courseCard("Numeracy", map.numeracy) + courseCard("Literacy", map.literacy);
+      return cards ? `<div class="section">${cards}</div>` : "";
+    }
     function renderCallDetail(call, feedback) {
       const progression = call.learning_progression || {};
       const flags = call.quality_flags || [];
@@ -1763,6 +1847,8 @@ def render_admin_review_page() -> str:
       drawerBody.innerHTML = `
       ${flags.length ? `<div class="callout"><strong>Why this call is flagged:</strong> ${flags.map(f => escapeHtml(callFlagLabel(f))).join(" &middot; ")}</div>` : ""}
       ${reviewControlsHtml(call)}
+      ${callScorecardHtml(call)}
+      ${teacherNoteHtml(call.teacher_note)}
       <div class="section">
         <div class="detail-grid">
           ${kv("When", fmtDate(call.created_at) || "Not recorded")}

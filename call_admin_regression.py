@@ -17,6 +17,7 @@ from call_admin import (
     merge_call_hangup_event,
     quality_flags,
     set_call_review_status,
+    write_call_learning_summary,
     write_call_review_record,
 )
 
@@ -237,6 +238,57 @@ def main() -> int:
             "set_review_status_unreviewed_clears_timestamp",
             cleared is not None and cleared["review_status"] == "unreviewed" and cleared.get("reviewed_at") is None,
             cleared,
+        )
+
+        ok &= check(
+            "load_call_record_defaults_learning_summary_and_note_none",
+            load_call_record(root / "call_call-qa-001.json").get("learning_summary") is None
+            and load_call_record(root / "call_call-qa-001.json").get("teacher_note") is None,
+        )
+        scorecard = {
+            "course": "numeracy",
+            "module": 4,
+            "lesson_title": "The 6 times table",
+            "lesson_global": 51,
+            "questions_correct": 4,
+            "questions_total": 6,
+            "accuracy": 0.667,
+            "per_skill": {"multiplication": {"accuracy": 0.67, "mastery": "near"}},
+            "mastery_signal": "near",
+            "should_advance": False,
+        }
+        teacher_note = {
+            "strengths": ["Understood equal groups"],
+            "struggles": ["Slower on 6 times table"],
+            "engagement": "focused",
+            "misconceptions": [],
+            "recommended_focus": "Practice sixes with market trays.",
+            "narrative": "Chidi is getting multiplication as groups; the sixes still need repetition.",
+            "source": "heuristic",
+        }
+        summarized = write_call_learning_summary(call_uuid, scorecard, teacher_note, directory=root)
+        ok &= check(
+            "write_call_learning_summary_persists_scorecard_and_note",
+            summarized is not None
+            and summarized.get("learning_summary", {}).get("mastery_signal") == "near"
+            and summarized.get("teacher_note", {}).get("engagement") == "focused",
+            summarized,
+        )
+        reloaded = load_call_record(root / "call_call-qa-001.json")
+        ok &= check(
+            "load_call_record_surfaces_scorecard_and_note",
+            reloaded.get("learning_summary", {}).get("questions_correct") == 4
+            and reloaded.get("teacher_note", {}).get("recommended_focus", "").startswith("Practice sixes"),
+            reloaded.get("learning_summary"),
+        )
+        ok &= check(
+            "write_call_learning_summary_preserves_existing_turns",
+            len(reloaded.get("turns") or []) == 1,
+            reloaded.get("turn_count"),
+        )
+        ok &= check(
+            "write_call_learning_summary_noop_when_both_none",
+            write_call_learning_summary("call-missing", None, None, directory=root) is None,
         )
 
     return 0 if ok else 1

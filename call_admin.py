@@ -167,6 +167,39 @@ def set_call_review_status(
     return load_call_record(path, include_artifacts=False)
 
 
+def write_call_learning_summary(
+    call_uuid: str,
+    scorecard: dict[str, Any] | None,
+    teacher_note: dict[str, Any] | None = None,
+    directory: Path | None = None,
+) -> dict[str, Any] | None:
+    """Attach the per-call learning scorecard and Sabi's teacher note to the sidecar.
+
+    This is metadata only: it never touches call audio or the phone pipeline. The
+    scorecard is the curriculum-aligned numbers for the call (lesson attempted,
+    questions correct/total, per-skill mastery); the teacher note is Sabi's
+    qualitative observation of the child. Both are surfaced by `load_call_record`.
+    """
+    path = call_sidecar_path(call_uuid, directory)
+    if not path:
+        return None
+    if scorecard is None and teacher_note is None:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = _load_json(path) or {
+        "call_uuid": call_uuid,
+        "call_id": call_uuid,
+        "created_at": int(time.time()),
+    }
+    if scorecard is not None:
+        record["learning_summary"] = scorecard
+    if teacher_note is not None:
+        record["teacher_note"] = teacher_note
+    record["updated_at"] = int(time.time())
+    path.write_text(json.dumps(record, ensure_ascii=True, indent=2, sort_keys=True, default=str))
+    return load_call_record(path, include_artifacts=False)
+
+
 def append_call_turn_review(
     *,
     call_uuid: str,
@@ -329,6 +362,8 @@ def load_call_record(path: Path, *, include_artifacts: bool = True) -> dict[str,
     data["turn_count"] = len(data.get("turns") or [])
     data.setdefault("review_status", "unreviewed")
     data.setdefault("reviewed_at", None)
+    data.setdefault("learning_summary", None)
+    data.setdefault("teacher_note", None)
     data["learning_progression"] = _call_learning_progression(data)
     if include_artifacts:
         data["recordings"] = _recording_review_paths(data, path.parent)

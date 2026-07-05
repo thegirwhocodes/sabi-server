@@ -23,7 +23,7 @@ import httpx
 
 from answer_matcher import extract_number
 from call_admin import merge_call_hangup_event, write_call_review_record
-from call_admin import append_call_turn_review, call_turn_audio_path
+from call_admin import append_call_turn_review, call_turn_audio_path, write_call_learning_summary
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
 from transcript_normalizer import has_numeric_lesson_context, normalize_lesson_transcript
@@ -1505,8 +1505,9 @@ class RealtimeCall:
                 await self.writer.wait_closed()
             except Exception:
                 pass
+            learning_result = None
             if student_id and messages:
-                await self.memory.save_phone_session(
+                learning_result = await self.memory.save_phone_session(
                     student_id=student_id,
                     phone_number=self.phone,
                     call_id=self.call_id,
@@ -1531,6 +1532,16 @@ class RealtimeCall:
                 hangup_event=HANGUP_EVENTS.get(self.call_uuid),
                 directory=SHARED_AUDIO_DIR,
             )
+            if learning_result:
+                try:
+                    write_call_learning_summary(
+                        self.call_uuid,
+                        learning_result.get("scorecard"),
+                        learning_result.get("teacher_note"),
+                        directory=SHARED_AUDIO_DIR,
+                    )
+                except Exception as exc:
+                    logger.warning("Could not write learning summary uuid=%s: %s", self.call_uuid, exc)
             self.memory.clear_call(self.call_id)
             logger.warning(
                 "Realtime call complete uuid=%s phone=%s mode=%s attempt=%s end_reason=%s duration=%ss user_turns=%s assistant_turns=%s",

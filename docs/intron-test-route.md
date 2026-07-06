@@ -160,7 +160,7 @@ https://api.eduforequality.org/admin/review?pin=<SABI_ADMIN_PIN>
 
 ## 5. Promotion gate before any production swap
 
-See [11. Documentation/SABI_PREPILOT_PRODUCT_QA_AND_ENDPOINT_SWITCHING_PLAYBOOK.md](../../11.%20Documentation/SABI_PREPILOT_PRODUCT_QA_AND_ENDPOINT_SWITCHING_PLAYBOOK.md)
+See [pilot/SABI_PREPILOT_PRODUCT_QA_AND_ENDPOINT_SWITCHING_PLAYBOOK.md](../../pilot/SABI_PREPILOT_PRODUCT_QA_AND_ENDPOINT_SWITCHING_PLAYBOOK.md)
 for the full ladder. Minimum bar before flipping production to Intron:
 
 1. **Offline replay**: at least 50 saved user-turn WAVs from production calls

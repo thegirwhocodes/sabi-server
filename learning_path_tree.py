@@ -322,7 +322,7 @@ def build_learning_path_tree(
         auto_expand=True,
     )
 
-    chain_tail: dict[str, Any] = root
+    completed_modules: list[dict[str, Any]] = []
     for module in module_order:
         if module >= current_module:
             break
@@ -331,8 +331,7 @@ def build_learning_path_tree(
         lesson_chain = _chain_lessons(course, rows, module, 0, len(rows), len(rows), suffix=suffix if course == "literacy" else "")
         if lesson_chain:
             mod["children"] = [lesson_chain]
-        chain_tail["children"] = [mod]
-        chain_tail = mod
+        completed_modules.append(mod)
 
     rows = lessons_for(current_module).get("lessons") or []
     current_idx = next((i for i, row in enumerate(rows) if lesson_key(row) == current_key), max(0, len(rows) - 1))
@@ -378,14 +377,16 @@ def build_learning_path_tree(
         future_chain=future_chain,
     )
     current_mod["children"] = [module_head]
-
     current_mod["auto_expand"] = True
-    chain_tail["children"] = [current_mod]
-    _mark_expand_path(root)
+    root["auto_expand"] = True
+    root["children"] = [*completed_modules, current_mod]
+    _mark_expand_path(current_mod)
     return _finalize(course, view_state, lesson, mode, root)
 
 
 def _mark_expand_path(node: dict[str, Any]) -> None:
+    node["auto_expand"] = True
+    node["expanded"] = True
     children = node.get("children") or []
     if not children:
         return
@@ -396,19 +397,12 @@ def _mark_expand_path(node: dict[str, Any]) -> None:
             active_child = child
             break
     if active_child is None:
-        for child in children:
-            if child.get("kind") == "branch" and child.get("auto_expand"):
-                active_child = child
-                break
-    if active_child is None:
         active_child = children[-1]
+    if active_child.get("kind") == "module_gate" and active_child.get("status") == "completed":
+        return
     active_child["auto_expand"] = True
-    if active_child.get("kind") == "branch":
-        active_child["expanded"] = True
-    node["auto_expand"] = True
-    node["expanded"] = True
-    for child in children:
-        _mark_expand_path(child)
+    active_child["expanded"] = True
+    _mark_expand_path(active_child)
 
 
 def _finalize(
@@ -433,7 +427,7 @@ def _finalize(
             "future": "Planned next — click any node to expand its branch",
         },
         "root": root,
-        "interaction": "Click a node to expand its branches. Sibling branches collapse like Prezi focus.",
+        "interaction": "Click a row to expand branches. Completed modules stay collapsed until you open them. Full detail appears below.",
     }
 
 

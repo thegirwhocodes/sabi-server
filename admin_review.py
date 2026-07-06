@@ -1799,7 +1799,8 @@ def render_admin_review_page() -> str:
         title: node.title || "Untitled",
         concept: node.concept || "",
         example: node.example || "",
-        teacher_move: node.teacher_move || "",
+        teacher_move: node.teacher_move || node.concept || "",
+        rebuild: node.rebuild || "",
         status: node.status || "",
         branch_label: node.branch_label || "",
         kind: node.kind || "",
@@ -1811,8 +1812,9 @@ def render_admin_review_page() -> str:
         node.code ? `<div class="branch-detail-code">${escapeHtml(node.code)}</div>` : "",
         `<h4>${escapeHtml(node.title || "Untitled")}</h4>`,
         node.concept ? `<p><strong>Concept:</strong> ${escapeHtml(node.concept)}</p>` : "",
-        node.teacher_move ? `<p><strong>Teacher move:</strong> ${escapeHtml(node.teacher_move)}</p>` : "",
+        node.teacher_move && node.teacher_move !== node.concept ? `<p><strong>Teacher move:</strong> ${escapeHtml(node.teacher_move)}</p>` : "",
         node.example ? `<p><strong>Ask the child:</strong> ${escapeHtml(node.example)}</p>` : "",
+        node.rebuild ? `<p><strong>After success:</strong> ${escapeHtml(node.rebuild)}</p>` : "",
         node.branch_label ? `<p><strong>Branch:</strong> ${escapeHtml(node.branch_label)}</p>` : "",
         `<p><strong>Status:</strong> ${escapeHtml(status)}</p>`,
       ];
@@ -1854,7 +1856,7 @@ def render_admin_review_page() -> str:
     function branchRenderTree(root) {
       return `<div class="branch-tree">${branchRenderNode(root)}</div>`;
     }
-    function mountPreziTreeFromRoot(host, root) {
+    function mountBranchTreeFromRoot(host, root) {
       if (!host || !root || !root.id) {
         if (host) host.innerHTML = `<div class="empty">Learning path tree will appear once this child has a placed module.</div>`;
         return;
@@ -1924,7 +1926,7 @@ def render_admin_review_page() -> str:
       });
 
       toolbar.querySelector(".branch-jump-now")?.addEventListener("click", () => {
-        const nowBtn = scroll.querySelector(".branch-row.status-current, .branch-row.status-support-current, .branch-row.status-support_current");
+        const nowBtn = scroll.querySelector(".branch-row.status-support-current, .branch-row.status-support_current, .branch-row.status-current");
         if (!nowBtn) return;
         nowBtn.scrollIntoView({ behavior: "smooth", block: "center" });
         showDetail(nowBtn);
@@ -1938,25 +1940,33 @@ def render_admin_review_page() -> str:
         toggleBranchItem(nowBtn.closest(".branch-item"), true);
       }
     }
-    function mountPreziTrees(scope) {
-      (scope || document).querySelectorAll(".prezi-tree-host[data-root-key]").forEach(host => {
-        const root = window.__sabiPreziRoots?.[host.dataset.rootKey];
-        mountPreziTreeFromRoot(host, root);
+    function mountBranchTrees(scope) {
+      (scope || document).querySelectorAll(".branch-tree-host[data-root-key]").forEach(host => {
+        const root = window.__sabiBranchRoots?.[host.dataset.rootKey];
+        mountBranchTreeFromRoot(host, root);
       });
+    }
+    function branchLegendHtml(legend) {
+      if (!legend || typeof legend !== "object") return "";
+      const chips = Object.entries(legend).map(([key, label]) =>
+        `<span class="path-preview-chip">${escapeHtml(String(label))}</span>`
+      ).join("");
+      return chips ? `<div class="path-preview">${chips}</div>` : "";
     }
     function learningPathTreePanel(tree, heading) {
       if (!tree || !tree.root) {
         return `<div class="empty">Learning path tree will appear once this child has a placed module and lesson.</div>`;
       }
-      window.__sabiPreziRoots = window.__sabiPreziRoots || {};
+      window.__sabiBranchRoots = window.__sabiBranchRoots || {};
       const key = `tree_${Math.random().toString(36).slice(2)}`;
-      window.__sabiPreziRoots[key] = tree.root;
+      window.__sabiBranchRoots[key] = tree.root;
       return `<div class="curriculum-card compact">
         <div class="section-title-row">
           <h3>${escapeHtml(heading)}</h3>
           <span class="section-caption">${escapeHtml(tree.module_name || tree.course || "course")} · ${escapeHtml(tree.current_title || "current lesson")}</span>
         </div>
-        <div class="learning-tree-wrap"><div class="prezi-tree-host" data-root-key="${escapeHtml(key)}"></div></div>
+        ${branchLegendHtml(tree.legend)}
+        <div class="learning-tree-wrap"><div class="branch-tree-host" data-root-key="${escapeHtml(key)}"></div></div>
         <div class="small" style="margin-top:8px;">${escapeHtml(tree.interaction || "Click a row to expand branches; full detail appears below in large text.")}${tree.next_step ? ` · <strong>Next move:</strong> ${escapeHtml(preview(tree.next_step, 180))}` : ""}</div>
       </div>`;
     }
@@ -2137,7 +2147,7 @@ def render_admin_review_page() -> str:
         <div class="mini-table">${(student.recent_sessions || []).map(sessionRow).join("") || `<div class="empty">No sessions saved yet for this learner.</div>`}</div>
       </div>`;
       drawerBody.querySelectorAll("[data-open-call]").forEach(el => el.addEventListener("click", () => openCall(el.dataset.openCall)));
-      mountPreziTrees(drawerBody);
+      mountBranchTrees(drawerBody);
     }
     function sessionRow(session) {
       const childTurns = Number(session.child_turns || 0);

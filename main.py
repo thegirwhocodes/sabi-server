@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Thinking cues ready ({len(THINKING_CUES)} files)")
 
     # Pre-generate thinking cues as WAV for Asterisk playback
-    shared_audio = Path("/shared/audio")
+    shared_audio = Path(os.getenv("SABI_SHARED_AUDIO_DIR", "/shared/audio"))
     shared_audio.mkdir(parents=True, exist_ok=True)
     for i, cue in enumerate(THINKING_CUES):
         wav_path = shared_audio / f"thinking_{i}.wav"

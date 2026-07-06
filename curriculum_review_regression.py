@@ -51,6 +51,16 @@ def main() -> int:
     ok &= check("resolves_numeracy_position", position.get("numeracy", {}).get("title") == "What Is Multiplication: groups of")
     ok &= check("resolves_literacy_position", "Beginning Sounds" in (position.get("literacy", {}).get("title") or ""))
     ok &= check("preserves_scaffold_state", position.get("scaffold_depth") == 2)
+
+    num_path = position.get("numeracy_path") or {}
+    ok &= check("numeracy_path_has_nodes", len(num_path.get("nodes") or []) >= 6, len(num_path.get("nodes") or []))
+    ok &= check("numeracy_path_current_module", num_path.get("current_module") == 4)
+    ok &= check("numeracy_path_support_mode", num_path.get("mode") == "support", num_path.get("mode"))
+    ok &= check("numeracy_path_scaffold_branch", bool((num_path.get("scaffold_branch") or {}).get("steps")), num_path.get("scaffold_branch"))
+    ok &= check("numeracy_path_future_preview", len(num_path.get("future_preview") or []) >= 1)
+
+    lit_path = position.get("literacy_path") or {}
+    ok &= check("literacy_path_has_nodes", len(lit_path.get("nodes") or []) >= 5, len(lit_path.get("nodes") or []))
     return 0 if ok else 1
 
 

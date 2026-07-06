@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Learning path branch tree preview</title>
+<style>
+:root {
+  --ink:#1b1610; --muted:#6f6556; --line:#ddd3bf; --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  --serif: Georgia, 'Times New Roman', serif;
+}
+body { margin:0; background:#f3ecda; color:var(--ink); font-family:var(--sans); }
+.page { max-width: 980px; margin: 24px auto; padding: 0 16px 40px; }
+h1 { font-family:var(--serif); font-weight:600; font-size:28px; margin:0 0 8px; }
+.lede { color:var(--muted); font-size:15px; margin:0 0 18px; line-height:1.5; }
+.btn { border:1px solid var(--line); background:#fff; border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; }
+.btn.secondary { background:#faf6ec; }
+.hidden { display:none !important; }
+.learning-tree-wrap { border: 1px solid var(--line); border-radius: 14px; background: #fffdf8; overflow: hidden; }
+    .branch-tree-stage { display: grid; grid-template-rows: minmax(320px, 1fr) auto; max-height: 720px; }
+    .branch-tree-scroll { overflow: auto; padding: 22px 26px 18px; background: radial-gradient(circle at 12% 8%, #fffdf8 0%, #f7f0df 60%, #efe6cf 100%); }
+    .branch-tree { font-family: var(--sans); color: var(--ink); }
+    .branch-item { position: relative; }
+    .branch-row { display: flex; align-items: flex-start; gap: 14px; width: 100%; padding: 10px 6px; margin: 0; border: 0; background: transparent; text-align: left; cursor: pointer; border-radius: 8px; transition: background 120ms ease; }
+    .branch-row:hover { background: rgba(181, 83, 9, .06); }
+    .branch-row.selected { background: rgba(181, 83, 9, .12); }
+    .branch-dot { flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%; margin-top: 9px; background: #c8bfaa; box-shadow: 0 0 0 3px rgba(200,191,170,.35); }
+    .branch-row.status-completed .branch-dot { background: #1e7b43; box-shadow: 0 0 0 3px rgba(30,123,67,.22); }
+    .branch-row.status-current .branch-dot { background: #b45309; box-shadow: 0 0 0 4px rgba(181,83,9,.24); }
+    .branch-row.status-support-current .branch-dot, .branch-row.status-support_current .branch-dot { background: #c2410c; box-shadow: 0 0 0 4px rgba(194,65,12,.22); }
+    .branch-row.status-future .branch-dot, .branch-row.status-planned .branch-dot, .branch-row.status-rejoin .branch-dot { background: #9b8f78; border: 2px dashed #fff; box-shadow: none; }
+    .branch-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+    .branch-code { font-size: 13px; color: var(--muted); letter-spacing: .02em; }
+    .branch-title { font-size: 20px; font-weight: 600; line-height: 1.25; color: var(--ink); }
+    .branch-row.status-current .branch-title { color: #9b4a00; }
+    .branch-concept { font-size: 16px; line-height: 1.4; color: #4d4638; }
+    .branch-tag { display: inline-flex; align-self: flex-start; margin-top: 4px; font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: #7a6f5c; }
+    .branch-toggle { flex-shrink: 0; font-size: 18px; line-height: 1; color: var(--muted); margin-top: 8px; padding-right: 4px; }
+    .branch-spine { display: none; margin: 2px 0 6px 20px; padding: 4px 0 4px 28px; border-left: 3px solid #c8bfaa; }
+    .branch-spine.open { display: block; }
+    .branch-fork { display: none; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 28px 36px; margin: 10px 0 8px 20px; padding: 14px 0 6px 28px; border-left: 3px solid #b45309; border-top: 2px solid #d8cfb6; }
+    .branch-fork.open { display: grid; }
+    .branch-arm-label { font-size: 14px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8a5a12; margin: 0 0 10px; line-height: 1.35; }
+    .branch-arm-body { display: none; }
+    .branch-arm-body.open { display: block; }
+    .branch-detail-panel { border-top: 2px solid var(--line); padding: 18px 22px 20px; background: #faf6ec; }
+    .branch-detail-empty { font-size: 15px; color: var(--muted); line-height: 1.5; }
+    .branch-detail-content h4 { margin: 0 0 10px; font-family: var(--serif); font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--ink); }
+    .branch-detail-content .branch-detail-code { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+    .branch-detail-content p { margin: 0 0 10px; font-size: 17px; line-height: 1.55; color: #3a3428; }
+    .branch-detail-content p:last-child { margin-bottom: 0; }
+    .branch-detail-content strong { color: var(--ink); }
+    .branch-toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); background: #faf6ec; }
+    .branch-focus-label { flex: 1; font-size: 13px; color: var(--muted); align-self: center; min-width: 180px; }
+    @keyframes branchExpand { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+    .branch-spine.open, .branch-fork.open, .branch-arm-body.open { animation: branchExpand 220ms ease; }
+</style>
+</head>
+<body>
+<div class="page">
+<h1>Numeracy learning path — educator view</h1>
+<p class="lede">No cramped boxes. Large lesson titles on the tree; click any row for full detail below. At the current lesson the path splits into on-level route vs support ladder.</p>
+<div class="learning-tree-wrap"><div id="host"></div></div>
+</div>
+<script>
+window.__TREE__ = {"id": "numeracy-origin", "kind": "origin", "status": "completed", "code": "Program entry", "title": "TaRL level 1", "concept": "Every branch below is anchored to this placement level and the fixed script sequence.", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "numeracy-mod1", "kind": "module_gate", "status": "completed", "code": "Numeracy Module 1", "title": "Number Sense: counting and comparison", "concept": "12 scripted lessons \u00b7 Use fingers, body parts, counting aloud, number neighbors, comparing, and ordering. Make counting feel powerful, not childish.", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "numeracy-mod2", "kind": "module_gate", "status": "current", "code": "Numeracy Module 2", "title": "Addition", "concept": "16 scripted lessons \u00b7 Teach addition as putting groups together to find the total. Start with fingers or market items, then name plus, altogether, and total.", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l15", "kind": "lesson", "status": "completed", "code": "Lesson 15 \u00b7 W4 L3", "title": "Addition facts 6-10: counting on", "concept": "counting on", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l16", "kind": "lesson", "status": "completed", "code": "Lesson 16 \u00b7 W4 L4", "title": "Doubles: same number plus same number", "concept": "same number plus same number", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l17", "kind": "lesson", "status": "completed", "code": "Lesson 17 \u00b7 W5 L1", "title": "Adding to Make 10: friends of 10", "concept": "friends of 10", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l18", "kind": "lesson", "status": "current", "code": "Lesson 18 \u00b7 W5 L2", "title": "Adding Past 10: bridge through 10", "concept": "bridge through 10", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "branch-82859314", "kind": "branch", "status": "future", "code": "", "title": "On-level route \u00b7 child answers confidently", "concept": "Click to expand this route through the curriculum.", "branch_label": "On-level route \u00b7 child answers confidently", "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l19", "kind": "lesson", "status": "future", "code": "Lesson 19 \u00b7 W5 L3", "title": "Teen Number Addition: add to the ones", "concept": "add to the ones", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l20", "kind": "lesson", "status": "future", "code": "Lesson 20 \u00b7 W5 L4", "title": "Mixed Practice to 20 and speed round", "concept": "Mixed Practice to 20 and speed round", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l21", "kind": "lesson", "status": "future", "code": "Lesson 21 \u00b7 W6 L1", "title": "Place Value Review for Addition: tens and ones", "concept": "tens and ones", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l22", "kind": "lesson", "status": "future", "code": "Lesson 22 \u00b7 W6 L2", "title": "Adding Tens", "concept": "Adding Tens", "branch_label": null, "example": null, "rebuild": null, "expanded": false, "auto_expand": true, "children": []}]}]}]}]}, {"id": "branch-51401568", "kind": "branch", "status": "support_current", "code": "", "title": "Support ladder \u00b7 child needs repair (curriculum bump-down)", "concept": "Click to expand this route through the curriculum.", "branch_label": "Support ladder \u00b7 child needs repair (curriculum bump-down)", "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "numeracy-support-1", "kind": "scaffold", "status": "support_completed", "code": "Support 1 \u00b7 addition", "title": "First repair", "concept": "Use a smaller putting-together story and let the child count all items.", "branch_label": null, "example": "You have two mangoes and I give you one more. How many mangoes altogether?", "rebuild": "After success, return to sums under ten before trying the original problem size.", "expanded": true, "auto_expand": true, "children": [{"id": "numeracy-support-2", "kind": "scaffold", "status": "support_current", "code": "Support 2 \u00b7 addition", "title": "Bump down", "concept": "Return to pure finger counting: count each group, then count all together. Use only sums to five.", "branch_label": null, "example": "Hold up one finger, then two more fingers. Count them all. How many altogether?", "rebuild": "Then ask one fresh sum to five, then one sum under ten.", "expanded": true, "auto_expand": true, "children": [{"id": "numeracy-support-3", "kind": "scaffold", "status": "support_future", "code": "Support 3 \u00b7 addition", "title": "Foundation rebuild", "concept": "Use the foundation of addition: one more and one plus one.", "branch_label": null, "example": "One finger plus one finger makes how many fingers?", "rebuild": "Move from one plus one to two plus one, then back to a tiny market story.", "expanded": true, "auto_expand": true, "children": [{"id": "numeracy-rejoin", "kind": "rejoin", "status": "planned", "code": "Rebuild & rejoin", "title": "Return to the planned lesson check", "concept": "Then ask one fresh sum to five, then one sum under ten.", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l19", "kind": "lesson", "status": "future", "code": "Lesson 19 \u00b7 W5 L3", "title": "Teen Number Addition: add to the ones", "concept": "add to the ones", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l20", "kind": "lesson", "status": "future", "code": "Lesson 20 \u00b7 W5 L4", "title": "Mixed Practice to 20 and speed round", "concept": "Mixed Practice to 20 and speed round", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l21", "kind": "lesson", "status": "future", "code": "Lesson 21 \u00b7 W6 L1", "title": "Place Value Review for Addition: tens and ones", "concept": "tens and ones", "branch_label": null, "example": null, "rebuild": null, "expanded": true, "auto_expand": true, "children": [{"id": "num-l22", "kind": "lesson", "status": "future", "code": "Lesson 22 \u00b7 W6 L2", "title": "Adding Tens", "concept": "Adding Tens", "branch_label": null, "example": null, "rebuild": null, "expanded": false, "auto_expand": true, "children": []}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]};
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[ch]));
+}
+
+function branchStatusLabel(status) {
+      const map = {
+        completed: "Mastered",
+        current: "Teaching now",
+        future: "Planned",
+        support_current: "Live support",
+        support_completed: "Support done",
+        support_future: "If still stuck",
+        planned: "Rejoin",
+      };
+      return map[status] || String(status || "concept").replaceAll("_", " ");
+    }
+    function branchNodePayload(node) {
+      return {
+        code: node.code || "",
+        title: node.title || "Untitled",
+        concept: node.concept || "",
+        example: node.example || "",
+        teacher_move: node.teacher_move || "",
+        status: node.status || "",
+        branch_label: node.branch_label || "",
+        kind: node.kind || "",
+      };
+    }
+    function branchRenderDetail(node) {
+      const status = branchStatusLabel(node.status);
+      const parts = [
+        node.code ? `<div class="branch-detail-code">${escapeHtml(node.code)}</div>` : "",
+        `<h4>${escapeHtml(node.title || "Untitled")}</h4>`,
+        node.concept ? `<p><strong>Concept:</strong> ${escapeHtml(node.concept)}</p>` : "",
+        node.teacher_move ? `<p><strong>Teacher move:</strong> ${escapeHtml(node.teacher_move)}</p>` : "",
+        node.example ? `<p><strong>Ask the child:</strong> ${escapeHtml(node.example)}</p>` : "",
+        node.branch_label ? `<p><strong>Branch:</strong> ${escapeHtml(node.branch_label)}</p>` : "",
+        `<p><strong>Status:</strong> ${escapeHtml(status)}</p>`,
+      ];
+      return parts.filter(Boolean).join("");
+    }
+    function branchRenderNode(node) {
+      if (node.kind === "branch") {
+        const kids = node.children || [];
+        const open = node.auto_expand || node.expanded;
+        return `<div class="branch-arm ${open ? "expanded" : ""}" data-node-id="${escapeHtml(node.id)}">
+          <div class="branch-arm-label">${escapeHtml(node.branch_label || node.title || "Branch")}</div>
+          <div class="branch-arm-body ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>
+        </div>`;
+      }
+      const kids = node.children || [];
+      const hasKids = kids.length > 0;
+      const open = node.auto_expand || node.expanded;
+      const isFork = node.status === "current" && kids.some(c => c.kind === "branch");
+      const childHtml = hasKids
+        ? (isFork
+          ? `<div class="branch-fork ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>`
+          : `<div class="branch-spine ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>`)
+        : "";
+      const statusClass = escapeHtml(String(node.status || "").replaceAll("_", "-"));
+      return `<div class="branch-item ${open ? "expanded" : ""}" data-node-id="${escapeHtml(node.id)}">
+        <button type="button" class="branch-row status-${statusClass}" data-has-kids="${hasKids ? "1" : "0"}" data-node="${escapeHtml(JSON.stringify(branchNodePayload(node)))}">
+          <span class="branch-dot" aria-hidden="true"></span>
+          <span class="branch-text">
+            ${node.code ? `<span class="branch-code">${escapeHtml(node.code)}</span>` : ""}
+            <span class="branch-title">${escapeHtml(node.title || "Untitled")}</span>
+            ${node.concept ? `<span class="branch-concept">${escapeHtml(node.concept)}</span>` : ""}
+            <span class="branch-tag">${escapeHtml(branchStatusLabel(node.status))}</span>
+          </span>
+          ${hasKids ? `<span class="branch-toggle">${open ? "▾" : "▸"}</span>` : ""}
+        </button>
+        ${childHtml}
+      </div>`;
+    }
+    function branchRenderTree(root) {
+      return `<div class="branch-tree">${branchRenderNode(root)}</div>`;
+    }
+    function mountPreziTreeFromRoot(host, root) {
+      if (!host || !root || !root.id) {
+        if (host) host.innerHTML = `<div class="empty">Learning path tree will appear once this child has a placed module.</div>`;
+        return;
+      }
+      const wrap = document.createElement("div");
+      wrap.className = "branch-tree-stage";
+      wrap.innerHTML = `
+        <div class="branch-tree-scroll">${branchRenderTree(root)}</div>
+        <div class="branch-detail-panel">
+          <div class="branch-detail-empty">Click any lesson or support step to read the full detail here — large text, no cramped cards.</div>
+          <div class="branch-detail-content hidden"></div>
+        </div>`;
+      const toolbar = document.createElement("div");
+      toolbar.className = "branch-toolbar";
+      toolbar.innerHTML = `<span class="branch-focus-label">Click a row to expand branches; other open branches collapse. Details appear below.</span><button type="button" class="btn secondary branch-jump-now">Jump to teaching now</button>`;
+      host.innerHTML = "";
+      host.appendChild(wrap);
+      host.appendChild(toolbar);
+
+      const scroll = wrap.querySelector(".branch-tree-scroll");
+      const detailEmpty = wrap.querySelector(".branch-detail-empty");
+      const detailContent = wrap.querySelector(".branch-detail-content");
+      const focusLabel = toolbar.querySelector(".branch-focus-label");
+
+      function showDetail(button) {
+        if (!button) return;
+        let node = {};
+        try { node = JSON.parse(button.dataset.node || "{}"); } catch (_) { node = {}; }
+        scroll.querySelectorAll(".branch-row.selected").forEach(el => el.classList.remove("selected"));
+        button.classList.add("selected");
+        detailEmpty.classList.add("hidden");
+        detailContent.classList.remove("hidden");
+        detailContent.innerHTML = branchRenderDetail(node);
+        if (focusLabel) focusLabel.textContent = `Reading: ${node.title || "concept"}`;
+      }
+
+      function toggleBranchItem(item, opening) {
+        const fork = item?.querySelector(":scope > .branch-fork, :scope > .branch-spine");
+        if (!fork) return;
+        const siblings = item?.parentElement?.children;
+        if (siblings && opening) {
+          [...siblings].forEach(sib => {
+            if (sib === item || !sib.classList?.contains("branch-item")) return;
+            sib.classList.remove("expanded");
+            sib.querySelector(":scope > .branch-fork, :scope > .branch-spine")?.classList.remove("open");
+            const toggle = sib.querySelector(":scope > .branch-row .branch-toggle");
+            if (toggle) toggle.textContent = "▸";
+          });
+        }
+        fork.classList.toggle("open", opening);
+        item?.classList.toggle("expanded", opening);
+        const toggle = item?.querySelector(":scope > .branch-row .branch-toggle");
+        if (toggle) toggle.textContent = opening ? "▾" : "▸";
+      }
+
+      scroll.addEventListener("click", event => {
+        const button = event.target.closest(".branch-row");
+        if (!button) return;
+        event.preventDefault();
+        showDetail(button);
+        if (button.dataset.hasKids === "1") {
+          const item = button.closest(".branch-item");
+          const fork = item?.querySelector(":scope > .branch-fork, :scope > .branch-spine");
+          const opening = !(fork && fork.classList.contains("open"));
+          toggleBranchItem(item, opening);
+        }
+      });
+
+      toolbar.querySelector(".branch-jump-now")?.addEventListener("click", () => {
+        const nowBtn = scroll.querySelector(".branch-row.status-current, .branch-row.status-support-current, .branch-row.status-support_current");
+        if (!nowBtn) return;
+        nowBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+        showDetail(nowBtn);
+        const item = nowBtn.closest(".branch-item");
+        toggleBranchItem(item, true);
+      });
+
+      const nowBtn = scroll.querySelector(".branch-row.status-current, .branch-row.status-support-current, .branch-row.status-support_current");
+      if (nowBtn) {
+        showDetail(nowBtn);
+        toggleBranchItem(nowBtn.closest(".branch-item"), true);
+      }
+    }
+    
+mountPreziTreeFromRoot(document.getElementById('host'), window.__TREE__);
+</script>
+</body>
+</html>

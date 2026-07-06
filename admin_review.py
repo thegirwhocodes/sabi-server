@@ -466,10 +466,53 @@ def render_admin_review_page() -> str:
     /* ---------- Curriculum ---------- */
     .curriculum-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); padding: 15px; display: grid; gap: 10px; }
     .curriculum-card.compact { padding: 17px; }
-    .curriculum-map { width: 100%; height: 140px; display: block; }
+    .curriculum-map { width: 100%; height: 180px; display: block; }
     .curriculum-map text { font-size: 10px; fill: var(--muted); font-family: var(--sans); }
     .curriculum-map .map-active-label { fill: var(--gold-deep); font-weight: 600; }
     .curriculum-map .map-branch-label { font-size: 9px; }
+    .curriculum-map .map-future { stroke-dasharray: 5 4; opacity: 0.72; }
+    .curriculum-map .map-future-label { fill: #9a8d72; font-size: 9px; }
+    .path-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+    .path-preview-chip { font-size: 11.5px; border: 1px dashed var(--line); border-radius: 99px; padding: 3px 10px; color: var(--muted); background: #faf6ec; }
+    .learning-tree-wrap { border: 1px solid var(--line); border-radius: 14px; background: #fffdf8; overflow: hidden; }
+    .branch-tree-stage { display: grid; grid-template-rows: minmax(320px, 1fr) auto; max-height: 720px; }
+    .branch-tree-scroll { overflow: auto; padding: 22px 26px 18px; background: radial-gradient(circle at 12% 8%, #fffdf8 0%, #f7f0df 60%, #efe6cf 100%); }
+    .branch-tree { font-family: var(--sans); color: var(--ink); }
+    .branch-item { position: relative; }
+    .branch-row { display: flex; align-items: flex-start; gap: 14px; width: 100%; padding: 10px 6px; margin: 0; border: 0; background: transparent; text-align: left; cursor: pointer; border-radius: 8px; transition: background 120ms ease; }
+    .branch-row:hover { background: rgba(181, 83, 9, .06); }
+    .branch-row.selected { background: rgba(181, 83, 9, .12); }
+    .branch-dot { flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%; margin-top: 9px; background: #c8bfaa; box-shadow: 0 0 0 3px rgba(200,191,170,.35); }
+    .branch-row.status-completed .branch-dot { background: #1e7b43; box-shadow: 0 0 0 3px rgba(30,123,67,.22); }
+    .branch-row.status-current .branch-dot { background: #b45309; box-shadow: 0 0 0 4px rgba(181,83,9,.24); }
+    .branch-row.status-support-current .branch-dot, .branch-row.status-support_current .branch-dot { background: #c2410c; box-shadow: 0 0 0 4px rgba(194,65,12,.22); }
+    .branch-row.status-future .branch-dot, .branch-row.status-planned .branch-dot, .branch-row.status-rejoin .branch-dot { background: #9b8f78; border: 2px dashed #fff; box-shadow: none; }
+    .branch-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+    .branch-code { font-size: 13px; color: var(--muted); letter-spacing: .02em; }
+    .branch-title { font-size: 20px; font-weight: 600; line-height: 1.25; color: var(--ink); }
+    .branch-row.status-current .branch-title { color: #9b4a00; }
+    .branch-concept { font-size: 16px; line-height: 1.4; color: #4d4638; }
+    .branch-tag { display: inline-flex; align-self: flex-start; margin-top: 4px; font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: #7a6f5c; }
+    .branch-toggle { flex-shrink: 0; font-size: 18px; line-height: 1; color: var(--muted); margin-top: 8px; padding-right: 4px; }
+    .branch-spine { display: none; margin: 2px 0 6px 20px; padding: 4px 0 4px 28px; border-left: 3px solid #c8bfaa; }
+    .branch-spine.open { display: block; }
+    .branch-fork { display: none; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 28px 36px; margin: 10px 0 8px 20px; padding: 14px 0 6px 28px; border-left: 3px solid #b45309; border-top: 2px solid #d8cfb6; }
+    .branch-fork.open { display: grid; }
+    .branch-fork.open .branch-arm-body { display: block; }
+    .branch-arm-label { font-size: 14px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8a5a12; margin: 0 0 10px; line-height: 1.35; }
+    .branch-arm-body { display: none; }
+    .branch-arm-body.open { display: block; }
+    .branch-detail-panel { border-top: 2px solid var(--line); padding: 18px 22px 20px; background: #faf6ec; }
+    .branch-detail-empty { font-size: 15px; color: var(--muted); line-height: 1.5; }
+    .branch-detail-content h4 { margin: 0 0 10px; font-family: var(--serif); font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--ink); }
+    .branch-detail-content .branch-detail-code { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+    .branch-detail-content p { margin: 0 0 10px; font-size: 17px; line-height: 1.55; color: #3a3428; }
+    .branch-detail-content p:last-child { margin-bottom: 0; }
+    .branch-detail-content strong { color: var(--ink); }
+    .branch-toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); background: #faf6ec; }
+    .branch-focus-label { flex: 1; font-size: 13px; color: var(--muted); align-self: center; min-width: 180px; }
+    @keyframes branchExpand { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+    .branch-spine.open, .branch-fork.open, .branch-arm-body.open { animation: branchExpand 220ms ease; }
     .map-caption { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
     .map-caption strong { font-size: 13.5px; font-weight: 500; }
     .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -1689,8 +1732,8 @@ def render_admin_review_page() -> str:
       tableWrap.innerHTML = `<div class="overview-layout">
         <div class="curriculum-card">
           <h3>Full Curriculum Line &mdash; Numeracy</h3>
-          ${bigCurriculumMap({current_module: 4, scaffold_depth: 0, correct_streak: 0})}
-          <div class="small">Six modules from counting to mixed word problems. The green line is a learner's progress; a support branch appears below when Sabi bumps down to rebuild a skill.</div>
+          ${bigCurriculumMap({current_module: 4, scaffold_depth: 2, correct_streak: 0, active_skill: "multiplication"})}
+          <div class="small">Main line = curriculum modules. Dashed line = planned future route. Support branch below shows the bump-down ladder Sabi uses before rejoining the main path.</div>
         </div>
         <div class="module-grid">
           <div class="curriculum-card">
@@ -1737,6 +1780,262 @@ def render_admin_review_page() -> str:
       if (depth) return "The branch shows the support path Sabi is using before returning to the main module path.";
       if (Number((current || {}).correct_streak || 0) >= 2) return "The line rises when the child is showing mastery.";
       return "The green line shows how far the child has reached in this path.";
+    }
+    function branchStatusLabel(status) {
+      const map = {
+        completed: "Mastered",
+        current: "Teaching now",
+        future: "Planned",
+        support_current: "Live support",
+        support_completed: "Support done",
+        support_future: "If still stuck",
+        planned: "Rejoin",
+      };
+      return map[status] || String(status || "concept").replaceAll("_", " ");
+    }
+    function branchNodePayload(node) {
+      return {
+        code: node.code || "",
+        title: node.title || "Untitled",
+        concept: node.concept || "",
+        example: node.example || "",
+        teacher_move: node.teacher_move || "",
+        status: node.status || "",
+        branch_label: node.branch_label || "",
+        kind: node.kind || "",
+      };
+    }
+    function branchRenderDetail(node) {
+      const status = branchStatusLabel(node.status);
+      const parts = [
+        node.code ? `<div class="branch-detail-code">${escapeHtml(node.code)}</div>` : "",
+        `<h4>${escapeHtml(node.title || "Untitled")}</h4>`,
+        node.concept ? `<p><strong>Concept:</strong> ${escapeHtml(node.concept)}</p>` : "",
+        node.teacher_move ? `<p><strong>Teacher move:</strong> ${escapeHtml(node.teacher_move)}</p>` : "",
+        node.example ? `<p><strong>Ask the child:</strong> ${escapeHtml(node.example)}</p>` : "",
+        node.branch_label ? `<p><strong>Branch:</strong> ${escapeHtml(node.branch_label)}</p>` : "",
+        `<p><strong>Status:</strong> ${escapeHtml(status)}</p>`,
+      ];
+      return parts.filter(Boolean).join("");
+    }
+    function branchRenderNode(node) {
+      if (node.kind === "branch") {
+        const kids = node.children || [];
+        const open = node.auto_expand || node.expanded;
+        return `<div class="branch-arm ${open ? "expanded" : ""}" data-node-id="${escapeHtml(node.id)}">
+          <div class="branch-arm-label">${escapeHtml(node.branch_label || node.title || "Branch")}</div>
+          <div class="branch-arm-body ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>
+        </div>`;
+      }
+      const kids = node.children || [];
+      const hasKids = kids.length > 0;
+      const open = node.auto_expand || node.expanded;
+      const isFork = node.status === "current" && kids.some(c => c.kind === "branch");
+      const childHtml = hasKids
+        ? (isFork
+          ? `<div class="branch-fork ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>`
+          : `<div class="branch-spine ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>`)
+        : "";
+      const statusClass = escapeHtml(String(node.status || "").replaceAll("_", "-"));
+      return `<div class="branch-item ${open ? "expanded" : ""}" data-node-id="${escapeHtml(node.id)}">
+        <button type="button" class="branch-row status-${statusClass}" data-has-kids="${hasKids ? "1" : "0"}" data-node="${escapeHtml(JSON.stringify(branchNodePayload(node)))}">
+          <span class="branch-dot" aria-hidden="true"></span>
+          <span class="branch-text">
+            ${node.code ? `<span class="branch-code">${escapeHtml(node.code)}</span>` : ""}
+            <span class="branch-title">${escapeHtml(node.title || "Untitled")}</span>
+            ${node.concept ? `<span class="branch-concept">${escapeHtml(node.concept)}</span>` : ""}
+            <span class="branch-tag">${escapeHtml(branchStatusLabel(node.status))}</span>
+          </span>
+          ${hasKids ? `<span class="branch-toggle">${open ? "▾" : "▸"}</span>` : ""}
+        </button>
+        ${childHtml}
+      </div>`;
+    }
+    function branchRenderTree(root) {
+      return `<div class="branch-tree">${branchRenderNode(root)}</div>`;
+    }
+    function mountPreziTreeFromRoot(host, root) {
+      if (!host || !root || !root.id) {
+        if (host) host.innerHTML = `<div class="empty">Learning path tree will appear once this child has a placed module.</div>`;
+        return;
+      }
+      const wrap = document.createElement("div");
+      wrap.className = "branch-tree-stage";
+      wrap.innerHTML = `
+        <div class="branch-tree-scroll">${branchRenderTree(root)}</div>
+        <div class="branch-detail-panel">
+          <div class="branch-detail-empty">Click any lesson or support step to read the full detail here — large text, no cramped cards.</div>
+          <div class="branch-detail-content hidden"></div>
+        </div>`;
+      const toolbar = document.createElement("div");
+      toolbar.className = "branch-toolbar";
+      toolbar.innerHTML = `<span class="branch-focus-label">Click a row to expand branches; other open branches collapse. Details appear below.</span><button type="button" class="btn secondary branch-jump-now">Jump to teaching now</button>`;
+      host.innerHTML = "";
+      host.appendChild(wrap);
+      host.appendChild(toolbar);
+
+      const scroll = wrap.querySelector(".branch-tree-scroll");
+      const detailEmpty = wrap.querySelector(".branch-detail-empty");
+      const detailContent = wrap.querySelector(".branch-detail-content");
+      const focusLabel = toolbar.querySelector(".branch-focus-label");
+
+      function showDetail(button) {
+        if (!button) return;
+        let node = {};
+        try { node = JSON.parse(button.dataset.node || "{}"); } catch (_) { node = {}; }
+        scroll.querySelectorAll(".branch-row.selected").forEach(el => el.classList.remove("selected"));
+        button.classList.add("selected");
+        detailEmpty.classList.add("hidden");
+        detailContent.classList.remove("hidden");
+        detailContent.innerHTML = branchRenderDetail(node);
+        if (focusLabel) focusLabel.textContent = `Reading: ${node.title || "concept"}`;
+      }
+
+      function toggleBranchItem(item, opening) {
+        const fork = item?.querySelector(":scope > .branch-fork, :scope > .branch-spine");
+        if (!fork) return;
+        const siblings = item?.parentElement?.children;
+        if (siblings && opening) {
+          [...siblings].forEach(sib => {
+            if (sib === item || !sib.classList?.contains("branch-item")) return;
+            sib.classList.remove("expanded");
+            sib.querySelector(":scope > .branch-fork, :scope > .branch-spine")?.classList.remove("open");
+            const toggle = sib.querySelector(":scope > .branch-row .branch-toggle");
+            if (toggle) toggle.textContent = "▸";
+          });
+        }
+        fork.classList.toggle("open", opening);
+        item?.classList.toggle("expanded", opening);
+        const toggle = item?.querySelector(":scope > .branch-row .branch-toggle");
+        if (toggle) toggle.textContent = opening ? "▾" : "▸";
+      }
+
+      scroll.addEventListener("click", event => {
+        const button = event.target.closest(".branch-row");
+        if (!button) return;
+        event.preventDefault();
+        showDetail(button);
+        if (button.dataset.hasKids === "1") {
+          const item = button.closest(".branch-item");
+          const fork = item?.querySelector(":scope > .branch-fork, :scope > .branch-spine");
+          const opening = !(fork && fork.classList.contains("open"));
+          toggleBranchItem(item, opening);
+        }
+      });
+
+      toolbar.querySelector(".branch-jump-now")?.addEventListener("click", () => {
+        const nowBtn = scroll.querySelector(".branch-row.status-current, .branch-row.status-support-current, .branch-row.status-support_current");
+        if (!nowBtn) return;
+        nowBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+        showDetail(nowBtn);
+        const item = nowBtn.closest(".branch-item");
+        toggleBranchItem(item, true);
+      });
+
+      const nowBtn = scroll.querySelector(".branch-row.status-current, .branch-row.status-support-current, .branch-row.status-support_current");
+      if (nowBtn) {
+        showDetail(nowBtn);
+        toggleBranchItem(nowBtn.closest(".branch-item"), true);
+      }
+    }
+    function mountPreziTrees(scope) {
+      (scope || document).querySelectorAll(".prezi-tree-host[data-root-key]").forEach(host => {
+        const root = window.__sabiPreziRoots?.[host.dataset.rootKey];
+        mountPreziTreeFromRoot(host, root);
+      });
+    }
+    function learningPathTreePanel(tree, heading) {
+      if (!tree || !tree.root) {
+        return `<div class="empty">Learning path tree will appear once this child has a placed module and lesson.</div>`;
+      }
+      window.__sabiPreziRoots = window.__sabiPreziRoots || {};
+      const key = `tree_${Math.random().toString(36).slice(2)}`;
+      window.__sabiPreziRoots[key] = tree.root;
+      return `<div class="curriculum-card compact">
+        <div class="section-title-row">
+          <h3>${escapeHtml(heading)}</h3>
+          <span class="section-caption">${escapeHtml(tree.module_name || tree.course || "course")} · ${escapeHtml(tree.current_title || "current lesson")}</span>
+        </div>
+        <div class="learning-tree-wrap"><div class="prezi-tree-host" data-root-key="${escapeHtml(key)}"></div></div>
+        <div class="small" style="margin-top:8px;">${escapeHtml(tree.interaction || "Click a row to expand branches; full detail appears below in large text.")}${tree.next_step ? ` · <strong>Next move:</strong> ${escapeHtml(preview(tree.next_step, 180))}` : ""}</div>
+      </div>`;
+    }
+    function pathPreviewHtml(graph) {
+      const items = (graph && graph.future_preview) || [];
+      if (!items.length) return "";
+      const chips = items.map(item => {
+        if (item.kind === "next_lesson") return `<span class="path-preview-chip">Next lesson: ${escapeHtml(preview(item.title, 42))}</span>`;
+        return `<span class="path-preview-chip">Then ${escapeHtml(item.label || ("Module " + item.module))}</span>`;
+      }).join("");
+      return `<div class="path-preview">${chips}</div>`;
+    }
+    function learningPathMap(graph) {
+      if (!graph || !(graph.nodes || []).length) {
+        return bigCurriculumMap({ current_module: 1, scaffold_depth: 0, correct_streak: 0 });
+      }
+      const nodes = graph.nodes.filter(n => Number(n.module) > 0);
+      if (!nodes.length) {
+        return bigCurriculumMap({ current_module: 0, scaffold_depth: graph.scaffold_depth, correct_streak: graph.correct_streak });
+      }
+      const count = nodes.length;
+      const step = count > 1 ? (480 / (count - 1)) : 0;
+      const nodeX = module => {
+        const index = nodes.findIndex(n => Number(n.module) === Number(module));
+        return index >= 0 ? 50 + index * step : 50;
+      };
+      const currentNode = nodes.find(n => n.status === "current") || nodes[nodes.length - 1];
+      const currentModule = Number(currentNode.module || 1);
+      const x = nodeX(currentModule);
+      const trackY = 34;
+      const branchY = 96;
+      const depth = Number(graph.scaffold_depth || 0);
+      const branch = graph.scaffold_branch;
+      const mode = graph.mode || "on_level";
+      const color = mode === "advancing" ? "#146334" : (mode === "support" ? "#b45309" : "#1e7b43");
+      const completedCount = nodes.filter(n => n.status === "completed").length;
+      const completedX = completedCount > 0 ? nodeX(nodes[completedCount - 1].module) : 50;
+      const futureStartX = x;
+      return `<svg class="curriculum-map" viewBox="0 0 580 180" role="img" aria-label="learning path with support branch and future route">
+        <line x1="50" y1="${trackY}" x2="530" y2="${trackY}" stroke="#e3dac2" stroke-width="5" stroke-linecap="round"/>
+        ${completedCount ? `<line x1="50" y1="${trackY}" x2="${completedX}" y2="${trackY}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>` : ""}
+        <circle cx="${x}" cy="${trackY}" r="8" fill="#fffdf8" stroke="${color}" stroke-width="3"/>
+        ${futureStartX < 530 ? `<line class="map-future" x1="${futureStartX}" y1="${trackY}" x2="530" y2="${trackY}" stroke="#b8ad92" stroke-width="2.5" stroke-linecap="round"/>` : ""}
+        ${nodes.map(n => {
+          const cx = nodeX(n.module);
+          const status = n.status || "future";
+          const done = status === "completed";
+          const active = status === "current";
+          const future = status === "future";
+          const fill = active ? "#fffdf8" : (done ? color : "#d8cfb6");
+          const stroke = active ? color : (done ? "transparent" : "#c8bfaa");
+          return `<circle cx="${cx}" cy="${trackY}" r="${active ? 8 : 6}" fill="${fill}" stroke="${stroke}" stroke-width="${active ? 3 : 1.5}"/>
+            <text class="${active ? "map-active-label" : (future ? "map-future-label" : "")}" x="${cx}" y="63" text-anchor="middle">${escapeHtml(n.label || ("M" + n.module))}</text>`;
+        }).join("")}
+        ${branch && depth ? (() => {
+          const steps = branch.steps || [];
+          const span = Math.min(140, step * 1.4);
+          const supportNodes = steps.map((step, index) => ({
+            x: Math.max(38, Math.min(542, x - span / 2 + (steps.length <= 1 ? 0 : index * (span / Math.max(1, steps.length - 1))))),
+            step,
+          }));
+          const activeIndex = Math.max(0, Math.min(steps.length - 1, Number(branch.active_level || depth) - 1));
+          return `
+          <path d="M ${x} ${trackY + 8} C ${x} ${trackY + 24}, ${supportNodes[activeIndex]?.x || x} ${branchY - 20}, ${supportNodes[activeIndex]?.x || x} ${branchY}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" opacity="0.85"/>
+          <line x1="${supportNodes[0]?.x || x}" y1="${branchY}" x2="${supportNodes[supportNodes.length - 1]?.x || x}" y2="${branchY}" stroke="#e3dac2" stroke-width="4" stroke-linecap="round"/>
+          ${supportNodes.map((node, index) => {
+            const active = index === activeIndex;
+            const done = index < activeIndex;
+            return `<line x1="${supportNodes[0].x}" y1="${branchY}" x2="${node.x}" y2="${branchY}" stroke="${done || active ? color : "transparent"}" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="${node.x}" cy="${branchY}" r="${active ? 8 : 6}" fill="${active ? "#fffdf8" : (done ? color : "#d8cfb6")}" stroke="${active || done ? color : "#c8bfaa"}" stroke-width="${active ? 3 : 1.5}"/>
+              <text class="map-branch-label ${active ? "map-active-label" : ""}" x="${node.x}" y="118" text-anchor="middle">${escapeHtml(node.step.label || ("Support " + (index + 1)))}</text>
+              ${active ? `<text class="map-branch-label" x="${node.x}" y="132" text-anchor="middle">${escapeHtml(preview(branch.current_move || node.step.teacher_move, 28))}</text>` : ""}`;
+          }).join("")}
+          <path class="map-future" d="M ${supportNodes[activeIndex]?.x || x} ${branchY + 8} C ${supportNodes[activeIndex]?.x || x} ${branchY + 28}, ${x} ${trackY + 24}, ${x} ${trackY + 8}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" opacity="0.55"/>`;
+        })() : ""}
+        <text x="50" y="18" class="map-branch-label">Past</text>
+        <text x="${x - 18}" y="18" class="map-active-label">Now</text>
+        <text x="470" y="18" class="map-future-label">Future path</text>
+      </svg>${pathPreviewHtml(graph)}`;
     }
     function bigCurriculumMap(current, names) {
       const labels = names || moduleNames;
@@ -1809,25 +2108,11 @@ def render_admin_review_page() -> str:
       drawerTitle.textContent = learnerName(student);
       drawerSubtitle.innerHTML = `${pill(displayPhone(student), "ink")} ${phoneNote(student)} ${pill(current.course || "course", "gold")} ${depth ? pill(`Support level ${depth}`, "good") : pill("On level", "soft")}`;
       drawerBody.innerHTML = `
-      ${depth || Number(current.wrong_streak || 0) >= 3 ? `<div class="callout">This learner is on a support branch. Sabi's next move: ${escapeHtml(preview(current.next_step || "rebuild the current skill with smaller steps.", 220))}</div>` : ""}
+      ${depth || Number(current.wrong_streak || 0) >= 3 ? `<div class="callout">This learner is on a support branch. Sabi's next move: ${escapeHtml(preview(current.next_step || (position.numeracy_path && position.numeracy_path.scaffold_branch && position.numeracy_path.scaffold_branch.current_move) || "rebuild the current skill with smaller steps.", 220))}${position.numeracy_path && position.numeracy_path.scaffold_branch ? `<div class="small" style="margin-top:6px;">${escapeHtml(position.numeracy_path.scaffold_branch.rejoin_note || "")}</div>` : ""}</div>` : ""}
       ${teacherNoteHtml(student.last_teacher_note)}
       <div class="section">
-        <div class="curriculum-card compact">
-          <div class="section-title-row"><h3>Numeracy Journey</h3><span class="section-caption">${escapeHtml(curriculumStatusText(current))}</span></div>
-          ${bigCurriculumMap(current)}
-          <div class="map-caption">
-            <strong>Module ${escapeHtml(current.current_module ?? "?")}, Week ${escapeHtml(current.current_week ?? "?")}, Lesson ${escapeHtml(current.current_lesson ?? "?")}</strong>
-            <span class="small">${escapeHtml(curriculumHelpText(current))}</span>
-          </div>
-        </div>
-        <div class="curriculum-card compact">
-          <div class="section-title-row"><h3>Literacy Journey</h3><span class="section-caption">Phase ${escapeHtml(lit.current_phase ?? 1)} &middot; oral foundations</span></div>
-          ${bigCurriculumMap(literacyMapState(current), literacyModuleNames)}
-          <div class="map-caption">
-            <strong>Module ${escapeHtml(lit.current_module ?? "?")}, Week ${escapeHtml(lit.current_week ?? "?")}, Lesson ${escapeHtml(lit.current_lesson ?? "?")}</strong>
-            <span class="small">Literacy runs as its own path and never collides with numeracy progress.</span>
-          </div>
-        </div>
+        ${learningPathTreePanel(position.numeracy_tree, "Numeracy learning path")}
+        ${learningPathTreePanel(position.literacy_tree, "Literacy learning path")}
         <div class="detail-grid">
           ${kv("Current numeracy lesson", numeracy.title || "not placed yet")}
           ${kv("Current literacy lesson", literacy.title || "not placed yet")}
@@ -1852,6 +2137,7 @@ def render_admin_review_page() -> str:
         <div class="mini-table">${(student.recent_sessions || []).map(sessionRow).join("") || `<div class="empty">No sessions saved yet for this learner.</div>`}</div>
       </div>`;
       drawerBody.querySelectorAll("[data-open-call]").forEach(el => el.addEventListener("click", () => openCall(el.dataset.openCall)));
+      mountPreziTrees(drawerBody);
     }
     function sessionRow(session) {
       const childTurns = Number(session.child_turns || 0);

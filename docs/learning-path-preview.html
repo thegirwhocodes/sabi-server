@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Sabi Learning Path Preview</title>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root { --ink:#1b1610; --muted:#6f6555; --line:#e3dac2; --gold-deep:#9b5b00; --paper:#fffdf8; --card:#faf6ec; }
+    body { margin:0; font-family: Lexend, sans-serif; background:#f4eedf; color:var(--ink); }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 28px 24px 48px; display:grid; gap:18px; }
+    h1 { margin:0 0 6px; font-size: 28px; }
+    p { margin:0; color:var(--muted); line-height:1.5; }
+    .card { background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
+    .head { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:10px; }
+    .head h2 { margin:0; font-size:18px; }
+    .caption { font-size:12px; color:var(--muted); }
+    .curriculum-map { width:100%; height:180px; display:block; }
+    .curriculum-map text { font-size:10px; fill:var(--muted); font-family:Lexend,sans-serif; }
+    .curriculum-map .map-active-label { fill:var(--gold-deep); font-weight:600; }
+    .curriculum-map .map-branch-label { font-size:9px; }
+    .curriculum-map .map-future { stroke-dasharray:5 4; opacity:.72; }
+    .curriculum-map .map-future-label { fill:#9a8d72; font-size:9px; }
+    .path-preview { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .path-preview-chip { font-size:11.5px; border:1px dashed var(--line); border-radius:99px; padding:3px 10px; color:var(--muted); background:var(--card); }
+    .callout { background:#faf0da; border:1px solid #ecd3a2; border-radius:12px; padding:12px 14px; font-size:13.5px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div>
+      <h1>Sabi learning path preview</h1>
+      <p>Sample child bumped down on Addition (support level 2). Solid line = past/current; dashed = future; branch = repair ladder; dotted arc = rejoin main path.</p>
+    </div>
+    <div class="callout" id="callout"></div>
+    <div class="card">
+      <div class="head"><h2>Numeracy Journey</h2><span class="caption" id="num-caption"></span></div>
+      <div id="numeracy-map"></div>
+    </div>
+    <div class="card">
+      <div class="head"><h2>Literacy Journey</h2><span class="caption" id="lit-caption"></span></div>
+      <div id="literacy-map"></div>
+    </div>
+  </div>
+  <script>
+    const SAMPLE = {"numeracy_path":{"course":"numeracy","current_module":2,"current_week":5,"current_lesson":2,"current_title":"Adding Past 10: bridge through 10","next_title":"Teen Number Addition: add to the ones","scaffold_depth":2,"wrong_streak":2,"correct_streak":0,"mode":"support","nodes":[{"module":1,"label":"Counting","status":"completed"},{"module":2,"label":"Addition","status":"current"},{"module":3,"label":"Subtraction","status":"future"},{"module":4,"label":"Multiply","status":"future"},{"module":5,"label":"Division","status":"future"},{"module":6,"label":"Problems","status":"future"}],"scaffold_branch":{"active_level":2,"skill":"addition","steps":[{"level":1,"label":"Repair","teacher_move":"Use a smaller putting-together story and let the child count all items.","status":"completed"},{"level":2,"label":"Bump down","teacher_move":"Return to pure finger counting: count each group, then count all together. Use only sums to five.","status":"current"},{"level":3,"label":"Foundation","teacher_move":"Use the foundation of addition: one more and one plus one.","status":"future"}],"current_move":"Return to pure finger counting: count each group, then count all together. Use only sums to five.","rejoin_module":2,"rejoin_note":"After success on the support branch, Sabi rebuilds and rejoins Addition."},"future_preview":[{"kind":"next_lesson","title":"Teen Number Addition: add to the ones"},{"kind":"module","module":3,"label":"Subtraction"},{"kind":"module","module":4,"label":"Multiply"}]},"literacy_path":{"course":"literacy","current_module":1,"current_week":2,"current_lesson":1,"current_title":"What Is Rhyming? Recognizing Rhyming Pairs","next_title":"Rhyming Practice: Identifying Which Words Rhyme","scaffold_depth":0,"mode":"on_level","nodes":[{"module":1,"label":"Sounds","status":"current"},{"module":2,"label":"Words","status":"future"},{"module":3,"label":"Stories","status":"future"},{"module":4,"label":"Grammar","status":"future"},{"module":5,"label":"Sound play","status":"future"}],"scaffold_branch":null,"future_preview":[{"kind":"next_lesson","title":"Rhyming Practice: Identifying Which Words Rhyme"},{"kind":"module","module":2,"label":"Words"}]}};
+
+    function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+    function preview(text,limit=120){const t=String(text||"").trim();return t.length<=limit?t:t.slice(0,limit-1)+"…";}
+    function pathPreviewHtml(graph){const items=(graph&&graph.future_preview)||[];if(!items.length)return"";return `<div class="path-preview">${items.map(item=>item.kind==="next_lesson"?`<span class="path-preview-chip">Next lesson: ${escapeHtml(preview(item.title,42))}</span>`:`<span class="path-preview-chip">Then ${escapeHtml(item.label||("Module "+item.module))}</span>`).join("")}</div>`;}
+    function learningPathMap(graph){
+      const nodes=(graph.nodes||[]).filter(n=>Number(n.module)>0); const count=nodes.length; const step=count>1?480/(count-1):0;
+      const nodeX=module=>{const i=nodes.findIndex(n=>Number(n.module)===Number(module));return i>=0?50+i*step:50;};
+      const currentNode=nodes.find(n=>n.status==="current")||nodes[0]; const currentModule=Number(currentNode.module||1); const x=nodeX(currentModule);
+      const trackY=34, branchY=96, depth=Number(graph.scaffold_depth||0), branch=graph.scaffold_branch, mode=graph.mode||"on_level";
+      const color=mode==="advancing"?"#146334":(mode==="support"?"#b45309":"#1e7b43");
+      const completedCount=nodes.filter(n=>n.status==="completed").length; const completedX=completedCount>0?nodeX(nodes[completedCount-1].module):50;
+      return `<svg class="curriculum-map" viewBox="0 0 580 180" role="img" aria-label="learning path">
+        <line x1="50" y1="${trackY}" x2="530" y2="${trackY}" stroke="#e3dac2" stroke-width="5" stroke-linecap="round"/>
+        ${completedCount?`<line x1="50" y1="${trackY}" x2="${completedX}" y2="${trackY}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`:""}
+        <circle cx="${x}" cy="${trackY}" r="8" fill="#fffdf8" stroke="${color}" stroke-width="3"/>
+        ${x<530?`<line class="map-future" x1="${x}" y1="${trackY}" x2="530" y2="${trackY}" stroke="#b8ad92" stroke-width="2.5" stroke-linecap="round"/>`:""}
+        ${nodes.map(n=>{const cx=nodeX(n.module), active=n.status==="current", done=n.status==="completed", future=n.status==="future"; return `<circle cx="${cx}" cy="${trackY}" r="${active?8:6}" fill="${active?"#fffdf8":(done?color:"#d8cfb6")}" stroke="${active?color:(done?"transparent":"#c8bfaa")}" stroke-width="${active?3:1.5}"/><text class="${active?"map-active-label":(future?"map-future-label":"")}" x="${cx}" y="63" text-anchor="middle">${escapeHtml(n.label)}</text>`;}).join("")}
+        ${branch&&depth?(()=>{const steps=branch.steps||[];const span=Math.min(140,step*1.4);const supportNodes=steps.map((step,index)=>({x:Math.max(38,Math.min(542,x-span/2+(steps.length<=1?0:index*(span/Math.max(1,steps.length-1))))),step}));const activeIndex=Math.max(0,Math.min(steps.length-1,Number(branch.active_level||depth)-1));return `<path d="M ${x} ${trackY+8} C ${x} ${trackY+24}, ${supportNodes[activeIndex].x} ${branchY-20}, ${supportNodes[activeIndex].x} ${branchY}" fill="none" stroke="${color}" stroke-width="2.5" opacity=".85"/><line x1="${supportNodes[0].x}" y1="${branchY}" x2="${supportNodes[supportNodes.length-1].x}" y2="${branchY}" stroke="#e3dac2" stroke-width="4"/>${supportNodes.map((node,index)=>{const active=index===activeIndex,done=index<activeIndex;return `<line x1="${supportNodes[0].x}" y1="${branchY}" x2="${node.x}" y2="${branchY}" stroke="${done||active?color:"transparent"}" stroke-width="3"/><circle cx="${node.x}" cy="${branchY}" r="${active?8:6}" fill="${active?"#fffdf8":(done?color:"#d8cfb6")}" stroke="${active||done?color:"#c8bfaa"}" stroke-width="${active?3:1.5}"/><text class="map-branch-label ${active?"map-active-label":""}" x="${node.x}" y="118" text-anchor="middle">${escapeHtml(node.step.label)}</text>${active?`<text class="map-branch-label" x="${node.x}" y="132" text-anchor="middle">${escapeHtml(preview(branch.current_move||node.step.teacher_move,28))}</text>`:""}`;}).join("")}<path class="map-future" d="M ${supportNodes[activeIndex].x} ${branchY+8} C ${supportNodes[activeIndex].x} ${branchY+28}, ${x} ${trackY+24}, ${x} ${trackY+8}" fill="none" stroke="${color}" stroke-width="2" opacity=".55"/>`;})():""}
+        <text x="50" y="18" class="map-branch-label">Past</text><text x="${x-18}" y="18" class="map-active-label">Now</text><text x="470" y="18" class="map-future-label">Future path</text>
+      </svg>${pathPreviewHtml(graph)}`;
+    }
+    const num=SAMPLE.numeracy_path, lit=SAMPLE.literacy_path;
+    document.getElementById("numeracy-map").innerHTML=learningPathMap(num);
+    document.getElementById("literacy-map").innerHTML=learningPathMap(lit);
+    document.getElementById("num-caption").textContent=`Module ${num.current_module}, Week ${num.current_week}, Lesson ${num.current_lesson} · ${num.current_title}`;
+    document.getElementById("lit-caption").textContent=`Module ${lit.current_module}, Week ${lit.current_week}, Lesson ${lit.current_lesson} · ${lit.current_title}`;
+    document.getElementById("callout").innerHTML=`Support branch active on <strong>Addition</strong>. Sabi's move: ${escapeHtml(num.scaffold_branch.current_move)}<div class="caption" style="margin-top:6px;">${escapeHtml(num.scaffold_branch.rejoin_note)}</div>`;
+  </script>
+</body>
+</html>

@@ -97,8 +97,8 @@ def main() -> int:
 
     # Learner rows + progress map
     ok &= check("renders_learners_as_rows", "<table>" in html and "User</th>" in html and "Progress Map</th>" in html)
-    ok &= check("renders_curriculum_graph", "progressSparkline" in html and "bigCurriculumMap" in html)
-    ok &= check("renders_dual_course_positions", "Numeracy Journey" in html and "Literacy Journey" in html and "literacyMapState" in html)
+    ok &= check("renders_curriculum_graph", "progressSparkline" in html and "learningPathTreePanel" in html)
+    ok &= check("renders_dual_course_positions", "Numeracy learning path" in html and "Literacy learning path" in html and "learningPathTreePanel" in html)
     ok &= check("renders_curriculum_positions", "Current numeracy lesson" in html and "Current literacy lesson" in html)
     ok &= check("renders_learning_amount", "Learning evidence" in html and "Recent practice" in html)
     ok &= check("formats_session_dates", "fmtTimestamp(session.created_at)" in html and "No date saved" in html)

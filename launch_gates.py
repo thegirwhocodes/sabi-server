@@ -62,7 +62,7 @@ def build_launch_gate_report(
             f"{lit_move.get('children_up_one_plus_level') or 0} children up 1+ literacy level (pct {lit_move.get('pct_up_one_plus_level')})",
             f"{(cohort.get('mastery') or {}).get('skills_mastered_total', 0)} skill-modules mastered across cohort",
             f"probe effect size d={ (cohort.get('probe') or {}).get('effect_size_d') }",
-            f"RCT-ready protocol: {research.get('stage_label', '10-child pre-pilot')}",
+            f"Publishable-grade protocol: {research.get('stage_label', '10-child pre-pilot')}",
             (
                 "pre/mid/post records: "
                 f"{measurement_counts.get('pre_baseline', readiness.get('baseline_records', 0))}/"

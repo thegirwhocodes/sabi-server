@@ -1685,12 +1685,12 @@ def render_admin_review_page() -> str:
           </div>
         </div>
         <div class="section">
-          <div class="section-title-row"><h3>RCT-ready measurement protocol</h3><span class="section-caption">TEP assessment validity + TaRL placement/remediation/reassessment</span></div>
+          <div class="section-title-row"><h3>Publishable-grade evidence protocol</h3><span class="section-caption">J-PAL discipline + UNESCO/GPF outcomes + TEP assessment validity + TaRL reassessment</span></div>
           <div class="detail-grid">
             <div class="feedback-card"><strong>${escapeHtml(research.stage_label || "10-child pre-pilot")}</strong><p>${escapeHtml(research.design || "Pre/mid/post protocol pending.")}</p></div>
             <div class="feedback-card"><strong>Pre / mid / post records</strong><p>${escapeHtml(measurementCounts.pre_baseline || 0)} baseline · ${escapeHtml(measurementCounts.midline || 0)} midline · ${escapeHtml(measurementCounts.post_endline || 0)} endline · ${escapeHtml(measurementCounts.retention_followup || 0)} retention.</p></div>
             <div class="feedback-card"><strong>Study arms</strong><div class="skill-chips">${distributionChips(research.arm_distribution)}</div></div>
-            <div class="feedback-card"><strong>Claim boundary</strong><p>${escapeHtml(research.claim_boundary || "The 10-child pre-pilot is RCT-ready operational evidence, not a publishable RCT effect claim.")}</p></div>
+            <div class="feedback-card"><strong>Claim tier</strong><p>${escapeHtml(research.claim_boundary || "Publishable-grade methods from call one; effect claims stay scaled to sample size and power.")}</p></div>
             <div class="feedback-card"><strong>Assignment recorded</strong><p>${escapeHtml(readiness.assignment_recorded || 0)} child records carry arm metadata for later evaluator review.</p></div>
             <div class="feedback-card"><strong>Next design step</strong><p>${escapeHtml(research.next_design_step || "Complete the pre/mid/post evidence loop before scaling.")}</p></div>
           </div>

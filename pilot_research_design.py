@@ -1,9 +1,11 @@
-"""TEP/TaRL-informed pilot research protocol for Sabi.
+"""Publishable-grade pilot research protocol for Sabi.
 
-This module keeps the measurement design close to the call state. The 10-child
-pre-pilot is evidence-grade and RCT-ready, but it should not be described as a
-publishable RCT by itself. The same state shape can scale into the 30-child
-micro-randomization and the 300-child controlled pilot.
+This module keeps the measurement design close to the call state. From the
+first child, Sabi should collect data with J-PAL/UNESCO/TEP-level discipline:
+versioned protocol, consent-aware measurement, fixed pre/mid/post probes,
+auditable assignment fields, dosage, attrition, and reviewer-ready exports.
+Early cohorts can be outward-facing as methods and data-quality evidence while
+effect-size claims remain scaled to the sample size and power.
 """
 
 from __future__ import annotations
@@ -19,15 +21,16 @@ PROTOCOL_VERSION = "sabi-tep-tarl-rct-v0.1"
 PHILOSOPHY = [
     "TEP/LEARNigeria lens: assessment validity, Nigerian learner fit, and safe claim language.",
     "TaRL lens: assess actual level, teach at that level, remediate prerequisites, and reassess regularly.",
-    "RCT lens: preserve assignment, baseline, midline, endline, dosage, attrition, and analysis fields from day one.",
+    "J-PAL/RCT lens: preserve protocol, assignment, baseline, midline, endline, dosage, attrition, and analysis fields from day one.",
+    "UNESCO/GPF lens: keep reading and mathematics outcomes mappable to minimum proficiency language.",
 ]
 
 STUDY_STAGES = {
     "ten_child_prepilot": {
         "label": "10-child pre-pilot",
-        "design": "Within-child pre/mid/post evidence run; RCT-ready but not powered as an RCT.",
+        "design": "Publishable-grade single-arm pre-pilot with locked protocol fields, consent-aware baseline/midline/endline/retention probes, and full audit trail.",
         "target_n": 10,
-        "claim_boundary": "Use for product safety, feasibility, placement validity, and learning-signal readiness only.",
+        "claim_boundary": "Outward-facing as methods, feasibility, data-quality, assessment-validity, and exploratory learning-signal evidence; causal effect claims wait for powered randomization.",
     },
     "thirty_child_micro_rct": {
         "label": "30-child micro-randomization",
@@ -333,7 +336,8 @@ def research_prompt_block(research_state: dict[str, Any] | None) -> str:
 - Design: {research_state.get('design', STUDY_STAGES['ten_child_prepilot']['design'])}
 - Study arm: {assignment.get('label', assignment.get('arm', 'measured pre-pilot'))}
 - Assessment rule: {due_line}
-- During a fixed probe, ask neutrally, do not coach inside the measured item, then resume warm TaRL teaching.
+- Evidence standard: publishable-grade methods from call one; preserve clean item-level evidence and never coach inside measured items.
+- During a fixed probe, ask neutrally, capture the answer, then resume warm TaRL teaching after the measured item is complete.
 - Claim boundary: {research_state.get('claim_boundary', STUDY_STAGES['ten_child_prepilot']['claim_boundary'])}"""
 
 
@@ -372,7 +376,7 @@ def cohort_research_rollup(children: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "claim_boundary": STUDY_STAGES[stage]["claim_boundary"],
         "next_design_step": (
-            "For the 10-child pre-pilot, complete pre/mid/post probes and review every first call. "
+            "For the 10-child pre-pilot, complete publishable-grade pre/mid/post probes, consent audit, item-level scoring, and first-call review. "
             "For the 30-child micro-pilot, switch SABI_PILOT_RESEARCH_STAGE to thirty_child_micro_rct "
             "only after consent scripts and independent review are ready."
         ),

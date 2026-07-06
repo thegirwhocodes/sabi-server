@@ -205,6 +205,6 @@ def build_pilot_evidence_report(learners: list[dict], *, cost_per_child: float |
             "primary_outcome": "TaRL level movement (baseline placement -> current); % of cohort up >=1 level.",
             "probe": "Effect size populates once a monthly baseline/endline probe is captured per child.",
             "child_only": "Adult testers are excluded from all cohort figures.",
-            "research_design": "Pre-pilot evidence is TEP/LEARNigeria assessment-validity plus TaRL placement/remediation/reassessment, with RCT-ready assignment and pre/mid/post fields.",
+            "research_design": "Pre-pilot evidence uses publishable-grade methods from call one: TEP/LEARNigeria assessment validity, TaRL placement/remediation/reassessment, UNESCO/GPF outcome language, and J-PAL-style protocol/assignment/pre-mid-post fields.",
         },
     }

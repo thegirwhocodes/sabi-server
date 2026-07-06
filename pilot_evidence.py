@@ -124,8 +124,341 @@ def child_evidence(learner: dict) -> dict[str, Any]:
         },
         "probe": probe,
         "research": research_state,
+        "mastery_map": mastery,
         "teacher_note": note.get("narrative") if isinstance(note, dict) else None,
     }
+
+
+def _child_code(child: dict, index: int = 0) -> str:
+    child_key = str(child.get("id") or child.get("name") or index or "child")
+    return "sabi-child-" + hashlib.sha256(child_key.encode("utf-8")).hexdigest()[:10]
+
+
+def _phase_set(child: dict) -> set[str]:
+    research = child.get("research") if isinstance(child.get("research"), dict) else {}
+    return {
+        str(item.get("phase"))
+        for item in (research.get("measurements") or [])
+        if isinstance(item, dict) and item.get("phase")
+    }
+
+
+def _next_due(child: dict) -> str:
+    research = child.get("research") if isinstance(child.get("research"), dict) else {}
+    status = research.get("assessment_status") if isinstance(research.get("assessment_status"), dict) else {}
+    return str(status.get("next_due_phase") or "monitoring")
+
+
+def _evidence_child(child: dict, index: int, *, value: str, detail: str, status: str | None = None) -> dict[str, Any]:
+    dose = child.get("dosage") or {}
+    totals = child.get("totals") or {}
+    return {
+        "child_code": _child_code(child, index),
+        "name": child.get("name"),
+        "value": value,
+        "detail": detail,
+        "status": status or "recorded",
+        "calls": dose.get("calls") or 0,
+        "hours": dose.get("hours") or 0,
+        "next_probe": _next_due(child),
+        "practice": f"{totals.get('correct', 0)} correct / {totals.get('wrong', 0)} needs help",
+    }
+
+
+def _indicator_status(*, progress: float | None, evidence_count: int, has_support: bool = False) -> str:
+    if has_support:
+        return "needs_support"
+    if progress is not None and progress >= 0.8:
+        return "strong"
+    if progress is not None and progress >= 0.4:
+        return "emerging"
+    if evidence_count:
+        return "collecting"
+    return "not_started"
+
+
+def _indicator_record(
+    *,
+    key: str,
+    label: str,
+    subject: str,
+    construct: str,
+    indicator_type: str,
+    metric: str,
+    detail: str,
+    progress: float | None,
+    evidence: list[dict[str, Any]],
+    status: str | None = None,
+    phase: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "subject": subject,
+        "construct": construct,
+        "type": indicator_type,
+        "phase": phase,
+        "status": status or _indicator_status(progress=progress, evidence_count=len(evidence)),
+        "metric": metric,
+        "detail": detail,
+        "progress": progress,
+        "evidence_count": len(evidence),
+        "evidence": evidence[:8],
+    }
+
+
+def learning_indicator_evidence(children: list[dict]) -> list[dict[str, Any]]:
+    """Aggregate child records into board-facing learning indicators.
+
+    The UI should read as "what learning signals are moving?" rather than
+    "which children are in a table?", while still preserving the evidence under
+    each signal for audit and board review.
+    """
+    n = len(children)
+    indicators: list[dict[str, Any]] = []
+
+    for subject, block_key, label in (
+        ("numeracy", "numeracy", "Numeracy TaRL movement"),
+        ("literacy", "literacy", "Literacy readiness movement"),
+    ):
+        paired = [child for child in children if (child.get(block_key) or {}).get("levels_gained") is not None]
+        moved = [child for child in paired if int((child.get(block_key) or {}).get("levels_gained") or 0) >= 1]
+        evidence = [
+            _evidence_child(
+                child,
+                index,
+                value=(
+                    f"L{(child.get(block_key) or {}).get('baseline_level')} -> "
+                    f"L{(child.get(block_key) or {}).get('current_level')}"
+                ),
+                detail=f"{(child.get(block_key) or {}).get('levels_gained'):+} level movement",
+                status="moved_up" if child in moved else "steady",
+            )
+            for index, child in enumerate(paired, start=1)
+        ]
+        progress = (len(moved) / len(paired)) if paired else None
+        indicators.append(_indicator_record(
+            key=f"{subject}_tarl_level_movement",
+            label=label,
+            subject=subject,
+            construct="TaRL placement movement",
+            indicator_type="primary_outcome",
+            metric=f"{len(moved)}/{len(paired)} up one or more levels",
+            detail="Baseline-to-current movement from actual placed level, not age or grade.",
+            progress=round(progress, 3) if progress is not None else None,
+            evidence=evidence,
+            status="signal_visible" if moved else _indicator_status(progress=progress, evidence_count=len(evidence)),
+            phase="baseline_to_current",
+        ))
+
+    probe_children = [child for child in children if child.get("probe")]
+    probe_gainers = [child for child in probe_children if float((child.get("probe") or {}).get("gain") or 0) > 0]
+    probe_progress = (len(probe_gainers) / len(probe_children)) if probe_children else None
+    indicators.append(_indicator_record(
+        key="fixed_probe_gain",
+        label="Fixed oral probe gain",
+        subject="cross_subject",
+        construct="pre/post fixed-probe mastery",
+        indicator_type="primary_outcome",
+        metric=f"{len(probe_gainers)}/{len(probe_children)} positive gains",
+        detail="Same-construct probes before instruction, midstream, and after the cycle.",
+        progress=round(probe_progress, 3) if probe_progress is not None else None,
+        evidence=[
+            _evidence_child(
+                child,
+                index,
+                value=f"{(child.get('probe') or {}).get('baseline')} -> {(child.get('probe') or {}).get('latest')}",
+                detail=f"gain {(child.get('probe') or {}).get('gain')}",
+                status="gain" if child in probe_gainers else "flat",
+            )
+            for index, child in enumerate(probe_children, start=1)
+        ],
+        status="signal_visible" if probe_gainers else None,
+        phase="pre_mid_post",
+    ))
+
+    returned = [child for child in children if (child.get("dosage") or {}).get("second_call_returned")]
+    return_progress = (len(returned) / n) if n else None
+    indicators.append(_indicator_record(
+        key="second_call_return",
+        label="Second-call return",
+        subject="engagement",
+        construct="dosage and persistence",
+        indicator_type="implementation_signal",
+        metric=f"{len(returned)}/{n} returned",
+        detail="A child coming back is an early signal that the learning path is usable at home.",
+        progress=round(return_progress, 3) if return_progress is not None else None,
+        evidence=[
+            _evidence_child(
+                child,
+                index,
+                value=f"{(child.get('dosage') or {}).get('calls', 0)} calls",
+                detail=f"{(child.get('dosage') or {}).get('hours', 0)} learning hours",
+                status="returned" if child in returned else "first_call_only",
+            )
+            for index, child in enumerate(children, start=1)
+            if (child.get("dosage") or {}).get("calls")
+        ],
+        phase="dosage",
+    ))
+
+    phase_order = [
+        ("pre_baseline", "Baseline probe", "Freeze starting level before Sabi teaches."),
+        ("midline", "Midline probe", "Check early signal before changing instruction or scaling."),
+        ("post_endline", "Endline probe", "Compare learning signal against the same construct map."),
+        ("retention_followup", "Retention probe", "Check whether the child keeps the skill after spacing."),
+    ]
+    for phase, label, detail in phase_order:
+        covered = [child for child in children if phase in _phase_set(child)]
+        progress = (len(covered) / n) if n else None
+        indicators.append(_indicator_record(
+            key=f"{phase}_coverage",
+            label=label,
+            subject="measurement",
+            construct="pre/mid/post RCT readiness",
+            indicator_type="measurement_fidelity",
+            metric=f"{len(covered)}/{n} recorded",
+            detail=detail,
+            progress=round(progress, 3) if progress is not None else None,
+            evidence=[
+                _evidence_child(
+                    child,
+                    index,
+                    value="recorded" if child in covered else "due",
+                    detail=f"next due: {_next_due(child).replace('_', ' ')}",
+                    status="recorded" if child in covered else "due",
+                )
+                for index, child in enumerate(children, start=1)
+                if child in covered or _next_due(child) == phase
+            ],
+            phase=phase,
+        ))
+
+    module_groups: dict[str, dict[str, Any]] = {}
+    for index, child in enumerate(children, start=1):
+        mastery = child.get("mastery_map") if isinstance(child.get("mastery_map"), dict) else {}
+        for subject in ("numeracy", "literacy"):
+            modules = ((mastery.get(subject) or {}).get("modules") or []) if isinstance(mastery.get(subject), dict) else []
+            for row in modules:
+                if not isinstance(row, dict):
+                    continue
+                key = f"{subject}_{row.get('skill') or row.get('module')}"
+                group = module_groups.setdefault(key, {
+                    "key": key,
+                    "label": row.get("module_name") or str(row.get("skill") or "Skill").replace("_", " ").title(),
+                    "subject": subject,
+                    "construct": str(row.get("skill") or "curriculum_skill").replace("_", " "),
+                    "rows": [],
+                })
+                group["rows"].append((child, index, row))
+
+    for group in module_groups.values():
+        rows = group["rows"]
+        active_rows = [row for row in rows if (row[2].get("position") != "not_started" or row[2].get("score") is not None)]
+        mastered = [row for row in active_rows if row[2].get("mastery") == "mastered"]
+        support = [
+            row for row in active_rows
+            if row[2].get("mastery") in {"insufficient", "emerging"}
+            or (row[2].get("score") is not None and float(row[2].get("score") or 0) < 0.5)
+        ]
+        denom = len(active_rows) or len(rows)
+        progress = (len(mastered) / denom) if denom else None
+        evidence = [
+            _evidence_child(
+                child,
+                index,
+                value=str(row.get("mastery_label") or row.get("mastery") or row.get("position") or "not started"),
+                detail=(
+                    f"{str(row.get('position') or 'not started').replace('_', ' ')}"
+                    + (f" · score {row.get('score')}" if row.get("score") is not None else "")
+                ),
+                status=str(row.get("mastery") or row.get("position") or "not_started"),
+            )
+            for child, index, row in active_rows[:8]
+        ]
+        indicators.append(_indicator_record(
+            key=group["key"],
+            label=group["label"],
+            subject=group["subject"],
+            construct=group["construct"],
+            indicator_type="curriculum_skill",
+            metric=f"{len(mastered)}/{denom} mastered",
+            detail="Rolling lesson evidence from Sabi's adaptive TaRL path.",
+            progress=round(progress, 3) if progress is not None else None,
+            evidence=evidence,
+            status=_indicator_status(
+                progress=progress,
+                evidence_count=len(evidence),
+                has_support=bool(support) and not mastered,
+            ),
+            phase="adaptive_learning",
+        ))
+
+    construct_groups: dict[str, dict[str, Any]] = {}
+    for index, child in enumerate(children, start=1):
+        research = child.get("research") if isinstance(child.get("research"), dict) else {}
+        for response in research.get("item_responses") or []:
+            if not isinstance(response, dict) or not response.get("item_id"):
+                continue
+            subject = str(response.get("subject") or "assessment")
+            construct = str(response.get("construct") or "fixed_probe")
+            key = f"probe_{subject}_{construct}"
+            group = construct_groups.setdefault(key, {
+                "key": key,
+                "label": construct.replace("_", " ").title(),
+                "subject": subject,
+                "construct": construct.replace("_", " "),
+                "rows": [],
+            })
+            group["rows"].append((child, index, response))
+
+    for group in construct_groups.values():
+        rows = group["rows"]
+        scored = [row for row in rows if row[2].get("score") is not None]
+        correct = [row for row in scored if float(row[2].get("score") or 0) > 0]
+        pending = len(rows) - len(scored)
+        progress = (len(correct) / len(scored)) if scored else None
+        indicators.append(_indicator_record(
+            key=group["key"],
+            label=group["label"],
+            subject=group["subject"],
+            construct=group["construct"],
+            indicator_type="fixed_probe_construct",
+            metric=f"{len(correct)}/{len(scored)} scored correct; {pending} pending",
+            detail="Item-level fixed-probe evidence with scorer/adjudication fields preserved.",
+            progress=round(progress, 3) if progress is not None else None,
+            evidence=[
+                _evidence_child(
+                    child,
+                    index,
+                    value=f"{response.get('phase') or 'probe'} · {response.get('item_id')}",
+                    detail=(
+                        "pending score" if response.get("score") is None
+                        else f"score {response.get('score')}"
+                    ),
+                    status="pending_score" if response.get("score") is None else "scored",
+                )
+                for child, index, response in rows[:8]
+            ],
+            status="needs_scoring" if pending else None,
+            phase="fixed_probe_item",
+        ))
+
+    order = {
+        "primary_outcome": 0,
+        "curriculum_skill": 1,
+        "fixed_probe_construct": 2,
+        "measurement_fidelity": 3,
+        "implementation_signal": 4,
+    }
+    return sorted(
+        indicators,
+        key=lambda item: (
+            order.get(str(item.get("type")), 9),
+            str(item.get("subject")),
+            str(item.get("label")),
+        ),
+    )
 
 
 def _course_movement(children: list[dict], course: str) -> dict[str, Any]:
@@ -340,6 +673,7 @@ def build_pilot_evidence_report(learners: list[dict], *, cost_per_child: float |
         "status": "ok",
         "cohort": rollup,
         "children": children,
+        "learning_indicators": learning_indicator_evidence(children),
         "benchmarks": BENCHMARKS,
         "notes": {
             "primary_outcome": "TaRL level movement (baseline placement -> current); % of cohort up >=1 level.",
@@ -390,8 +724,7 @@ def pilot_evidence_csv(report: dict, *, mode: str = "board") -> str:
         phases = {str(item.get("phase")) for item in (research.get("measurements") or []) if isinstance(item, dict)}
         events = [item for item in (research.get("assessment_events") or []) if isinstance(item, dict)]
         responses = [item for item in (research.get("item_responses") or []) if isinstance(item, dict)]
-        child_key = str(child.get("id") or child.get("name") or index)
-        child_code = "sabi-child-" + hashlib.sha256(child_key.encode("utf-8")).hexdigest()[:10]
+        child_code = _child_code(child, index)
         row = {
             "id": child.get("id"),
             "name": child.get("name"),

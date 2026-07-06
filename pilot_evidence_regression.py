@@ -25,7 +25,36 @@ def _child(cid, base_num, cur_num, calls, seconds, *, mastered_num=0, probe=None
         "baseline_tarl_level": base_num,
         "baseline_reading_level": 0,
         "effective_state": {"tarl_level": cur_num, "current_module": 2, "literacy": {"tarl_reading_level": 0}},
-        "mastery_map": {"numeracy": {"mastered_modules": mastered_num}, "literacy": {"mastered_modules": 0}},
+        "mastery_map": {
+            "numeracy": {
+                "mastered_modules": mastered_num,
+                "modules": [
+                    {
+                        "module": 1,
+                        "module_name": "Counting and number sense",
+                        "skill": "counting_number_sense",
+                        "score": 0.9 if mastered_num else 0.35,
+                        "mastery": "mastered" if mastered_num else "emerging",
+                        "mastery_label": "Mastered" if mastered_num else "Still building",
+                        "position": "completed" if mastered_num else "in_progress",
+                    }
+                ],
+            },
+            "literacy": {
+                "mastered_modules": 0,
+                "modules": [
+                    {
+                        "module": 1,
+                        "module_name": "Beginning sounds",
+                        "skill": "beginning_sounds",
+                        "score": 0.4,
+                        "mastery": "emerging",
+                        "mastery_label": "Still building",
+                        "position": "in_progress",
+                    }
+                ],
+            },
+        },
         "total_correct": 20,
         "total_wrong": 5,
         "total_sessions": calls,
@@ -68,6 +97,20 @@ def main() -> int:
     ok &= check("board_training_present", "no coaching" in cohort["research"]["board_training"]["facilitator_script"].lower(), cohort["research"]["board_training"])
     ok &= check("partner_implementation_kit_present", len(cohort["research"]["partner_implementation_kit"]["api_surfaces"]) >= 4, cohort["research"]["partner_implementation_kit"])
     ok &= check("research_design_note_present", "research_design" in report["notes"], report["notes"])
+    indicators = report["learning_indicators"]
+    ok &= check("learning_indicators_present", len(indicators) >= 8, indicators)
+    ok &= check(
+        "learning_indicators_replace_child_rows_with_signals",
+        any(item["key"] == "numeracy_tarl_level_movement" and item["metric"] == "2/3 up one or more levels" for item in indicators)
+        and any(item["type"] == "curriculum_skill" for item in indicators)
+        and any(item["key"] == "second_call_return" for item in indicators),
+        indicators,
+    )
+    ok &= check(
+        "learning_indicator_evidence_carries_child_snippets",
+        any(item.get("evidence") and item["evidence"][0].get("child_code", "").startswith("sabi-child-") for item in indicators),
+        indicators,
+    )
 
     public_csv = pilot_evidence_csv(report, mode="public")
     ok &= check("public_export_deidentifies_name", "name" not in public_csv.splitlines()[0] and "child_code" in public_csv.splitlines()[0], public_csv.splitlines()[0])

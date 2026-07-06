@@ -31,7 +31,7 @@ def main() -> int:
     ok &= check("renders_overview_first_navigation", "nav-overview" in html and "Launch Control" in html and 'view: "overview"' in html)
     ok &= check("renders_launch_gates_navigation", "nav-gates" in html and "Launch Gate Report" in html and "/admin/launch-gates" in html)
     ok &= check("renders_table_navigation", "nav-learners" in html and "Learner Database" in html)
-    ok &= check("renders_kids_backend_tab", "nav-kids" in html and "Kids Backend" in html and "isChildProfile" in html)
+    ok &= check("renders_indicator_backend_tab", "nav-kids" in html and "Indicator Backend" in html and "isChildProfile" in html)
     ok &= check("renders_feedback_tab", "nav-feedback" in html and "Voice Notes" in html and "/admin/feedback" in html)
     ok &= check("renders_premium_brand", "Cormorant" in html and "Lexend" in html and "brand-spark" in html and "#cba868" in html)
     ok &= check("shows_live_health_indicator", "health-dot" in html and "/health" in html)
@@ -159,6 +159,19 @@ def main() -> int:
         "RCT Advancement" in html
         and "protocol, instruments, consent, data quality, outcomes, and publication pack" in html
         and "item-response rows" in html,
+    )
+    ok &= check(
+        "renders_learning_indicator_map",
+        "Learning Indicator Map" in html
+        and "indicator-node" in html
+        and "activeIndicatorKey" in html
+        and "click a node to see the learner evidence underneath" in html,
+    )
+    ok &= check(
+        "replaces_per_child_evidence_table_with_indicators",
+        "Per-child evidence" not in html
+        and "Child-Safe Evidence Export" in html
+        and "learning_indicators" in html,
     )
     ok &= check(
         "renders_board_training",

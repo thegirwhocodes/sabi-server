@@ -427,7 +427,7 @@ def _finalize(
             "future": "Planned next — click any node to expand its branch",
         },
         "root": root,
-        "interaction": "Click a row to expand branches. Completed modules stay collapsed until you open them. Full detail appears below.",
+        "interaction": "Choose a path button to see what that curriculum future means, or click any node to inspect that lesson or move.",
     }
 
 

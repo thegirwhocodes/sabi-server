@@ -2231,15 +2231,15 @@ def render_admin_review_page() -> str:
     }
     function branchRenderPathDetail(focus, treeData, selectedNode) {
       const info = branchFocusInfo(focus, treeData);
-      const selected = selectedNode && selectedNode.title
-        ? `<div class="path-node-note"><strong>Selected node:</strong> ${escapeHtml(selected.title)}${selected.status ? ` · ${escapeHtml(branchStatusLabel(selected.status))}` : ""}</div>`
+      const selectedNote = selectedNode && selectedNode.title
+        ? `<div class="path-node-note"><strong>Selected node:</strong> ${escapeHtml(selectedNode.title)}${selectedNode.status ? ` · ${escapeHtml(branchStatusLabel(selectedNode.status))}` : ""}</div>`
         : "";
       return `<div class="branch-path-summary">
         <div class="path-kicker">${escapeHtml(info.kicker)}</div>
         <h4>${escapeHtml(info.title)}</h4>
         <p>${escapeHtml(info.body)}</p>
         <p><strong>What to look at:</strong> ${escapeHtml(info.look)}</p>
-        ${selected}
+        ${selectedNote}
       </div>`;
     }
     function branchApplyGraphFocus(scroll, graph, focus, treeData) {

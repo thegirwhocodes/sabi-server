@@ -795,12 +795,21 @@ def render_admin_review_page() -> str:
       input { min-width: 0; width: 100%; }
     }
     @media (max-width: 720px) {
+      .app { grid-template-columns: 148px minmax(0, 1fr); }
+      .sidebar { position: sticky; height: 100vh; padding: 14px 8px; }
+      .brand { align-items: flex-start; padding-inline: 4px; }
+      .brand-title { font-size: 20px; }
+      .brand-subtitle { display: none; }
+      .nav { grid-template-columns: 1fr; }
+      .nav button { justify-content: flex-start; min-height: 38px; padding: 8px; font-size: 11.5px; gap: 7px; }
+      .nav-count { min-width: 18px; padding-inline: 5px; }
+      .indicator-map { grid-template-columns: 1fr; }
+      .side-foot { display: none; }
+    }
+    @media (max-width: 420px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; }
       .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .nav button { justify-content: flex-start; min-height: 42px; }
-      .indicator-map { grid-template-columns: 1fr; }
-      .side-foot { display: none; }
     }
   </style>
 </head>

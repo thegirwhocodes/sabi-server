@@ -475,16 +475,16 @@ def render_admin_review_page() -> str:
     .path-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
     .path-preview-chip { font-size: 11.5px; border: 1px dashed var(--line); border-radius: 99px; padding: 3px 10px; color: var(--muted); background: #faf6ec; }
     .learning-tree-wrap { border: 1px solid var(--line); border-radius: 14px; background: #f2f0e8; overflow: hidden; }
-    .branch-tree-stage { display: grid; grid-template-rows: minmax(360px, 1fr) auto; max-height: 760px; }
+    .branch-tree-stage { display: grid; grid-template-rows: minmax(460px, 1fr) auto; max-height: 820px; }
     .branch-tree-scroll {
       overflow: auto;
-      min-height: 360px;
-      padding: 18px 18px 12px;
+      min-height: 460px;
+      padding: 12px;
       background:
         linear-gradient(90deg, rgba(255,255,255,.28) 0 1px, transparent 1px 100%),
         linear-gradient(180deg, rgba(255,255,255,.24) 0 1px, transparent 1px 100%),
         #c9c7be;
-      background-size: 38px 38px;
+      background-size: 42px 42px;
     }
     .branch-tree {
       min-width: max-content;
@@ -496,75 +496,105 @@ def render_admin_review_page() -> str:
       min-width: 100%;
       min-height: 340px;
     }
-    .branch-edge {
+    .branch-link {
       fill: none;
       stroke: #2f302d;
       stroke-width: 2.2;
-      stroke-linecap: square;
-      stroke-linejoin: miter;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: .56;
       vector-effect: non-scaling-stroke;
+      transition: opacity 180ms ease, stroke-width 180ms ease;
     }
-    .branch-edge.completed { stroke: #1e7b43; }
-    .branch-edge.current { stroke: #80611f; stroke-width: 2.7; }
-    .branch-edge.future, .branch-edge.planned { stroke: rgba(47,48,45,.62); }
-    .branch-edge.support, .branch-edge.support_current, .branch-edge.support_completed, .branch-edge.support_future {
-      stroke: #416e4d;
-      stroke-dasharray: 8 5;
+    .branch-link.route-spine, .branch-link.route-completed { stroke: #30322d; }
+    .branch-link.route-onlevel { stroke: #80611f; }
+    .branch-link.route-lower { stroke: #1f7a46; stroke-dasharray: 8 6; }
+    .branch-link.route-higher { stroke: #1f7180; }
+    .branch-link.route-rejoin { stroke: #506455; stroke-dasharray: 4 5; }
+    .branch-link.active {
+      opacity: 1;
+      stroke-width: 3.4;
     }
-    .branch-terminal-guide {
-      stroke: rgba(255,255,255,.78);
-      stroke-width: 2.2;
-      vector-effect: non-scaling-stroke;
+    .branch-link.dim { opacity: .15; }
+    .branch-zone-label {
+      fill: #2d2d28;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      paint-order: stroke;
+      stroke: rgba(242,240,232,.88);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+    .branch-zone-label.dim { opacity: .28; }
+    .branch-node {
+      cursor: pointer;
+      opacity: .9;
+      transition: transform 460ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease;
     }
     .branch-node-dot {
       fill: #f8f5ea;
       stroke: #31322f;
       stroke-width: 2;
       vector-effect: non-scaling-stroke;
+      transition: stroke-width 160ms ease, r 160ms ease, fill 160ms ease;
     }
-    .branch-node-dot.completed { fill: #27d552; stroke: #0f5d2f; }
-    .branch-node-dot.current { fill: var(--gold); stroke: #5d4317; stroke-width: 3; }
-    .branch-node-dot.support-current, .branch-node-dot.support-completed, .branch-node-dot.support-future { fill: #dff1df; stroke: #1e7b43; }
-    .branch-node-dot.future, .branch-node-dot.planned { fill: #f4efe2; stroke: #57544c; }
-    .branch-node-hit, .branch-node-label {
-      cursor: pointer;
+    .branch-node-halo {
+      fill: rgba(255,255,255,.34);
+      stroke: rgba(255,255,255,.52);
+      stroke-width: 1;
+      opacity: 0;
+      transition: opacity 180ms ease, r 180ms ease;
     }
-    .branch-node-hit:hover + .branch-node-dot,
-    .branch-node-hit.selected + .branch-node-dot {
+    .branch-node.completed .branch-node-dot { fill: #27d552; stroke: #0f5d2f; }
+    .branch-node.current .branch-node-dot { fill: var(--gold); stroke: #5d4317; stroke-width: 3; }
+    .branch-node.support-current .branch-node-dot,
+    .branch-node.support-completed .branch-node-dot,
+    .branch-node.support-future .branch-node-dot { fill: #dff1df; stroke: #1e7b43; }
+    .branch-node.extension-current .branch-node-dot,
+    .branch-node.extension-future .branch-node-dot { fill: #d9f0f2; stroke: #1f7180; }
+    .branch-node.future .branch-node-dot, .branch-node.planned .branch-node-dot { fill: #f4efe2; stroke: #57544c; }
+    .branch-node:hover .branch-node-halo,
+    .branch-node.selected .branch-node-halo {
+      opacity: 1;
+    }
+    .branch-node:hover .branch-node-dot,
+    .branch-node.selected .branch-node-dot {
       stroke: #111;
       stroke-width: 4;
     }
+    .branch-node.dim { opacity: .28; }
+    .branch-node-hit { fill: transparent; }
     .branch-label {
       fill: #241f16;
       font-family: var(--sans);
-      font-size: 13px;
-      font-weight: 500;
+      font-size: 11px;
+      font-weight: 700;
       letter-spacing: 0;
-      dominant-baseline: middle;
+      text-anchor: middle;
       paint-order: stroke;
       stroke: rgba(242,240,232,.9);
       stroke-width: 5px;
       stroke-linejoin: round;
+      pointer-events: none;
     }
     .branch-label.subtle {
       fill: #5a554c;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 400;
     }
     .branch-label.current {
       fill: #4d3510;
       font-weight: 700;
     }
-    .branch-route-label {
-      fill: #324536;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      paint-order: stroke;
-      stroke: rgba(242,240,232,.92);
-      stroke-width: 5px;
-    }
+    .branch-mode-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+    .branch-mode-btn { border: 1px solid var(--line); background: #fffdf8; border-radius: 999px; padding: 6px 11px; color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+    .branch-mode-btn.active { background: #1f1d18; border-color: #1f1d18; color: #fffaf0; }
+    .branch-path-summary { display: grid; gap: 8px; }
+    .branch-path-summary h4 { margin-bottom: 2px; }
+    .branch-path-summary .path-kicker { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+    .branch-path-summary .path-node-note { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; line-height: 1.45; }
     .branch-detail-panel { border-top: 2px solid var(--line); padding: 18px 22px 20px; background: #faf6ec; }
     .branch-detail-empty { font-size: 15px; color: var(--muted); line-height: 1.5; }
     .branch-detail-content h4 { margin: 0 0 10px; font-family: var(--serif); font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--ink); }
@@ -1851,6 +1881,8 @@ def render_admin_review_page() -> str:
         support_completed: "Support done",
         support_future: "If still stuck",
         planned: "Rejoin",
+        extension_current: "Ready to stretch",
+        extension_future: "Higher path",
       };
       return map[status] || String(status || "concept").replaceAll("_", " ");
     }
@@ -1884,148 +1916,387 @@ def render_admin_review_page() -> str:
     function branchGraphStatusClass(node) {
       return String((node || {}).status || "future").replaceAll("_", "-");
     }
-    function branchGraphEdgeClass(node, parent) {
+    function branchGraphRoute(node) {
       const status = String((node || {}).status || "");
+      const kind = String((node || {}).kind || "");
       const label = String((node || {}).branch_label || (node || {}).title || "").toLowerCase();
-      if (label.includes("support") || status.includes("support")) return "support";
-      if (status === "current") return "current";
-      if (status === "completed") return "completed";
-      if (status === "planned") return "planned";
-      return "future";
+      if (status.includes("extension") || kind === "extension" || label.includes("higher") || label.includes("stretch")) return "higher";
+      if (kind === "rejoin" || status === "planned") return "rejoin";
+      if (status.includes("support") || kind === "scaffold" || label.includes("support") || label.includes("bump down") || label.includes("repair")) return "lower";
+      if (label.includes("on-level") || status === "future") return "onlevel";
+      return "spine";
+    }
+    function branchGraphEdgeRoute(edge) {
+      if (!edge) return "spine";
+      if (edge.route) return edge.route;
+      const fromRoute = edge.from?.route || branchGraphRoute(edge.from?.raw);
+      const toRoute = edge.to?.route || branchGraphRoute(edge.to?.raw);
+      if (fromRoute === "higher" || toRoute === "higher") return "higher";
+      if (fromRoute === "lower" || toRoute === "lower") return toRoute === "rejoin" ? "rejoin" : "lower";
+      if (fromRoute === "rejoin" || toRoute === "rejoin") return "rejoin";
+      if (fromRoute === "onlevel" || toRoute === "onlevel") return "onlevel";
+      return "spine";
     }
     function branchGraphWalk(root) {
       const nodes = [];
       const edges = [];
+      const nodeMap = new Map();
+      const edgeKeys = new Set();
       let sequence = 0;
+      function nodeKey(node) {
+        return String(node.id || `${node.kind || "node"}-${node.title || node.code || sequence++}`);
+      }
+      function connect(from, to, route = "") {
+        if (!from || !to) return;
+        if (!from.children.includes(to)) from.children.push(to);
+        if (!to.parents.includes(from)) to.parents.push(from);
+        const key = `${from.key}->${to.key}:${route || branchGraphEdgeRoute({ from, to })}`;
+        if (edgeKeys.has(key)) return;
+        edgeKeys.add(key);
+        edges.push({ from, to, route });
+      }
       function visit(node, parent = null, depth = 0) {
         if (!node || typeof node !== "object") return null;
-        const copy = {
-          raw: node,
-          key: `${node.id || node.title || "node"}-${sequence++}`,
-          depth,
-          children: [],
-          parent,
-          payload: branchNodePayload(node),
-        };
-        nodes.push(copy);
-        for (const child of (node.children || [])) {
-          const childCopy = visit(child, copy, depth + 1);
-          if (childCopy) {
-            copy.children.push(childCopy);
-            edges.push({ from: copy, to: childCopy });
+        const key = nodeKey(node);
+        let copy = nodeMap.get(key);
+        if (!copy) {
+          copy = {
+            raw: node,
+            key,
+            depth,
+            children: [],
+            parents: [],
+            payload: branchNodePayload(node),
+            route: branchGraphRoute(node),
+          };
+          nodeMap.set(key, copy);
+          nodes.push(copy);
+        } else {
+          copy.depth = Math.min(copy.depth, depth);
+        }
+        if (parent && !copy.parents.includes(parent)) copy.parents.push(parent);
+        if (parent && !parent.children.includes(copy)) parent.children.push(copy);
+        if (parent) connect(parent, copy);
+        if (node.kind === "module_gate" && node.status === "completed") return copy;
+        const children = node.children || [];
+        const completedModuleCount = children.filter(child => child?.kind === "module_gate" && child?.status === "completed").length;
+        let completedModuleIndex = 0;
+        for (const child of children) {
+          let childDepth = depth + 1;
+          if (node.kind === "origin" && child?.kind === "module_gate") {
+            if (child.status === "completed") {
+              completedModuleIndex += 1;
+              childDepth = depth + completedModuleIndex;
+            } else if (child.status === "current") {
+              childDepth = depth + completedModuleCount + 1;
+            }
           }
+          visit(child, copy, childDepth);
         }
         return copy;
       }
       const rootCopy = visit(root);
-      return { root: rootCopy, nodes, edges };
+      return { root: rootCopy, nodes, edges, nodeMap, connect };
     }
-    function branchGraphLeafCount(node) {
-      if (!node) return 0;
-      if (!node.children.length) return 1;
-      return node.children.reduce((sum, child) => sum + branchGraphLeafCount(child), 0);
+    function branchGraphSyntheticNode(id, fields) {
+      return {
+        raw: {
+          id,
+          kind: fields.kind || "extension",
+          status: fields.status || "extension_future",
+          code: fields.code || "",
+          title: fields.title || "",
+          concept: fields.concept || "",
+          branch_label: fields.branch_label || "",
+        },
+        key: id,
+        depth: fields.depth || 0,
+        children: [],
+        parents: [],
+        payload: branchNodePayload({
+          id,
+          kind: fields.kind || "extension",
+          status: fields.status || "extension_future",
+          code: fields.code || "",
+          title: fields.title || "",
+          concept: fields.concept || "",
+          branch_label: fields.branch_label || "",
+        }),
+        route: "higher",
+      };
     }
-    function branchGraphLayout(root) {
-      const graph = branchGraphWalk(root);
-      const leafCount = Math.max(1, branchGraphLeafCount(graph.root));
-      const maxDepth = Math.max(1, ...graph.nodes.map(n => n.depth));
-      const targetWidth = 1060;
-      const yGap = 86;
-      const paddingX = 66;
-      const paddingY = 54;
-      const xGap = Math.max(46, Math.min(112, (targetWidth - paddingX * 2 - 260) / maxDepth));
-      const height = Math.max(340, paddingY * 2 + Math.max(1, leafCount - 1) * yGap);
-      const width = Math.max(920, paddingX * 2 + maxDepth * xGap + 260);
-      const leafSpan = leafCount > 1 ? ((height - paddingY * 2) / (leafCount - 1)) : 0;
-      let leafIndex = 0;
-      function assign(node) {
-        node.x = paddingX + node.depth * xGap;
-        if (!node.children.length) {
-          node.y = leafCount > 1 ? paddingY + leafIndex * leafSpan : height / 2;
-          leafIndex += 1;
-          return node.y;
-        }
-        const childYs = node.children.map(assign);
-        node.y = childYs.reduce((sum, y) => sum + y, 0) / childYs.length;
-        return node.y;
+    function branchGraphInjectHigherPath(graph, mode) {
+      const current = graph.nodes.find(n => n.raw.kind === "lesson" && n.raw.status === "current")
+        || graph.nodes.find(n => n.raw.status === "current");
+      if (!current || graph.nodeMap.has(`${current.key}-higher-branch`)) return;
+      const futureLessons = graph.nodes
+        .filter(n => n.raw.kind === "lesson" && n.raw.status === "future")
+        .sort((a, b) => a.depth - b.depth);
+      const rejoinTarget = futureLessons[1] || futureLessons[0] || null;
+      const status = mode === "advancing" ? "extension_current" : "extension_future";
+      const branch = branchGraphSyntheticNode(`${current.key}-higher-branch`, {
+        kind: "branch",
+        status,
+        depth: current.depth + 1,
+        title: "Higher path",
+        branch_label: "Higher path · child is ready to stretch",
+        concept: "If the child shows mastery, Sabi can compress review and let the curriculum move upward sooner.",
+      });
+      const stretch = branchGraphSyntheticNode(`${current.key}-stretch-check`, {
+        status,
+        depth: current.depth + 2,
+        code: "Above-level check",
+        title: "Stretch check",
+        concept: "Ask one harder transfer question before moving them ahead.",
+      });
+      const compact = branchGraphSyntheticNode(`${current.key}-compact-review`, {
+        status: "extension_future",
+        depth: current.depth + 3,
+        code: "Fast route",
+        title: "Compact review",
+        concept: "Skip repeated practice, keep one quick retrieval check, then rejoin the future path.",
+      });
+      [branch, stretch, compact].forEach(node => {
+        graph.nodeMap.set(node.key, node);
+        graph.nodes.push(node);
+      });
+      graph.connect(current, branch, "higher");
+      graph.connect(branch, stretch, "higher");
+      graph.connect(stretch, compact, "higher");
+      if (rejoinTarget) {
+        graph.connect(compact, rejoinTarget, "higher");
       }
-      assign(graph.root);
-      graph.width = width;
-      graph.height = height;
+    }
+    function branchGraphBuild(root, mode) {
+      const graph = branchGraphWalk(root);
+      graph.mode = mode || "on_level";
+      branchGraphInjectHigherPath(graph, graph.mode);
+      graph.edges.forEach((edge, index) => {
+        edge.index = index;
+        edge.route = branchGraphEdgeRoute(edge);
+      });
       return graph;
     }
-    function branchGraphPath(edge) {
-      const from = edge.from;
-      const to = edge.to;
+    function branchGraphActive(route, focus) {
+      if (!focus || focus === "all") return true;
+      if (focus === "lower") return route === "lower" || route === "rejoin" || route === "spine";
+      if (focus === "higher") return route === "higher" || route === "spine";
+      if (focus === "onlevel") return route === "onlevel" || route === "spine";
+      return true;
+    }
+    function branchGraphLayout(graph, focus = "all") {
+      const maxDepth = Math.max(1, ...graph.nodes.map(n => n.depth));
+      const xGap = 88;
+      const width = Math.max(1060, 130 + maxDepth * xGap + 180);
+      const height = 520;
+      const presets = {
+        all: { higher: 96, onlevel: 184, spine: 294, lower: 416, rejoin: 356 },
+        lower: { higher: 72, onlevel: 130, spine: 214, lower: 304, rejoin: 360 },
+        onlevel: { higher: 82, onlevel: 294, spine: 214, lower: 420, rejoin: 364 },
+        higher: { higher: 294, onlevel: 170, spine: 366, lower: 438, rejoin: 408 },
+      };
+      const lanes = presets[focus] || presets.all;
+      const positions = new Map();
+      for (const node of graph.nodes) {
+        const route = node.route || "spine";
+        const raw = node.raw || {};
+        let x = 70 + node.depth * xGap;
+        let y = lanes[route] || lanes.spine;
+        if (raw.kind === "branch") {
+          const parent = node.parents?.[0];
+          const parentY = parent ? (positions.get(parent.key)?.y || lanes.spine) : lanes.spine;
+          y = parentY + ((lanes[route] || lanes.spine) - parentY) * .58;
+          x += 10;
+        }
+        if (raw.kind === "module_gate") y = lanes.spine - 20;
+        if (raw.kind === "origin") y = lanes.spine;
+        if (raw.kind === "rejoin") y = lanes.rejoin;
+        positions.set(node.key, { x, y });
+      }
+      return {
+        focus,
+        width,
+        height,
+        lanes,
+        positions,
+        zoneLabels: [
+          { key: "higher", label: "moves ahead", x: 260, y: lanes.higher - 28 },
+          { key: "onlevel", label: "keeps going", x: 450, y: lanes.onlevel - 28 },
+          { key: "lower", label: "needs support", x: 390, y: lanes.lower - 28 },
+        ],
+      };
+    }
+    function branchGraphPath(edge, layout) {
+      const from = layout.positions.get(edge.from.key);
+      const to = layout.positions.get(edge.to.key);
       if (!from || !to) return "";
-      const splitX = from.x + Math.min(72, Math.max(42, (to.x - from.x) * 0.56));
-      return `M ${from.x} ${from.y} L ${splitX} ${from.y} L ${to.x} ${to.y}`;
+      const dx = Math.max(44, Math.abs(to.x - from.x) * .48);
+      return `M ${from.x} ${from.y} C ${from.x + dx} ${from.y}, ${to.x - dx} ${to.y}, ${to.x} ${to.y}`;
     }
-    function branchGraphLabel(node, isTerminal) {
+    function branchGraphLabel(node) {
       if (!node) return "";
-      if (node.raw.kind === "branch") return node.raw.branch_label || node.raw.title || "Branch";
-      if (isTerminal || node.raw.status === "current" || node.raw.status === "support_current") return node.raw.title || node.raw.code || "Lesson";
-      if (node.raw.kind === "module_gate") return node.raw.code || node.raw.title || "Module";
-      return node.raw.code || "";
+      const raw = node.raw || {};
+      const title = raw.title || raw.code || "";
+      if (raw.kind === "origin") return "entry";
+      if (raw.kind === "module_gate" && raw.status === "current") return "module";
+      if (raw.kind === "lesson" && raw.status === "current") return preview(title, 24);
+      if (raw.kind === "scaffold" && raw.status === "support_current") return "lower level";
+      if (raw.kind === "rejoin") return "rejoin";
+      if (raw.status === "extension_current" || raw.status === "extension_future") return preview(title, 18);
+      if (!node.children.length && raw.kind === "lesson") return preview(title, 18);
+      return "";
     }
-    function branchGraphRenderNode(node, graph) {
-      const payload = escapeHtml(JSON.stringify(node.payload));
-      const statusClass = escapeHtml(branchGraphStatusClass(node.raw));
-      const terminal = !node.children.length;
-      const showLabel = terminal
-        || (node.raw.kind === "lesson" && node.raw.status === "current")
-        || (node.raw.kind === "scaffold" && node.raw.status === "support_current")
-        || node.raw.kind === "origin";
-      const label = branchGraphLabel(node, terminal);
-      const labelX = terminal ? Math.min(graph.width - 260, node.x + 76) : node.x + 13;
-      const labelY = node.y + (node.raw.kind === "origin" ? -18 : 0);
-      const rail = terminal
-        ? `<line class="branch-terminal-guide" x1="${node.x + 9}" y1="${node.y}" x2="${labelX - 14}" y2="${node.y}"></line>`
-        : "";
-      const route = node.raw.kind === "branch"
-        ? `<text class="branch-route-label" x="${node.x - 20}" y="${node.y - 16}" text-anchor="middle">${escapeHtml(preview(label, 26))}</text>`
-        : "";
-      const labelEl = showLabel && label
-        ? `<text class="branch-label ${statusClass} ${terminal ? "" : "subtle"}" x="${labelX}" y="${labelY}" data-node="${payload}">${escapeHtml(preview(label, terminal ? 42 : 28))}</text>`
-        : "";
-      const radius = node.raw.status === "current" || node.raw.status === "support_current" ? 7 : (node.raw.kind === "branch" ? 5 : 6);
-      return `${rail}
-        <circle class="branch-node-hit ${statusClass}" cx="${node.x}" cy="${node.y}" r="${radius + 10}" fill="transparent" data-node="${payload}" data-status="${escapeHtml(node.raw.status || "")}"></circle>
-        <circle class="branch-node-dot ${statusClass}" cx="${node.x}" cy="${node.y}" r="${radius}"></circle>
-        ${route}
-        ${labelEl}`;
+    function branchGraphNodeRadius(node) {
+      const status = String((node.raw || {}).status || "");
+      const kind = String((node.raw || {}).kind || "");
+      if (status === "current" || status === "support_current" || status === "extension_current") return 9;
+      if (kind === "branch") return 5;
+      if (kind === "module_gate") return 7;
+      return 6;
     }
-    function branchRenderTree(root) {
-      const graph = branchGraphLayout(root);
+    function branchRenderTree(graph) {
+      const layout = branchGraphLayout(graph, "all");
+      graph.layout = layout;
       const edgeHtml = graph.edges.map(edge => {
-        const edgeClass = escapeHtml(branchGraphEdgeClass(edge.to, edge.from));
-        return `<path class="branch-edge ${edgeClass}" d="${branchGraphPath(edge)}"></path>`;
+        const route = escapeHtml(edge.route || "spine");
+        return `<path class="branch-link route-${route}" data-edge-index="${edge.index}" data-route="${route}" d="${branchGraphPath(edge, layout)}"></path>`;
       }).join("");
-      const nodeHtml = graph.nodes.map(node => branchGraphRenderNode(node, graph)).join("");
+      const zoneHtml = layout.zoneLabels.map(zone =>
+        `<text class="branch-zone-label" data-zone="${escapeHtml(zone.key)}" x="${zone.x}" y="${zone.y}">${escapeHtml(zone.label)}</text>`
+      ).join("");
+      const nodeHtml = graph.nodes.map(node => {
+        const pos = layout.positions.get(node.key) || { x: 0, y: 0 };
+        const payload = escapeHtml(JSON.stringify(node.payload));
+        const statusClass = escapeHtml(branchGraphStatusClass(node.raw));
+        const route = escapeHtml(node.route || "spine");
+        const label = branchGraphLabel(node);
+        const radius = branchGraphNodeRadius(node);
+        const labelEl = label ? `<text class="branch-label ${statusClass}" y="${radius + 20}">${escapeHtml(label)}</text>` : "";
+        return `<g class="branch-node ${statusClass} route-${route}" data-node-id="${escapeHtml(node.key)}" data-node="${payload}" data-status="${escapeHtml(node.raw.status || "")}" data-kind="${escapeHtml(node.raw.kind || "")}" data-route="${route}" style="transform: translate(${pos.x}px, ${pos.y}px);">
+          <circle class="branch-node-halo" r="${radius + 12}"></circle>
+          <circle class="branch-node-hit" r="${radius + 13}"></circle>
+          <circle class="branch-node-dot" r="${radius}"></circle>
+          ${labelEl}
+        </g>`;
+      }).join("");
       return `<div class="branch-tree">
-        <svg class="branch-graph" viewBox="0 0 ${graph.width} ${graph.height}" width="${graph.width}" height="${graph.height}" role="img" aria-label="learner curriculum branching map">
-          <rect x="18" y="18" width="${graph.width - 36}" height="${graph.height - 36}" fill="none" stroke="rgba(32,26,19,.44)" stroke-width="2"></rect>
+        <svg class="branch-graph" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" role="img" aria-label="interactive curriculum possibility map">
+          <rect x="18" y="18" width="${layout.width - 36}" height="${layout.height - 36}" fill="none" stroke="rgba(32,26,19,.38)" stroke-width="2"></rect>
+          ${zoneHtml}
           ${edgeHtml}
           ${nodeHtml}
         </svg>
       </div>`;
     }
-    function mountBranchTreeFromRoot(host, root) {
+    function branchFocusCopy(focus, treeData) {
+      return branchFocusInfo(focus, treeData).summary;
+    }
+    function branchFocusInfo(focus, treeData) {
+      const current = treeData?.current_title || "this lesson";
+      const live = treeData?.mode === "support";
+      if (focus === "lower") {
+        return {
+          kicker: "If the child struggles",
+          title: "Sabi bumps the child to easier prerequisite work",
+          summary: "This shows the path when the child needs support.",
+          body: "The curriculum drops below the planned lesson, rebuilds the missing skill with smaller examples, then curves back to the main path after the child succeeds.",
+          look: "Follow the green support lane under the current lesson.",
+        };
+      }
+      if (focus === "onlevel") {
+        return {
+          kicker: "If the child keeps up",
+          title: "Sabi keeps the child on the planned curriculum path",
+          summary: "This shows the path when the child is ready to continue normally.",
+          body: "The child stays at the current level, finishes the next scripted lessons, and keeps moving through the module without a repair detour.",
+          look: "Follow the middle lane from the current lesson into the next lesson nodes.",
+        };
+      }
+      if (focus === "higher") {
+        return {
+          kicker: "If the child is ahead",
+          title: "Sabi can move the child toward harder work sooner",
+          summary: "This shows the path when the child is showing mastery.",
+          body: "The curriculum arcs upward: Sabi gives a harder transfer check, compresses repeated review, and rejoins the future path farther ahead.",
+          look: "Follow the blue lane above the current lesson.",
+        };
+      }
+      return {
+        kicker: live ? "Current child path" : "Curriculum futures",
+        title: live ? "The child is currently on a support branch" : `Possible paths from ${current}`,
+        summary: live ? "The map shows the live bump-down plus the paths the child can take next." : "The map shows the main choices Sabi can make from this lesson.",
+        body: "Each button highlights one possible curriculum future: support if the child struggles, normal progress if they keep up, or a faster path if they are ahead.",
+        look: "Use the buttons to isolate one path, or click any node to inspect that lesson or move.",
+      };
+    }
+    function branchRenderPathDetail(focus, treeData, selectedNode) {
+      const info = branchFocusInfo(focus, treeData);
+      const selected = selectedNode && selectedNode.title
+        ? `<div class="path-node-note"><strong>Selected node:</strong> ${escapeHtml(selected.title)}${selected.status ? ` · ${escapeHtml(branchStatusLabel(selected.status))}` : ""}</div>`
+        : "";
+      return `<div class="branch-path-summary">
+        <div class="path-kicker">${escapeHtml(info.kicker)}</div>
+        <h4>${escapeHtml(info.title)}</h4>
+        <p>${escapeHtml(info.body)}</p>
+        <p><strong>What to look at:</strong> ${escapeHtml(info.look)}</p>
+        ${selected}
+      </div>`;
+    }
+    function branchApplyGraphFocus(scroll, graph, focus, treeData) {
+      const layout = branchGraphLayout(graph, focus);
+      graph.layout = layout;
+      scroll.querySelector(".branch-graph")?.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+      const nodeElements = new Map([...scroll.querySelectorAll(".branch-node[data-node-id]")].map(el => [el.dataset.nodeId, el]));
+      for (const edge of graph.edges) {
+        const el = scroll.querySelector(`.branch-link[data-edge-index="${edge.index}"]`);
+        if (!el) continue;
+        const active = branchGraphActive(edge.route, focus);
+        el.setAttribute("d", branchGraphPath(edge, layout));
+        el.classList.toggle("active", active && focus !== "all");
+        el.classList.toggle("dim", !active);
+      }
+      for (const node of graph.nodes) {
+        const el = nodeElements.get(node.key);
+        const pos = layout.positions.get(node.key);
+        if (!el || !pos) continue;
+        const active = branchGraphActive(node.route, focus);
+        el.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+        el.classList.toggle("dim", !active);
+      }
+      for (const zone of layout.zoneLabels) {
+        const el = scroll.querySelector(`.branch-zone-label[data-zone="${zone.key}"]`);
+        if (!el) continue;
+        el.setAttribute("x", zone.x);
+        el.setAttribute("y", zone.y);
+        el.classList.toggle("dim", focus !== "all" && focus !== zone.key && !(focus === "lower" && zone.key === "lower") && !(focus === "onlevel" && zone.key === "onlevel") && !(focus === "higher" && zone.key === "higher"));
+      }
+      return branchFocusCopy(focus, treeData);
+    }
+    function mountBranchTreeFromRoot(host, treeData) {
+      const root = treeData?.root || treeData;
       if (!host || !root || !root.id) {
         if (host) host.innerHTML = `<div class="empty">Learning path tree will appear once this child has a placed module.</div>`;
         return;
       }
+      const graph = branchGraphBuild(root, treeData?.mode || "on_level");
       const wrap = document.createElement("div");
       wrap.className = "branch-tree-stage";
       wrap.innerHTML = `
-        <div class="branch-tree-scroll">${branchRenderTree(root)}</div>
+        <div class="branch-tree-scroll">${branchRenderTree(graph)}</div>
         <div class="branch-detail-panel">
-          <div class="branch-detail-empty">Click any point on the branch map to read the full lesson or support detail here.</div>
+          <div class="branch-detail-empty">Click any node to read the full lesson, repair move, rejoin point, or higher-path move here.</div>
           <div class="branch-detail-content hidden"></div>
         </div>`;
       const toolbar = document.createElement("div");
       toolbar.className = "branch-toolbar";
-      toolbar.innerHTML = `<span class="branch-focus-label">Root to the left; branches split toward the learner's possible next moves.</span><button type="button" class="btn secondary branch-jump-now">Jump to teaching now</button>`;
+      toolbar.innerHTML = `<span class="branch-focus-label">${escapeHtml(branchFocusCopy("all", treeData))}</span>
+        <span class="branch-mode-buttons">
+          <button type="button" class="branch-mode-btn active" data-focus="all">Show all paths</button>
+          <button type="button" class="branch-mode-btn" data-focus="lower">If child struggles</button>
+          <button type="button" class="branch-mode-btn" data-focus="onlevel">If child keeps up</button>
+          <button type="button" class="branch-mode-btn" data-focus="higher">If child is ahead</button>
+        </span>
+        <button type="button" class="btn secondary branch-jump-now">Current node</button>`;
       host.innerHTML = "";
       host.appendChild(wrap);
       host.appendChild(toolbar);
@@ -2039,34 +2310,82 @@ def render_admin_review_page() -> str:
         if (!button) return;
         let node = {};
         try { node = JSON.parse(button.dataset.node || "{}"); } catch (_) { node = {}; }
-        scroll.querySelectorAll(".branch-node-hit.selected").forEach(el => el.classList.remove("selected"));
+        scroll.querySelectorAll(".branch-node.selected").forEach(el => el.classList.remove("selected"));
         button.classList.add("selected");
         detailEmpty.classList.add("hidden");
         detailContent.classList.remove("hidden");
         detailContent.innerHTML = branchRenderDetail(node);
         if (focusLabel) focusLabel.textContent = `Reading: ${node.title || "concept"}`;
       }
+      function showFocusDetail(focus, button) {
+        let node = {};
+        try { node = JSON.parse(button?.dataset.node || "{}"); } catch (_) { node = {}; }
+        scroll.querySelectorAll(".branch-node.selected").forEach(el => el.classList.remove("selected"));
+        if (button) button.classList.add("selected");
+        detailEmpty.classList.add("hidden");
+        detailContent.classList.remove("hidden");
+        detailContent.innerHTML = branchRenderPathDetail(focus, treeData, node);
+        if (focusLabel) focusLabel.textContent = branchFocusCopy(focus, treeData);
+      }
 
       scroll.addEventListener("click", event => {
-        const target = event.target.closest("[data-node]");
+        const target = event.target.closest(".branch-node[data-node]");
         if (!target) return;
         event.preventDefault();
-        const hit = target.classList.contains("branch-node-hit")
-          ? target
-          : [...scroll.querySelectorAll(".branch-node-hit")].find(el => el.dataset.node === target.dataset.node);
-        showDetail(hit || target);
+        showDetail(target);
       });
 
+      function currentTeachingNode() {
+        const selectors = [
+          '.branch-node[data-kind="scaffold"][data-status="support_current"]',
+          '.branch-node[data-kind="lesson"][data-status="current"]',
+          '.branch-node[data-status="support_current"]',
+          '.branch-node[data-status="current"]',
+        ];
+        for (const selector of selectors) {
+          const node = scroll.querySelector(selector);
+          if (node) return node;
+        }
+        return null;
+      }
+
+      function focusRepresentativeNode(focus) {
+        const selectors = focus === "higher"
+          ? ['.branch-node.route-higher[data-kind="branch"]', '.branch-node.route-higher[data-kind="extension"]', '.branch-node.route-higher']
+          : focus === "onlevel"
+            ? ['.branch-node.route-onlevel[data-kind="lesson"][data-status="future"]', '.branch-node[data-kind="lesson"][data-status="current"]']
+            : focus === "lower"
+              ? ['.branch-node[data-kind="scaffold"][data-status="support_current"]', '.branch-node.route-lower']
+              : [];
+        for (const selector of selectors) {
+          const node = scroll.querySelector(selector);
+          if (node) return node;
+        }
+        return currentTeachingNode();
+      }
+
       toolbar.querySelector(".branch-jump-now")?.addEventListener("click", () => {
-        const nowBtn = scroll.querySelector('.branch-node-hit[data-status="support_current"], .branch-node-hit[data-status="current"]');
+        const nowBtn = currentTeachingNode();
         if (!nowBtn) return;
         nowBtn.scrollIntoView({ behavior: "smooth", block: "center" });
         showDetail(nowBtn);
       });
 
-      const nowBtn = scroll.querySelector('.branch-node-hit[data-status="current"], .branch-node-hit[data-status="support_current"]');
+      toolbar.querySelectorAll(".branch-mode-btn[data-focus]").forEach(button => {
+        button.addEventListener("click", () => {
+          const focus = button.dataset.focus || "all";
+          toolbar.querySelectorAll(".branch-mode-btn").forEach(btn => btn.classList.toggle("active", btn === button));
+          const label = branchApplyGraphFocus(scroll, graph, focus, treeData);
+          if (focusLabel) focusLabel.textContent = label;
+          const representative = focusRepresentativeNode(focus);
+          showFocusDetail(focus, representative);
+        });
+      });
+
+      branchApplyGraphFocus(scroll, graph, "all", treeData);
+      const nowBtn = currentTeachingNode();
       if (nowBtn) {
-        showDetail(nowBtn);
+        showFocusDetail("all", nowBtn);
       }
     }
     function mountBranchTrees(scope) {
@@ -2088,7 +2407,7 @@ def render_admin_review_page() -> str:
       }
       window.__sabiBranchRoots = window.__sabiBranchRoots || {};
       const key = `tree_${Math.random().toString(36).slice(2)}`;
-      window.__sabiBranchRoots[key] = tree.root;
+      window.__sabiBranchRoots[key] = tree;
       return `<div class="curriculum-card compact">
         <div class="section-title-row">
           <h3>${escapeHtml(heading)}</h3>

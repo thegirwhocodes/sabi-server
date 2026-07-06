@@ -474,34 +474,97 @@ def render_admin_review_page() -> str:
     .curriculum-map .map-future-label { fill: #9a8d72; font-size: 9px; }
     .path-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
     .path-preview-chip { font-size: 11.5px; border: 1px dashed var(--line); border-radius: 99px; padding: 3px 10px; color: var(--muted); background: #faf6ec; }
-    .learning-tree-wrap { border: 1px solid var(--line); border-radius: 14px; background: #fffdf8; overflow: hidden; }
-    .branch-tree-stage { display: grid; grid-template-rows: minmax(320px, 1fr) auto; max-height: 720px; }
-    .branch-tree-scroll { overflow: auto; padding: 22px 26px 18px; background: radial-gradient(circle at 12% 8%, #fffdf8 0%, #f7f0df 60%, #efe6cf 100%); }
-    .branch-tree { font-family: var(--sans); color: var(--ink); }
-    .branch-item { position: relative; }
-    .branch-row { display: flex; align-items: flex-start; gap: 14px; width: 100%; padding: 10px 6px; margin: 0; border: 0; background: transparent; text-align: left; cursor: pointer; border-radius: 8px; transition: background 120ms ease; }
-    .branch-row:hover { background: rgba(181, 83, 9, .06); }
-    .branch-row.selected { background: rgba(181, 83, 9, .12); }
-    .branch-dot { flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%; margin-top: 9px; background: #c8bfaa; box-shadow: 0 0 0 3px rgba(200,191,170,.35); }
-    .branch-row.status-completed .branch-dot { background: #1e7b43; box-shadow: 0 0 0 3px rgba(30,123,67,.22); }
-    .branch-row.status-current .branch-dot { background: #b45309; box-shadow: 0 0 0 4px rgba(181,83,9,.24); }
-    .branch-row.status-support-current .branch-dot, .branch-row.status-support_current .branch-dot { background: #c2410c; box-shadow: 0 0 0 4px rgba(194,65,12,.22); }
-    .branch-row.status-future .branch-dot, .branch-row.status-planned .branch-dot, .branch-row.status-rejoin .branch-dot { background: #9b8f78; border: 2px dashed #fff; box-shadow: none; }
-    .branch-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
-    .branch-code { font-size: 13px; color: var(--muted); letter-spacing: .02em; }
-    .branch-title { font-size: 20px; font-weight: 600; line-height: 1.25; color: var(--ink); }
-    .branch-row.status-current .branch-title { color: #9b4a00; }
-    .branch-concept { font-size: 16px; line-height: 1.4; color: #4d4638; }
-    .branch-tag { display: inline-flex; align-self: flex-start; margin-top: 4px; font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: #7a6f5c; }
-    .branch-toggle { flex-shrink: 0; font-size: 18px; line-height: 1; color: var(--muted); margin-top: 8px; padding-right: 4px; }
-    .branch-spine { display: none; margin: 2px 0 6px 20px; padding: 4px 0 4px 28px; border-left: 3px solid #c8bfaa; }
-    .branch-spine.open { display: block; }
-    .branch-fork { display: none; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap: 28px 36px; margin: 10px 0 8px 20px; padding: 14px 0 6px 28px; border-left: 3px solid #b45309; border-top: 2px solid #d8cfb6; }
-    .branch-fork.open { display: grid; }
-    .branch-fork.open .branch-arm-body { display: block; }
-    .branch-arm-label { font-size: 14px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8a5a12; margin: 0 0 10px; line-height: 1.35; }
-    .branch-arm-body { display: none; }
-    .branch-arm-body.open { display: block; }
+    .learning-tree-wrap { border: 1px solid var(--line); border-radius: 14px; background: #f2f0e8; overflow: hidden; }
+    .branch-tree-stage { display: grid; grid-template-rows: minmax(360px, 1fr) auto; max-height: 760px; }
+    .branch-tree-scroll {
+      overflow: auto;
+      min-height: 360px;
+      padding: 18px 18px 12px;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.28) 0 1px, transparent 1px 100%),
+        linear-gradient(180deg, rgba(255,255,255,.24) 0 1px, transparent 1px 100%),
+        #c9c7be;
+      background-size: 38px 38px;
+    }
+    .branch-tree {
+      min-width: max-content;
+      font-family: var(--sans);
+      color: var(--ink);
+    }
+    .branch-graph {
+      display: block;
+      min-width: 100%;
+      min-height: 340px;
+    }
+    .branch-edge {
+      fill: none;
+      stroke: #2f302d;
+      stroke-width: 2.2;
+      stroke-linecap: square;
+      stroke-linejoin: miter;
+      vector-effect: non-scaling-stroke;
+    }
+    .branch-edge.completed { stroke: #1e7b43; }
+    .branch-edge.current { stroke: #80611f; stroke-width: 2.7; }
+    .branch-edge.future, .branch-edge.planned { stroke: rgba(47,48,45,.62); }
+    .branch-edge.support, .branch-edge.support_current, .branch-edge.support_completed, .branch-edge.support_future {
+      stroke: #416e4d;
+      stroke-dasharray: 8 5;
+    }
+    .branch-terminal-guide {
+      stroke: rgba(255,255,255,.78);
+      stroke-width: 2.2;
+      vector-effect: non-scaling-stroke;
+    }
+    .branch-node-dot {
+      fill: #f8f5ea;
+      stroke: #31322f;
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+    .branch-node-dot.completed { fill: #27d552; stroke: #0f5d2f; }
+    .branch-node-dot.current { fill: var(--gold); stroke: #5d4317; stroke-width: 3; }
+    .branch-node-dot.support-current, .branch-node-dot.support-completed, .branch-node-dot.support-future { fill: #dff1df; stroke: #1e7b43; }
+    .branch-node-dot.future, .branch-node-dot.planned { fill: #f4efe2; stroke: #57544c; }
+    .branch-node-hit, .branch-node-label {
+      cursor: pointer;
+    }
+    .branch-node-hit:hover + .branch-node-dot,
+    .branch-node-hit.selected + .branch-node-dot {
+      stroke: #111;
+      stroke-width: 4;
+    }
+    .branch-label {
+      fill: #241f16;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0;
+      dominant-baseline: middle;
+      paint-order: stroke;
+      stroke: rgba(242,240,232,.9);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+    .branch-label.subtle {
+      fill: #5a554c;
+      font-size: 11px;
+      font-weight: 400;
+    }
+    .branch-label.current {
+      fill: #4d3510;
+      font-weight: 700;
+    }
+    .branch-route-label {
+      fill: #324536;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      paint-order: stroke;
+      stroke: rgba(242,240,232,.92);
+      stroke-width: 5px;
+    }
     .branch-detail-panel { border-top: 2px solid var(--line); padding: 18px 22px 20px; background: #faf6ec; }
     .branch-detail-empty { font-size: 15px; color: var(--muted); line-height: 1.5; }
     .branch-detail-content h4 { margin: 0 0 10px; font-family: var(--serif); font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--ink); }
@@ -511,8 +574,6 @@ def render_admin_review_page() -> str:
     .branch-detail-content strong { color: var(--ink); }
     .branch-toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); background: #faf6ec; }
     .branch-focus-label { flex: 1; font-size: 13px; color: var(--muted); align-self: center; min-width: 180px; }
-    @keyframes branchExpand { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-    .branch-spine.open, .branch-fork.open, .branch-arm-body.open { animation: branchExpand 220ms ease; }
     .map-caption { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
     .map-caption strong { font-size: 13.5px; font-weight: 500; }
     .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -1820,41 +1881,134 @@ def render_admin_review_page() -> str:
       ];
       return parts.filter(Boolean).join("");
     }
-    function branchRenderNode(node) {
-      if (node.kind === "branch") {
-        const kids = node.children || [];
-        const open = node.auto_expand || node.expanded;
-        return `<div class="branch-arm ${open ? "expanded" : ""}" data-node-id="${escapeHtml(node.id)}">
-          <div class="branch-arm-label">${escapeHtml(node.branch_label || node.title || "Branch")}</div>
-          <div class="branch-arm-body ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>
-        </div>`;
+    function branchGraphStatusClass(node) {
+      return String((node || {}).status || "future").replaceAll("_", "-");
+    }
+    function branchGraphEdgeClass(node, parent) {
+      const status = String((node || {}).status || "");
+      const label = String((node || {}).branch_label || (node || {}).title || "").toLowerCase();
+      if (label.includes("support") || status.includes("support")) return "support";
+      if (status === "current") return "current";
+      if (status === "completed") return "completed";
+      if (status === "planned") return "planned";
+      return "future";
+    }
+    function branchGraphWalk(root) {
+      const nodes = [];
+      const edges = [];
+      let sequence = 0;
+      function visit(node, parent = null, depth = 0) {
+        if (!node || typeof node !== "object") return null;
+        const copy = {
+          raw: node,
+          key: `${node.id || node.title || "node"}-${sequence++}`,
+          depth,
+          children: [],
+          parent,
+          payload: branchNodePayload(node),
+        };
+        nodes.push(copy);
+        for (const child of (node.children || [])) {
+          const childCopy = visit(child, copy, depth + 1);
+          if (childCopy) {
+            copy.children.push(childCopy);
+            edges.push({ from: copy, to: childCopy });
+          }
+        }
+        return copy;
       }
-      const kids = node.children || [];
-      const hasKids = kids.length > 0;
-      const open = node.auto_expand || node.expanded;
-      const isFork = node.status === "current" && kids.some(c => c.kind === "branch");
-      const childHtml = hasKids
-        ? (isFork
-          ? `<div class="branch-fork ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>`
-          : `<div class="branch-spine ${open ? "open" : ""}">${kids.map(branchRenderNode).join("")}</div>`)
+      const rootCopy = visit(root);
+      return { root: rootCopy, nodes, edges };
+    }
+    function branchGraphLeafCount(node) {
+      if (!node) return 0;
+      if (!node.children.length) return 1;
+      return node.children.reduce((sum, child) => sum + branchGraphLeafCount(child), 0);
+    }
+    function branchGraphLayout(root) {
+      const graph = branchGraphWalk(root);
+      const leafCount = Math.max(1, branchGraphLeafCount(graph.root));
+      const maxDepth = Math.max(1, ...graph.nodes.map(n => n.depth));
+      const targetWidth = 1060;
+      const yGap = 86;
+      const paddingX = 66;
+      const paddingY = 54;
+      const xGap = Math.max(46, Math.min(112, (targetWidth - paddingX * 2 - 260) / maxDepth));
+      const height = Math.max(340, paddingY * 2 + Math.max(1, leafCount - 1) * yGap);
+      const width = Math.max(920, paddingX * 2 + maxDepth * xGap + 260);
+      const leafSpan = leafCount > 1 ? ((height - paddingY * 2) / (leafCount - 1)) : 0;
+      let leafIndex = 0;
+      function assign(node) {
+        node.x = paddingX + node.depth * xGap;
+        if (!node.children.length) {
+          node.y = leafCount > 1 ? paddingY + leafIndex * leafSpan : height / 2;
+          leafIndex += 1;
+          return node.y;
+        }
+        const childYs = node.children.map(assign);
+        node.y = childYs.reduce((sum, y) => sum + y, 0) / childYs.length;
+        return node.y;
+      }
+      assign(graph.root);
+      graph.width = width;
+      graph.height = height;
+      return graph;
+    }
+    function branchGraphPath(edge) {
+      const from = edge.from;
+      const to = edge.to;
+      if (!from || !to) return "";
+      const splitX = from.x + Math.min(72, Math.max(42, (to.x - from.x) * 0.56));
+      return `M ${from.x} ${from.y} L ${splitX} ${from.y} L ${to.x} ${to.y}`;
+    }
+    function branchGraphLabel(node, isTerminal) {
+      if (!node) return "";
+      if (node.raw.kind === "branch") return node.raw.branch_label || node.raw.title || "Branch";
+      if (isTerminal || node.raw.status === "current" || node.raw.status === "support_current") return node.raw.title || node.raw.code || "Lesson";
+      if (node.raw.kind === "module_gate") return node.raw.code || node.raw.title || "Module";
+      return node.raw.code || "";
+    }
+    function branchGraphRenderNode(node, graph) {
+      const payload = escapeHtml(JSON.stringify(node.payload));
+      const statusClass = escapeHtml(branchGraphStatusClass(node.raw));
+      const terminal = !node.children.length;
+      const showLabel = terminal
+        || (node.raw.kind === "lesson" && node.raw.status === "current")
+        || (node.raw.kind === "scaffold" && node.raw.status === "support_current")
+        || node.raw.kind === "origin";
+      const label = branchGraphLabel(node, terminal);
+      const labelX = terminal ? Math.min(graph.width - 260, node.x + 76) : node.x + 13;
+      const labelY = node.y + (node.raw.kind === "origin" ? -18 : 0);
+      const rail = terminal
+        ? `<line class="branch-terminal-guide" x1="${node.x + 9}" y1="${node.y}" x2="${labelX - 14}" y2="${node.y}"></line>`
         : "";
-      const statusClass = escapeHtml(String(node.status || "").replaceAll("_", "-"));
-      return `<div class="branch-item ${open ? "expanded" : ""}" data-node-id="${escapeHtml(node.id)}">
-        <button type="button" class="branch-row status-${statusClass}" data-has-kids="${hasKids ? "1" : "0"}" data-node="${escapeHtml(JSON.stringify(branchNodePayload(node)))}">
-          <span class="branch-dot" aria-hidden="true"></span>
-          <span class="branch-text">
-            ${node.code ? `<span class="branch-code">${escapeHtml(node.code)}</span>` : ""}
-            <span class="branch-title">${escapeHtml(node.title || "Untitled")}</span>
-            ${node.concept ? `<span class="branch-concept">${escapeHtml(node.concept)}</span>` : ""}
-            <span class="branch-tag">${escapeHtml(branchStatusLabel(node.status))}</span>
-          </span>
-          ${hasKids ? `<span class="branch-toggle">${open ? "▾" : "▸"}</span>` : ""}
-        </button>
-        ${childHtml}
-      </div>`;
+      const route = node.raw.kind === "branch"
+        ? `<text class="branch-route-label" x="${node.x - 20}" y="${node.y - 16}" text-anchor="middle">${escapeHtml(preview(label, 26))}</text>`
+        : "";
+      const labelEl = showLabel && label
+        ? `<text class="branch-label ${statusClass} ${terminal ? "" : "subtle"}" x="${labelX}" y="${labelY}" data-node="${payload}">${escapeHtml(preview(label, terminal ? 42 : 28))}</text>`
+        : "";
+      const radius = node.raw.status === "current" || node.raw.status === "support_current" ? 7 : (node.raw.kind === "branch" ? 5 : 6);
+      return `${rail}
+        <circle class="branch-node-hit ${statusClass}" cx="${node.x}" cy="${node.y}" r="${radius + 10}" fill="transparent" data-node="${payload}" data-status="${escapeHtml(node.raw.status || "")}"></circle>
+        <circle class="branch-node-dot ${statusClass}" cx="${node.x}" cy="${node.y}" r="${radius}"></circle>
+        ${route}
+        ${labelEl}`;
     }
     function branchRenderTree(root) {
-      return `<div class="branch-tree">${branchRenderNode(root)}</div>`;
+      const graph = branchGraphLayout(root);
+      const edgeHtml = graph.edges.map(edge => {
+        const edgeClass = escapeHtml(branchGraphEdgeClass(edge.to, edge.from));
+        return `<path class="branch-edge ${edgeClass}" d="${branchGraphPath(edge)}"></path>`;
+      }).join("");
+      const nodeHtml = graph.nodes.map(node => branchGraphRenderNode(node, graph)).join("");
+      return `<div class="branch-tree">
+        <svg class="branch-graph" viewBox="0 0 ${graph.width} ${graph.height}" width="${graph.width}" height="${graph.height}" role="img" aria-label="learner curriculum branching map">
+          <rect x="18" y="18" width="${graph.width - 36}" height="${graph.height - 36}" fill="none" stroke="rgba(32,26,19,.44)" stroke-width="2"></rect>
+          ${edgeHtml}
+          ${nodeHtml}
+        </svg>
+      </div>`;
     }
     function mountBranchTreeFromRoot(host, root) {
       if (!host || !root || !root.id) {
@@ -1866,12 +2020,12 @@ def render_admin_review_page() -> str:
       wrap.innerHTML = `
         <div class="branch-tree-scroll">${branchRenderTree(root)}</div>
         <div class="branch-detail-panel">
-          <div class="branch-detail-empty">Click any lesson or support step to read the full detail here — large text, no cramped cards.</div>
+          <div class="branch-detail-empty">Click any point on the branch map to read the full lesson or support detail here.</div>
           <div class="branch-detail-content hidden"></div>
         </div>`;
       const toolbar = document.createElement("div");
       toolbar.className = "branch-toolbar";
-      toolbar.innerHTML = `<span class="branch-focus-label">Click a row to expand branches; other open branches collapse. Details appear below.</span><button type="button" class="btn secondary branch-jump-now">Jump to teaching now</button>`;
+      toolbar.innerHTML = `<span class="branch-focus-label">Root to the left; branches split toward the learner's possible next moves.</span><button type="button" class="btn secondary branch-jump-now">Jump to teaching now</button>`;
       host.innerHTML = "";
       host.appendChild(wrap);
       host.appendChild(toolbar);
@@ -1885,7 +2039,7 @@ def render_admin_review_page() -> str:
         if (!button) return;
         let node = {};
         try { node = JSON.parse(button.dataset.node || "{}"); } catch (_) { node = {}; }
-        scroll.querySelectorAll(".branch-row.selected").forEach(el => el.classList.remove("selected"));
+        scroll.querySelectorAll(".branch-node-hit.selected").forEach(el => el.classList.remove("selected"));
         button.classList.add("selected");
         detailEmpty.classList.add("hidden");
         detailContent.classList.remove("hidden");
@@ -1893,51 +2047,26 @@ def render_admin_review_page() -> str:
         if (focusLabel) focusLabel.textContent = `Reading: ${node.title || "concept"}`;
       }
 
-      function toggleBranchItem(item, opening) {
-        const fork = item?.querySelector(":scope > .branch-fork, :scope > .branch-spine");
-        if (!fork) return;
-        const siblings = item?.parentElement?.children;
-        if (siblings && opening) {
-          [...siblings].forEach(sib => {
-            if (sib === item || !sib.classList?.contains("branch-item")) return;
-            sib.classList.remove("expanded");
-            sib.querySelector(":scope > .branch-fork, :scope > .branch-spine")?.classList.remove("open");
-            const toggle = sib.querySelector(":scope > .branch-row .branch-toggle");
-            if (toggle) toggle.textContent = "▸";
-          });
-        }
-        fork.classList.toggle("open", opening);
-        item?.classList.toggle("expanded", opening);
-        const toggle = item?.querySelector(":scope > .branch-row .branch-toggle");
-        if (toggle) toggle.textContent = opening ? "▾" : "▸";
-      }
-
       scroll.addEventListener("click", event => {
-        const button = event.target.closest(".branch-row");
-        if (!button) return;
+        const target = event.target.closest("[data-node]");
+        if (!target) return;
         event.preventDefault();
-        showDetail(button);
-        if (button.dataset.hasKids === "1") {
-          const item = button.closest(".branch-item");
-          const fork = item?.querySelector(":scope > .branch-fork, :scope > .branch-spine");
-          const opening = !(fork && fork.classList.contains("open"));
-          toggleBranchItem(item, opening);
-        }
+        const hit = target.classList.contains("branch-node-hit")
+          ? target
+          : [...scroll.querySelectorAll(".branch-node-hit")].find(el => el.dataset.node === target.dataset.node);
+        showDetail(hit || target);
       });
 
       toolbar.querySelector(".branch-jump-now")?.addEventListener("click", () => {
-        const nowBtn = scroll.querySelector(".branch-row.status-support-current, .branch-row.status-support_current, .branch-row.status-current");
+        const nowBtn = scroll.querySelector('.branch-node-hit[data-status="support_current"], .branch-node-hit[data-status="current"]');
         if (!nowBtn) return;
         nowBtn.scrollIntoView({ behavior: "smooth", block: "center" });
         showDetail(nowBtn);
-        const item = nowBtn.closest(".branch-item");
-        toggleBranchItem(item, true);
       });
 
-      const nowBtn = scroll.querySelector(".branch-row.status-current, .branch-row.status-support-current, .branch-row.status-support_current");
+      const nowBtn = scroll.querySelector('.branch-node-hit[data-status="current"], .branch-node-hit[data-status="support_current"]');
       if (nowBtn) {
         showDetail(nowBtn);
-        toggleBranchItem(nowBtn.closest(".branch-item"), true);
       }
     }
     function mountBranchTrees(scope) {

@@ -721,9 +721,16 @@ def render_admin_review_page() -> str:
     @keyframes shimmer { to { background-position: -200% 0; } }
 
     @media (max-width: 1100px) {
-      .app { grid-template-columns: 1fr; }
-      .sidebar { position: static; height: auto; }
-      .nav { grid-template-columns: repeat(4, 1fr); }
+      .app { grid-template-columns: 198px minmax(0, 1fr); }
+      .sidebar { position: sticky; height: 100vh; padding: 18px 10px 14px; gap: 15px; }
+      .brand { gap: 9px; padding: 0 6px 14px; }
+      .brand-spark { width: 28px; height: 28px; }
+      .brand-title { font-size: 23px; }
+      .brand-subtitle { font-size: 9px; letter-spacing: .1em; }
+      .nav { grid-template-columns: 1fr; }
+      .nav button { padding: 9px 10px; font-size: 12.5px; gap: 9px; }
+      .nav button svg { width: 15px; height: 15px; }
+      .side-foot { padding-inline: 6px; }
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .detail-grid, .turn-columns, .audio-grid, .module-grid, .command-grid, .source-grid, .gate-grid { grid-template-columns: 1fr; }
       .review-card, .mini-row { grid-template-columns: 1fr; }
@@ -733,6 +740,13 @@ def render_admin_review_page() -> str:
       .timeline-side:last-child { border-bottom: 0; }
       .topbar { align-items: flex-start; flex-direction: column; }
       input { min-width: 0; width: 100%; }
+    }
+    @media (max-width: 720px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .nav button { justify-content: flex-start; min-height: 42px; }
+      .side-foot { display: none; }
     }
   </style>
 </head>

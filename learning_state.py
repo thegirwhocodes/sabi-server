@@ -499,12 +499,17 @@ def extract_child_name(messages: list[dict[str, str]]) -> str | None:
         "yes", "no", "okay", "ok", "hello", "hi", "ready", "thank you",
         "thanks", "sorry", "i'm sorry", "im sorry", "i am sorry",
         "i don't know", "i dont know", "and some", "numerous",
+        "not available", "currently unavailable", "unavailable",
+        "not reachable", "line busy", "busy", "voicemail", "voice mail",
+        "mailbox", "recording", "hang up",
     }
     for index, message in enumerate(messages[:8]):
         if message.get("role") != "user":
             continue
         text = message.get("content", "").strip()
         normalized = re.sub(r"[^a-z' ]", "", text.lower()).strip()
+        if normalized in non_names or _looks_like_phone_system_name_capture(text):
+            continue
         previous_assistant = ""
         for prev_index in range(index - 1, -1, -1):
             if messages[prev_index].get("role") == "assistant":
@@ -528,6 +533,21 @@ def extract_child_name(messages: list[dict[str, str]]) -> str | None:
     return None
 
 
+def _looks_like_phone_system_name_capture(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return bool(
+        re.search(
+            r"\b("
+            r"not available|currently unavailable|unavailable|not reachable|"
+            r"switched off|line busy|mailbox|voice ?mail|"
+            r"leave (?:a )?message|record (?:your )?message|"
+            r"finished recording|after the tone|try again later|hang up"
+            r")\b",
+            lowered,
+        )
+    )
+
+
 def _clean_name(text: str) -> str | None:
     cleaned = re.sub(r"[^A-Za-z' -]", "", text).strip(" .,'-")
     if not cleaned:
@@ -546,6 +566,9 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
     current_module = int(state.get("current_module") or 0)
     diagnostic_progress = analyze_diagnostic_progress(messages) if current_module == 0 else None
     onboarding_status = onboarding_status_from_messages(messages) if current_module == 0 else state.get("onboarding_status", "complete")
+    if current_module == 0 and onboarding_status == "needs_name" and _student_has_known_name(student):
+        previous_status = str(state.get("onboarding_status") or "")
+        onboarding_status = previous_status if previous_status and previous_status != "needs_name" else "needs_school"
     skill_rows: dict[str, list[bool]] = {}
     topics: list[str] = []
     correct_count = 0
@@ -799,6 +822,11 @@ def _analyze_literacy_session(
         learning_state=updated_state,
         child_name=extract_child_name(messages),
     )
+
+
+def _student_has_known_name(student: dict[str, Any] | None) -> bool:
+    raw_name = str((student or {}).get("name") or "").strip().lower()
+    return bool(raw_name and raw_name not in {"unnamed learner", "unknown", "none", "null"})
 
 
 def _analyze_literacy_lesson_session(

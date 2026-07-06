@@ -385,6 +385,8 @@ def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | N
 
     if not name:
         return "Hello! I'm Sabi, your learning friend. Sabi means to know, and together, we're going to know so much! What is your name?"
+    if onboarding_status == "needs_name":
+        onboarding_status = "needs_school"
 
     if course == "literacy":
         return _build_literacy_opening_turn(name, student, state, onboarding_status)
@@ -761,6 +763,8 @@ def _has_child_name(messages: list[dict[str, str]]) -> bool:
         if message.get("role") != "user":
             continue
         text = message.get("content", "").strip()
+        if _looks_like_phone_system_response(text):
+            continue
         if re.search(r"\b(?:my name is|i am|i'm|its|it's)\s+[A-Za-z]", text, re.I):
             return True
         if extract_numbers(text):
@@ -768,6 +772,20 @@ def _has_child_name(messages: list[dict[str, str]]) -> bool:
         if 1 <= len(text.split()) <= 3 and not re.search(r"\d|\b(yes|no|okay|hello|hi|ready)\b", text, re.I):
             return True
     return False
+
+
+def _looks_like_phone_system_response(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b("
+            r"not available|currently unavailable|unavailable|not reachable|"
+            r"switched off|line busy|mailbox|voice ?mail|"
+            r"leave (?:a )?message|record (?:your )?message|"
+            r"finished recording|after the tone|try again later|hang up"
+            r")\b",
+            str(text or "").lower(),
+        )
+    )
 
 
 def onboarding_status_from_messages(messages: list[dict[str, str]]) -> str:

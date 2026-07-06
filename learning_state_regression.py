@@ -1071,6 +1071,20 @@ def main() -> int:
         ]) is None,
     )
     ok &= check(
+        "name_prompt_rejects_phone_system_unavailable",
+        extract_child_name([
+            {"role": "assistant", "content": "What is your name?"},
+            {"role": "user", "content": "Not available."},
+        ]) is None,
+    )
+    ok &= check(
+        "name_prompt_rejects_explicit_unavailable",
+        extract_child_name([
+            {"role": "assistant", "content": "What is your name?"},
+            {"role": "user", "content": "I am not available."},
+        ]) is None,
+    )
+    ok &= check(
         "name_capture_rejects_sentence_without_name_prompt",
         extract_child_name([
             {"role": "assistant", "content": "Say: I am going to school."},
@@ -1083,6 +1097,29 @@ def main() -> int:
             {"role": "assistant", "content": "What is your name?"},
             {"role": "user", "content": "I'm Bonnie."},
         ]) == "Bonnie",
+    )
+    stale_name_opening = build_opening_turn(
+        {"name": "Naomi", "current_module": 0},
+        {"current_module": 0, "diagnostic_status": "not_started", "onboarding_status": "needs_name"},
+    )
+    ok &= check(
+        "known_name_stale_onboarding_does_not_ask_name",
+        "your name" not in stale_name_opening.lower()
+        and "do you go to school" in stale_name_opening.lower(),
+        stale_name_opening,
+    )
+    stale_name_stats = analyze_session(
+        {"name": "Naomi", "current_module": 0, "learning_state": {"onboarding_status": "needs_name"}},
+        [
+            {"role": "assistant", "content": "What is your name?"},
+            {"role": "user", "content": "Not available."},
+        ],
+    )
+    ok &= check(
+        "known_name_carrier_audio_does_not_replace_name",
+        stale_name_stats.child_name is None
+        and stale_name_stats.learning_state["onboarding_status"] == "needs_school",
+        str(stale_name_stats),
     )
 
     memory = StudentMemory.__new__(StudentMemory)

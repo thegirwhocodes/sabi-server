@@ -33,6 +33,11 @@ from learning_state import (
     route_next_course_after_session,
 )
 from mastery_probe import probe_capture_payload, session_probe_score
+from pilot_research_design import (
+    build_research_state,
+    initial_research_payload,
+    research_capture_payload,
+)
 from teacher_notes import generate_teacher_note
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
@@ -79,6 +84,16 @@ OPTIONAL_STUDENT_COLUMNS = {
     "latest_probe_score",
     "latest_probe_at",
     "probe_history",
+    "research_state",
+    "research_measurements",
+    "study_stage",
+    "study_arm",
+    "latest_assessment_phase",
+    "next_assessment_due",
+    "baseline_assessment_at",
+    "midline_assessment_at",
+    "endline_assessment_at",
+    "retention_assessment_at",
 }
 
 OPTIONAL_SESSION_COLUMNS = {
@@ -330,10 +345,19 @@ class StudentMemory:
                 correct_count=stats.correct_count,
                 wrong_count=stats.wrong_count,
             )
+            call_count_after = int(student.get("total_sessions") or 0) + 1
+            research_payload = research_capture_payload(
+                student,
+                learning_state=persisted_learning_state,
+                call_count_after=call_count_after,
+                probe_score=probe_score,
+                source=probe_source,
+                duration_seconds=duration_seconds,
+            )
             update_payload = {
                 **_identity_payload_for_existing_row(student, normalized_phone, identity_name),
                 "name": identity_name,
-                "total_sessions": (student.get("total_sessions") or 0) + 1,
+                "total_sessions": call_count_after,
                 "total_correct": (student.get("total_correct") or 0) + stats.correct_count,
                 "total_wrong": (student.get("total_wrong") or 0) + stats.wrong_count,
                 "current_level": stats.current_level,
@@ -354,6 +378,7 @@ class StudentMemory:
                 "last_teacher_note": teacher_note,
                 **_baseline_capture_payload(student, persisted_learning_state),
                 **probe_capture_payload(student, session_score=probe_score, source=probe_source),
+                **research_payload,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             update_payload = {key: value for key, value in update_payload.items() if value is not None}
@@ -454,6 +479,7 @@ class StudentMemory:
                 "total_sessions": 0,
                 "total_correct": 0,
                 "total_wrong": 0,
+                **initial_research_payload({"phone_number": normalized_phone, "name": child_name}),
             }
             try:
                 result = self._insert_student_with_fallback(insert_payload)
@@ -511,6 +537,7 @@ class StudentMemory:
             "total_sessions": 0,
             "total_correct": 0,
             "total_wrong": 0,
+            **initial_research_payload({"phone_number": normalized_phone, "name": child_name}),
         }
         try:
             result = self._insert_student_with_fallback(insert_payload)
@@ -1078,6 +1105,7 @@ class StudentMemory:
             "total_sessions": 0,
             "total_correct": 0,
             "total_wrong": 0,
+            **initial_research_payload({"phone_number": normalized_phone, "name": child_name}),
         }
         try:
             result = self._insert_student_with_fallback(insert_payload)
@@ -1551,6 +1579,16 @@ def build_learner_mastery_map(student: dict, effective_state: dict | None) -> di
 
 def _student_review_record(student: dict, effective_state: dict, sessions: list[dict]) -> dict:
     identity = _student_display_identity(student)
+    research_state = student.get("research_state") if isinstance(student.get("research_state"), dict) else None
+    if research_state is None:
+        research_state = build_research_state(
+            {
+                **student,
+                "effective_state": effective_state,
+                "research_measurements": student.get("research_measurements"),
+            },
+            calls_completed=student.get("total_sessions") or len(sessions),
+        )
     return {
         "id": student.get("id"),
         "name": student.get("name"),
@@ -1585,6 +1623,16 @@ def _student_review_record(student: dict, effective_state: dict, sessions: list[
         "baseline_probe_score": student.get("baseline_probe_score"),
         "latest_probe_score": student.get("latest_probe_score"),
         "probe_history": student.get("probe_history"),
+        "research_state": research_state,
+        "research_measurements": student.get("research_measurements") or research_state.get("measurements"),
+        "study_stage": student.get("study_stage") or research_state.get("study_stage"),
+        "study_arm": student.get("study_arm") or (research_state.get("assignment") or {}).get("arm"),
+        "latest_assessment_phase": student.get("latest_assessment_phase"),
+        "next_assessment_due": student.get("next_assessment_due") or (research_state.get("assessment_status") or {}).get("next_due_phase"),
+        "baseline_assessment_at": student.get("baseline_assessment_at"),
+        "midline_assessment_at": student.get("midline_assessment_at"),
+        "endline_assessment_at": student.get("endline_assessment_at"),
+        "retention_assessment_at": student.get("retention_assessment_at"),
         "consent_status": student.get("consent_status"),
         "consent_recorded": student.get("consent_recorded"),
         "participant_type": student.get("participant_type"),

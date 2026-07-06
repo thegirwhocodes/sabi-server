@@ -618,6 +618,8 @@ def _pilot_evidence_csv(report: dict) -> str:
 
     fields = [
         "id", "name", "consented",
+        "study_stage", "study_arm", "next_assessment_due",
+        "pre_baseline_recorded", "midline_recorded", "post_endline_recorded", "retention_recorded",
         "numeracy_baseline", "numeracy_current", "numeracy_levels_gained", "numeracy_mastered_modules",
         "literacy_baseline", "literacy_current", "literacy_levels_gained", "literacy_mastered_modules",
         "calls", "minutes", "hours", "second_call_returned",
@@ -632,8 +634,14 @@ def _pilot_evidence_csv(report: dict) -> str:
         dosage = child.get("dosage") or {}
         totals = child.get("totals") or {}
         probe = child.get("probe") or {}
+        research = child.get("research") or {}
+        assignment = research.get("assignment") or {}
+        status = research.get("assessment_status") or {}
+        phases = {str(item.get("phase")) for item in (research.get("measurements") or []) if isinstance(item, dict)}
         writer.writerow([
             child.get("id"), child.get("name"), child.get("consented"),
+            research.get("study_stage"), assignment.get("arm"), status.get("next_due_phase"),
+            "pre_baseline" in phases, "midline" in phases, "post_endline" in phases, "retention_followup" in phases,
             num.get("baseline_level"), num.get("current_level"), num.get("levels_gained"), num.get("mastered_modules"),
             lit.get("baseline_level"), lit.get("current_level"), lit.get("levels_gained"), lit.get("mastered_modules"),
             dosage.get("calls"), dosage.get("minutes"), dosage.get("hours"), dosage.get("second_call_returned"),

@@ -58,11 +58,15 @@ def main() -> int:
     ok &= check("probe_effect_size_present", cohort["probe"]["n_paired"] == 3 and cohort["probe"]["effect_size_d"] is not None, cohort["probe"])
     ok &= check("cost_sd_per_dollar", cohort["cost"]["sd_per_dollar"] is not None, cohort["cost"])
     ok &= check("benchmarks_included", "connected" in report["benchmarks"] and "rori" in report["benchmarks"])
+    ok &= check("research_protocol_rollup_present", cohort["research"]["stage"] == "ten_child_prepilot", cohort["research"])
+    ok &= check("research_arm_distribution_present", cohort["research"]["arm_distribution"].get("measured_sabi_pre_pilot") == 3, cohort["research"])
+    ok &= check("research_design_note_present", "research_design" in report["notes"], report["notes"])
 
     # Child record shape and no-baseline handling.
     rec = child_evidence(_child("cx", None, 3, 5, 1500))
     ok &= check("levels_gained_none_without_baseline", rec["numeracy"]["levels_gained"] is None, rec["numeracy"])
     ok &= check("dosage_hours_computed", rec["dosage"]["hours"] == round(1500 / 3600, 2), rec["dosage"])
+    ok &= check("child_research_assignment_present", rec["research"]["assignment"]["arm"] == "measured_sabi_pre_pilot", rec["research"])
 
     # Empty cohort is safe.
     empty = build_pilot_evidence_report([])
@@ -78,6 +82,11 @@ def main() -> int:
     ok &= check(
         "gate6_evidence_includes_movement",
         any("up 1+ numeracy level" in e for e in ten_child["evidence"]),
+        ten_child["evidence"],
+    )
+    ok &= check(
+        "gate6_evidence_includes_protocol_counts",
+        any("pre/mid/post records" in e for e in ten_child["evidence"]),
         ten_child["evidence"],
     )
 

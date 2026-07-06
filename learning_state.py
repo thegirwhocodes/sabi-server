@@ -19,6 +19,7 @@ from diagnostic_flow import (
     onboarding_status_from_messages,
 )
 from numeric_grading import analyze_latest_numeric_turn
+from pilot_research_design import build_research_state, research_prompt_block
 
 
 MODULE_NAMES = {
@@ -315,6 +316,7 @@ def default_learning_state() -> dict[str, Any]:
             "active_skill": "phonemic_awareness_beginning",
             "next_step": "Run a warm sound-and-story diagnostic disguised as a game.",
         },
+        "research": build_research_state({}),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -326,6 +328,11 @@ def merge_learning_state(student: dict[str, Any] | None) -> dict[str, Any]:
     existing = student.get("learning_state")
     if isinstance(existing, dict):
         state.update(existing)
+    research_state = student.get("research_state")
+    if isinstance(research_state, dict):
+        state["research"] = research_state
+    elif not isinstance(state.get("research"), dict):
+        state["research"] = build_research_state(student)
     current_module = student.get("current_module")
     if isinstance(current_module, int):
         state["current_module"] = current_module
@@ -490,15 +497,13 @@ def _looks_like_total_spend_question(question_lower: str) -> bool:
 def extract_child_name(messages: list[dict[str, str]]) -> str | None:
     non_names = {
         "yes", "no", "okay", "ok", "hello", "hi", "ready", "thank you",
-        "thanks", "i don't know", "i dont know", "and some", "numerous",
+        "thanks", "sorry", "i'm sorry", "im sorry", "i am sorry",
+        "i don't know", "i dont know", "and some", "numerous",
     }
     for index, message in enumerate(messages[:8]):
         if message.get("role") != "user":
             continue
         text = message.get("content", "").strip()
-        match = re.search(r"\b(?:my name is|i am|i'm|its|it's)\s+([A-Za-z][A-Za-z' -]{1,30})", text, re.I)
-        if match:
-            return _clean_name(match.group(1))
         normalized = re.sub(r"[^a-z' ]", "", text.lower()).strip()
         previous_assistant = ""
         for prev_index in range(index - 1, -1, -1):
@@ -506,6 +511,13 @@ def extract_child_name(messages: list[dict[str, str]]) -> str | None:
                 previous_assistant = messages[prev_index].get("content", "").lower()
                 break
         asked_name = "your name" in previous_assistant or "tell me your name" in previous_assistant
+        match = re.search(r"\b(my name is|i am|i'm|its|it's)\s+([A-Za-z][A-Za-z' -]{1,30})", text, re.I)
+        if match:
+            phrase = match.group(1).lower()
+            candidate = _clean_name(match.group(2))
+            if candidate and candidate.lower() not in non_names:
+                if phrase == "my name is" or asked_name:
+                    return candidate
         if (
             asked_name
             and 1 <= len(text.split()) <= 3
@@ -648,6 +660,7 @@ def build_learning_state_prompt(student: dict[str, Any] | None) -> str:
     if not isinstance(scaffold_ladder, dict):
         scaffold_ladder = scaffold_ladder_for(state.get("repair_skill") or active_skill, scaffold_depth, wrong_streak)
     ladder_block = _scaffold_ladder_prompt(scaffold_ladder, wrong_streak, scaffold_depth)
+    research_block = research_prompt_block(state.get("research"))
 
     return f"""
 
@@ -669,6 +682,7 @@ def build_learning_state_prompt(student: dict[str, Any] | None) -> str:
 - Literacy TaRL reading level: {(state.get('literacy') or {}).get('tarl_reading_level', 0)}
 - Active literacy skill: {(state.get('literacy') or {}).get('active_skill', 'phonemic_awareness_beginning')}
 - Literacy next step: {(state.get('literacy') or {}).get('next_step', 'Run the oral literacy diagnostic when literacy mode is selected.')}
+{research_block}
 {ladder_block}
 If wrong streak is 2 or more, do the proposed bump-down behavior immediately:
 1. Stop increasing difficulty.

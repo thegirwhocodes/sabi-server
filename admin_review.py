@@ -498,19 +498,36 @@ def render_admin_review_page() -> str:
     }
     .branch-link {
       fill: none;
-      stroke: #2f302d;
-      stroke-width: 2.2;
+      stroke: #b9b0a0;
+      stroke-width: 2;
       stroke-linecap: round;
       stroke-linejoin: round;
-      opacity: .56;
+      opacity: .36;
       vector-effect: non-scaling-stroke;
       transition: opacity 180ms ease, stroke-width 180ms ease;
     }
-    .branch-link.route-spine, .branch-link.route-completed { stroke: #30322d; }
-    .branch-link.route-onlevel { stroke: #80611f; }
-    .branch-link.route-lower { stroke: #1f7a46; stroke-dasharray: 8 6; }
-    .branch-link.route-higher { stroke: #1f7180; }
-    .branch-link.route-rejoin { stroke: #506455; stroke-dasharray: 4 5; }
+    .branch-link.route-spine, .branch-link.route-completed { stroke: #9f9788; }
+    .branch-link.route-onlevel { stroke: #b7ad99; }
+    .branch-link.route-lower { stroke: #92b99e; stroke-dasharray: 8 6; }
+    .branch-link.route-higher { stroke: #9cb8bd; }
+    .branch-link.route-rejoin { stroke: #9fb3a4; stroke-dasharray: 4 5; }
+    .branch-link.path-past {
+      stroke: #1e7b43;
+      stroke-width: 3.8;
+      opacity: .92;
+      stroke-dasharray: none;
+    }
+    .branch-link.path-current {
+      stroke: var(--gold);
+      stroke-width: 4;
+      opacity: .96;
+      stroke-dasharray: none;
+    }
+    .branch-link.path-future {
+      stroke: #b8af9d;
+      stroke-width: 1.8;
+      opacity: .34;
+    }
     .branch-link.active {
       opacity: 1;
       stroke-width: 3.4;
@@ -526,6 +543,7 @@ def render_admin_review_page() -> str:
       stroke: rgba(242,240,232,.88);
       stroke-width: 5px;
       stroke-linejoin: round;
+      dominant-baseline: middle;
     }
     .branch-zone-label.dim { opacity: .28; }
     .branch-node {
@@ -555,6 +573,10 @@ def render_admin_review_page() -> str:
     .branch-node.extension-current .branch-node-dot,
     .branch-node.extension-future .branch-node-dot { fill: #d9f0f2; stroke: #1f7180; }
     .branch-node.future .branch-node-dot, .branch-node.planned .branch-node-dot { fill: #f4efe2; stroke: #57544c; }
+    .branch-node.progress-future .branch-node-dot { fill: #eee8da; stroke: #aba18e; }
+    .branch-node.progress-future { opacity: .64; }
+    .branch-node.progress-past .branch-node-dot { fill: #1e7b43; stroke: #0f5d2f; }
+    .branch-node.progress-current .branch-node-dot { filter: drop-shadow(0 0 0.35rem rgba(203,168,104,.6)); }
     .branch-node:hover .branch-node-halo,
     .branch-node.selected .branch-node-halo {
       opacity: 1;
@@ -566,6 +588,31 @@ def render_admin_review_page() -> str:
     }
     .branch-node.dim { opacity: .28; }
     .branch-node-hit { fill: transparent; }
+    .branch-node-number {
+      fill: #1f1d18;
+      font-size: 7.5px;
+      font-weight: 800;
+      text-anchor: middle;
+      dominant-baseline: central;
+      pointer-events: none;
+    }
+    .branch-node.current .branch-node-number,
+    .branch-node.completed .branch-node-number,
+    .branch-node.extension-current .branch-node-number { fill: #fffaf0; }
+    .branch-node.module-gate .branch-node-number { font-size: 7px; }
+    .branch-current-badge {
+      fill: #1f1d18;
+      font-size: 8.5px;
+      font-weight: 800;
+      text-anchor: middle;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      pointer-events: none;
+      paint-order: stroke;
+      stroke: #f7f2e7;
+      stroke-width: 3px;
+      stroke-linejoin: round;
+    }
     .branch-label {
       fill: #241f16;
       font-family: var(--sans);
@@ -1567,6 +1614,24 @@ def render_admin_review_page() -> str:
       if (!entries.length) return `<span class="small">No baseline/current pairs yet.</span>`;
       return entries.map(([level, count]) => `<span class="skill-chip">L${escapeHtml(level)}: ${escapeHtml(count)}</span>`).join("");
     }
+    function phaseLabel(phase) {
+      const map = {
+        pre_baseline: "pre",
+        midline: "mid",
+        post_endline: "post",
+        retention_followup: "retention",
+        monitoring: "monitor",
+      };
+      return map[phase] || String(phase || "pending").replaceAll("_", " ");
+    }
+    function phaseRecorded(research, phase) {
+      return (research?.measurements || []).some(item => item && item.phase === phase);
+    }
+    function distributionChips(dist) {
+      const entries = Object.entries(dist || {});
+      if (!entries.length) return `<span class="small">No arms recorded yet.</span>`;
+      return entries.map(([label, count]) => `<span class="skill-chip">${escapeHtml(label.replaceAll("_", " "))}: ${escapeHtml(count)}</span>`).join("");
+    }
     function renderPilotEvidenceView() {
       staticRange("Cohort evidence");
       const report = state.pilotEvidence || {};
@@ -1576,6 +1641,9 @@ def render_admin_review_page() -> str:
       const probe = cohort.probe || {};
       const dosage = cohort.dosage || {};
       const cost = cohort.cost || {};
+      const research = cohort.research || {};
+      const measurementCounts = research.measurement_counts || {};
+      const readiness = research.rct_readiness || {};
       const benchmarks = report.benchmarks || {};
       const children = report.children || [];
       const rows = children.map(child => {
@@ -1583,13 +1651,19 @@ def render_admin_review_page() -> str:
         const litC = child.literacy || {};
         const dose = child.dosage || {};
         const gain = child.probe?.gain;
+        const childResearch = child.research || {};
+        const assignment = childResearch.assignment || {};
+        const assessment = childResearch.assessment_status || {};
         return `<tr>
           <td><div class="user-name">${escapeHtml(child.name || child.id || "Child")}</div></td>
           <td>${pill(child.consented ? "consented" : "pending", child.consented ? "good" : "warn")}</td>
+          <td>${escapeHtml((assignment.arm || "pending").replaceAll("_", " "))}</td>
+          <td>${pill(phaseLabel(assessment.next_due_phase), assessment.next_due_phase === "monitoring" ? "good" : "gold")}</td>
           <td>${escapeHtml(numC.baseline_level ?? "—")} → ${escapeHtml(numC.current_level ?? "—")}${numC.levels_gained != null ? ` (${numC.levels_gained >= 0 ? "+" : ""}${escapeHtml(numC.levels_gained)})` : ""}</td>
           <td>${escapeHtml(litC.baseline_level ?? "—")} → ${escapeHtml(litC.current_level ?? "—")}</td>
           <td>${escapeHtml(dose.calls || 0)} / ${escapeHtml(dose.hours || 0)}h</td>
           <td>${gain != null ? escapeHtml(gain) : "—"}</td>
+          <td>${["pre_baseline", "midline", "post_endline"].map(phase => pill(phaseLabel(phase), phaseRecorded(childResearch, phase) ? "good" : "soft")).join(" ")}</td>
         </tr>`;
       }).join("");
       tableWrap.innerHTML = `<div class="overview-layout">
@@ -1608,6 +1682,17 @@ def render_admin_review_page() -> str:
             ${pill(probe.effect_size_d != null ? `d=${probe.effect_size_d}` : "probe pending", probe.effect_size_d >= 0.3 ? "good" : "soft")}
             <strong>Probe effect size</strong>
             <p>${escapeHtml(probe.n_paired || 0)} paired probes · mean gain ${escapeHtml(probe.mean_gain ?? "—")} · target d ≥ 0.30.</p>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row"><h3>RCT-ready measurement protocol</h3><span class="section-caption">TEP assessment validity + TaRL placement/remediation/reassessment</span></div>
+          <div class="detail-grid">
+            <div class="feedback-card"><strong>${escapeHtml(research.stage_label || "10-child pre-pilot")}</strong><p>${escapeHtml(research.design || "Pre/mid/post protocol pending.")}</p></div>
+            <div class="feedback-card"><strong>Pre / mid / post records</strong><p>${escapeHtml(measurementCounts.pre_baseline || 0)} baseline · ${escapeHtml(measurementCounts.midline || 0)} midline · ${escapeHtml(measurementCounts.post_endline || 0)} endline · ${escapeHtml(measurementCounts.retention_followup || 0)} retention.</p></div>
+            <div class="feedback-card"><strong>Study arms</strong><div class="skill-chips">${distributionChips(research.arm_distribution)}</div></div>
+            <div class="feedback-card"><strong>Claim boundary</strong><p>${escapeHtml(research.claim_boundary || "The 10-child pre-pilot is RCT-ready operational evidence, not a publishable RCT effect claim.")}</p></div>
+            <div class="feedback-card"><strong>Assignment recorded</strong><p>${escapeHtml(readiness.assignment_recorded || 0)} child records carry arm metadata for later evaluator review.</p></div>
+            <div class="feedback-card"><strong>Next design step</strong><p>${escapeHtml(research.next_design_step || "Complete the pre/mid/post evidence loop before scaling.")}</p></div>
           </div>
         </div>
         <div class="command-grid">
@@ -1637,9 +1722,9 @@ def render_admin_review_page() -> str:
           <div class="section-title-row"><h3>Per-child evidence</h3><span class="section-caption">${escapeHtml(children.length)} rows · export for funder due diligence</span></div>
           <table>
             <thead><tr>
-              <th>Child</th><th>Consent</th><th>Num level</th><th>Lit level</th><th>Dosage</th><th>Probe gain</th>
+              <th>Child</th><th>Consent</th><th>Arm</th><th>Next probe</th><th>Num level</th><th>Lit level</th><th>Dosage</th><th>Probe gain</th><th>Pre/mid/post</th>
             </tr></thead>
-            <tbody>${rows || `<tr><td colspan="6"><div class="empty">No child evidence yet. Enroll consented children and complete diagnostics first.</div></td></tr>`}</tbody>
+            <tbody>${rows || `<tr><td colspan="9"><div class="empty">No child evidence yet. Enroll consented children and complete diagnostics first.</div></td></tr>`}</tbody>
           </table>
         </div>
         <div class="quote">${escapeHtml((report.notes || {}).primary_outcome || "")} ${escapeHtml((report.notes || {}).child_only || "")}</div>
@@ -1897,6 +1982,8 @@ def render_admin_review_page() -> str:
         status: node.status || "",
         branch_label: node.branch_label || "",
         kind: node.kind || "",
+        progress_label: node.progress_label || "",
+        progress_detail: node.progress_detail || "",
       };
     }
     function branchRenderDetail(node) {
@@ -1909,6 +1996,7 @@ def render_admin_review_page() -> str:
         node.example ? `<p><strong>Ask the child:</strong> ${escapeHtml(node.example)}</p>` : "",
         node.rebuild ? `<p><strong>After success:</strong> ${escapeHtml(node.rebuild)}</p>` : "",
         node.branch_label ? `<p><strong>Branch:</strong> ${escapeHtml(node.branch_label)}</p>` : "",
+        node.progress_detail ? `<p><strong>Progress marker:</strong> ${escapeHtml(node.progress_label || "")}${node.progress_label ? " · " : ""}${escapeHtml(node.progress_detail)}</p>` : "",
         `<p><strong>Status:</strong> ${escapeHtml(status)}</p>`,
       ];
       return parts.filter(Boolean).join("");
@@ -1936,6 +2024,27 @@ def render_admin_review_page() -> str:
       if (fromRoute === "rejoin" || toRoute === "rejoin") return "rejoin";
       if (fromRoute === "onlevel" || toRoute === "onlevel") return "onlevel";
       return "spine";
+    }
+    function branchGraphProgressClass(node) {
+      const status = String((node?.raw || {}).status || "");
+      if (status === "current" || status === "support_current" || status === "extension_current") return "progress-current";
+      if (status === "completed" || status === "support_completed") return "progress-past";
+      return "progress-future";
+    }
+    function branchGraphEdgeProgressClass(edge) {
+      const fromStatus = String((edge?.from?.raw || {}).status || "");
+      const toStatus = String((edge?.to?.raw || {}).status || "");
+      const statuses = [fromStatus, toStatus];
+      if (toStatus === "current" || toStatus === "support_current" || toStatus === "completed" || toStatus === "support_completed") {
+        return "path-past";
+      }
+      if (statuses.includes("extension_current")) {
+        return "path-current";
+      }
+      if (fromStatus === "completed" || fromStatus === "support_completed") {
+        return "path-past";
+      }
+      return "path-future";
     }
     function branchGraphWalk(root) {
       const nodes = [];
@@ -2008,6 +2117,8 @@ def render_admin_review_page() -> str:
           title: fields.title || "",
           concept: fields.concept || "",
           branch_label: fields.branch_label || "",
+          progress_label: fields.progress_label || "",
+          progress_detail: fields.progress_detail || "",
         },
         key: id,
         depth: fields.depth || 0,
@@ -2021,6 +2132,8 @@ def render_admin_review_page() -> str:
           title: fields.title || "",
           concept: fields.concept || "",
           branch_label: fields.branch_label || "",
+          progress_label: fields.progress_label || "",
+          progress_detail: fields.progress_detail || "",
         }),
         route: "higher",
       };
@@ -2039,6 +2152,8 @@ def render_admin_review_page() -> str:
         status,
         depth: current.depth + 1,
         title: "Higher path",
+        progress_label: "H",
+        progress_detail: "Higher-path branch",
         branch_label: "Higher path · child is ready to stretch",
         concept: "If the child shows mastery, Sabi can compress review and let the curriculum move upward sooner.",
       });
@@ -2047,6 +2162,8 @@ def render_admin_review_page() -> str:
         depth: current.depth + 2,
         code: "Above-level check",
         title: "Stretch check",
+        progress_label: "+1",
+        progress_detail: "One harder transfer check",
         concept: "Ask one harder transfer question before moving them ahead.",
       });
       const compact = branchGraphSyntheticNode(`${current.key}-compact-review`, {
@@ -2054,6 +2171,8 @@ def render_admin_review_page() -> str:
         depth: current.depth + 3,
         code: "Fast route",
         title: "Compact review",
+        progress_label: "F",
+        progress_detail: "Fast route with compacted review",
         concept: "Skip repeated practice, keep one quick retrieval check, then rejoin the future path.",
       });
       [branch, stretch, compact].forEach(node => {
@@ -2120,9 +2239,9 @@ def render_admin_review_page() -> str:
         lanes,
         positions,
         zoneLabels: [
-          { key: "higher", label: "moves ahead", x: 260, y: lanes.higher - 28 },
-          { key: "onlevel", label: "keeps going", x: 450, y: lanes.onlevel - 28 },
-          { key: "lower", label: "needs support", x: 390, y: lanes.lower - 28 },
+          { key: "higher", label: "moves ahead", x: 300, y: lanes.higher - 4 },
+          { key: "onlevel", label: "keeps going", x: 470, y: lanes.onlevel - 4 },
+          { key: "lower", label: "needs support", x: 400, y: lanes.lower - 4 },
         ],
       };
     }
@@ -2146,6 +2265,12 @@ def render_admin_review_page() -> str:
       if (!node.children.length && raw.kind === "lesson") return preview(title, 18);
       return "";
     }
+    function branchGraphMarker(node) {
+      const raw = node?.raw || {};
+      const marker = String(raw.progress_label || "").trim();
+      if (!marker) return "";
+      return marker.length > 4 ? marker.slice(0, 4) : marker;
+    }
     function branchGraphNodeRadius(node) {
       const status = String((node.raw || {}).status || "");
       const kind = String((node.raw || {}).kind || "");
@@ -2159,7 +2284,8 @@ def render_admin_review_page() -> str:
       graph.layout = layout;
       const edgeHtml = graph.edges.map(edge => {
         const route = escapeHtml(edge.route || "spine");
-        return `<path class="branch-link route-${route}" data-edge-index="${edge.index}" data-route="${route}" d="${branchGraphPath(edge, layout)}"></path>`;
+        const progressClass = escapeHtml(branchGraphEdgeProgressClass(edge));
+        return `<path class="branch-link route-${route} ${progressClass}" data-edge-index="${edge.index}" data-route="${route}" d="${branchGraphPath(edge, layout)}"></path>`;
       }).join("");
       const zoneHtml = layout.zoneLabels.map(zone =>
         `<text class="branch-zone-label" data-zone="${escapeHtml(zone.key)}" x="${zone.x}" y="${zone.y}">${escapeHtml(zone.label)}</text>`
@@ -2169,13 +2295,20 @@ def render_admin_review_page() -> str:
         const payload = escapeHtml(JSON.stringify(node.payload));
         const statusClass = escapeHtml(branchGraphStatusClass(node.raw));
         const route = escapeHtml(node.route || "spine");
+        const progressClass = escapeHtml(branchGraphProgressClass(node));
         const label = branchGraphLabel(node);
         const radius = branchGraphNodeRadius(node);
+        const marker = branchGraphMarker(node);
         const labelEl = label ? `<text class="branch-label ${statusClass}" y="${radius + 20}">${escapeHtml(label)}</text>` : "";
-        return `<g class="branch-node ${statusClass} route-${route}" data-node-id="${escapeHtml(node.key)}" data-node="${payload}" data-status="${escapeHtml(node.raw.status || "")}" data-kind="${escapeHtml(node.raw.kind || "")}" data-route="${route}" style="transform: translate(${pos.x}px, ${pos.y}px);">
+        const currentBadge = (statusClass === "current" || statusClass === "support-current" || statusClass === "extension-current")
+          ? `<text class="branch-current-badge" y="${-(radius + 14)}">now</text>`
+          : "";
+        return `<g class="branch-node ${statusClass} ${progressClass} route-${route}" data-node-id="${escapeHtml(node.key)}" data-node="${payload}" data-status="${escapeHtml(node.raw.status || "")}" data-kind="${escapeHtml(node.raw.kind || "")}" data-route="${route}" style="transform: translate(${pos.x}px, ${pos.y}px);">
           <circle class="branch-node-halo" r="${radius + 12}"></circle>
           <circle class="branch-node-hit" r="${radius + 13}"></circle>
           <circle class="branch-node-dot" r="${radius}"></circle>
+          ${marker ? `<text class="branch-node-number">${escapeHtml(marker)}</text>` : ""}
+          ${currentBadge}
           ${labelEl}
         </g>`;
       }).join("");

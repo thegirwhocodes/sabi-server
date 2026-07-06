@@ -54,11 +54,22 @@ def build_launch_gate_report(
         lit_move = tarl.get("literacy") or {}
         moved_up = int(num_move.get("children_up_one_plus_level") or 0) + int(lit_move.get("children_up_one_plus_level") or 0)
         learning_movement_ok = moved_up >= 1
+        research = cohort.get("research") or {}
+        readiness = research.get("rct_readiness") or {}
+        measurement_counts = research.get("measurement_counts") or {}
         movement_evidence = [
             f"{num_move.get('children_up_one_plus_level') or 0} children up 1+ numeracy level (pct {num_move.get('pct_up_one_plus_level')})",
             f"{lit_move.get('children_up_one_plus_level') or 0} children up 1+ literacy level (pct {lit_move.get('pct_up_one_plus_level')})",
             f"{(cohort.get('mastery') or {}).get('skills_mastered_total', 0)} skill-modules mastered across cohort",
             f"probe effect size d={ (cohort.get('probe') or {}).get('effect_size_d') }",
+            f"RCT-ready protocol: {research.get('stage_label', '10-child pre-pilot')}",
+            (
+                "pre/mid/post records: "
+                f"{measurement_counts.get('pre_baseline', readiness.get('baseline_records', 0))}/"
+                f"{measurement_counts.get('midline', readiness.get('midline_records', 0))}/"
+                f"{measurement_counts.get('post_endline', readiness.get('endline_records', 0))}"
+            ),
+            f"study arms recorded: {readiness.get('assignment_recorded', 0)}",
         ]
 
     gates = [
@@ -154,7 +165,7 @@ def build_launch_gate_report(
                 "Target: 10 consented children, 80% first-call completion, 50% second-call return",
                 *movement_evidence,
             ],
-            next_action="Finish consent, child profile linkage, first-call reviews, second-call return, and show measurable TaRL level movement (see /admin/pilot-evidence).",
+            next_action="Finish consent, child profile linkage, first-call reviews, second-call return, pre/mid/post probe capture, and measurable TaRL level movement (see /admin/pilot-evidence).",
         ),
     ]
 
@@ -253,4 +264,3 @@ def _is_child_profile(record: dict[str, Any]) -> bool:
         or "school" in school
         or has_pilot_fields
     )
-

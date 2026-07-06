@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Regression checks for Sabi's TEP/TaRL/RCT-ready pilot protocol."""
+
+from __future__ import annotations
+
+import sys
+
+from pilot_research_design import (
+    ASSESSMENT_PHASES,
+    PROTOCOL_VERSION,
+    assignment_for_student,
+    build_research_state,
+    cohort_research_rollup,
+    research_capture_payload,
+    research_prompt_block,
+)
+
+
+def check(name: str, condition: bool, detail: object = "") -> bool:
+    status = "PASS" if condition else "FAIL"
+    print(f"{status} {name}" + (f" - {detail}" if detail and not condition else ""))
+    return bool(condition)
+
+
+def main() -> int:
+    ok = True
+    student = {
+        "id": "kid-1",
+        "phone_number_normalized": "+2348000000001",
+        "participant_type": "child",
+        "baseline_tarl_level": 0,
+        "learning_state": {"tarl_level": 1, "literacy": {"tarl_reading_level": 0}},
+    }
+
+    state = build_research_state(student, calls_completed=0)
+    ok &= check("uses_protocol_version", state["protocol_version"] == PROTOCOL_VERSION, state)
+    ok &= check("default_stage_is_prepilot", state["study_stage"] == "ten_child_prepilot", state)
+    ok &= check("prep_pilot_single_arm", state["assignment"]["arm"] == "measured_sabi_pre_pilot", state["assignment"])
+    ok &= check("baseline_due_first", state["assessment_status"]["next_due_phase"] == "pre_baseline", state["assessment_status"])
+    ok &= check("prompt_mentions_claim_boundary", "not powered as an RCT" in research_prompt_block(state), research_prompt_block(state))
+
+    capture = research_capture_payload(
+        student,
+        learning_state={"diagnostic_status": "done", "tarl_level": 1, "course": "numeracy", "literacy": {"tarl_reading_level": 0}},
+        call_count_after=1,
+        probe_score=0.4,
+        source="diagnostic_baseline",
+        duration_seconds=360,
+    )
+    ok &= check("captures_pre_baseline_measurement", capture["research_measurements"][0]["phase"] == "pre_baseline", capture)
+    ok &= check("next_due_midline_after_baseline", capture["next_assessment_due"] == "midline" or capture["next_assessment_due"] == "monitoring", capture)
+
+    micro = assignment_for_student(student, stage="thirty_child_micro_rct")
+    ok &= check("micro_rct_assigns_comparison_arm", micro["arm"] in {"daily_sabi", "waitlist_then_sabi"}, micro)
+    full = assignment_for_student(student, stage="three_hundred_child_rct")
+    ok &= check("full_rct_assigns_three_arm_design", full["arm"] in {"daily_sabi", "light_touch_sabi", "waitlist_then_sabi"}, full)
+
+    rollup = cohort_research_rollup([
+        {"research": capture["research_state"]},
+        {"research": build_research_state({"id": "kid-2"}, calls_completed=0)},
+    ])
+    ok &= check("rollup_counts_baseline", rollup["measurement_counts"]["pre_baseline"] == 1, rollup)
+    ok &= check("rollup_includes_all_phases", all(phase in rollup["measurement_counts"] for phase in ASSESSMENT_PHASES), rollup)
+
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

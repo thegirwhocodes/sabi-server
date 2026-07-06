@@ -1063,6 +1063,27 @@ def main() -> int:
             {"role": "user", "content": "Thank you"},
         ]) is None,
     )
+    ok &= check(
+        "name_prompt_rejects_apology",
+        extract_child_name([
+            {"role": "assistant", "content": "What is your name?"},
+            {"role": "user", "content": "I'm sorry."},
+        ]) is None,
+    )
+    ok &= check(
+        "name_capture_rejects_sentence_without_name_prompt",
+        extract_child_name([
+            {"role": "assistant", "content": "Say: I am going to school."},
+            {"role": "user", "content": "I am going to school."},
+        ]) is None,
+    )
+    ok &= check(
+        "name_prompt_accepts_im_name",
+        extract_child_name([
+            {"role": "assistant", "content": "What is your name?"},
+            {"role": "user", "content": "I'm Bonnie."},
+        ]) == "Bonnie",
+    )
 
     memory = StudentMemory.__new__(StudentMemory)
     historical_state = memory._effective_state_from_student_and_sessions(

@@ -16,6 +16,7 @@ import statistics
 from typing import Any
 
 from launch_gates import _is_child_profile
+from pilot_research_design import build_research_state, cohort_research_rollup
 
 # Comparator benchmarks (from the project's Evidence research) so a funder can
 # place Sabi's numbers in context. Static reference values, not Sabi's results.
@@ -60,6 +61,7 @@ def child_evidence(learner: dict) -> dict[str, Any]:
     literacy_map = mastery.get("literacy") or {}
     calling = learner.get("calling") or {}
     note = learner.get("last_teacher_note") or {}
+    research_state = learner.get("research_state") if isinstance(learner.get("research_state"), dict) else None
 
     num_base = learner.get("baseline_tarl_level")
     num_now = state.get("tarl_level")
@@ -73,6 +75,9 @@ def child_evidence(learner: dict) -> dict[str, Any]:
 
     calls = int(calling.get("recent_call_count") or 0)
     seconds = int(calling.get("recent_call_seconds") or 0)
+    total_sessions = int(learner.get("total_sessions") or calls or 0)
+    if research_state is None:
+        research_state = build_research_state(learner, calls_completed=total_sessions)
 
     probe = None
     base_probe = learner.get("baseline_probe_score")
@@ -104,6 +109,7 @@ def child_evidence(learner: dict) -> dict[str, Any]:
         },
         "dosage": {
             "calls": calls,
+            "total_sessions": total_sessions,
             "minutes": round(seconds / 60, 1),
             "hours": round(seconds / 3600, 2),
             "second_call_returned": calls >= 2,
@@ -114,6 +120,7 @@ def child_evidence(learner: dict) -> dict[str, Any]:
             "sessions": int(learner.get("total_sessions") or 0),
         },
         "probe": probe,
+        "research": research_state,
         "teacher_note": note.get("narrative") if isinstance(note, dict) else None,
     }
 
@@ -178,6 +185,7 @@ def cohort_rollup(children: list[dict], *, cost_per_child: float | None = None) 
             "median_hours": _median([c["dosage"]["hours"] for c in with_calls]),
             "second_call_return_rate": round(len(returned) / len(with_calls), 3) if with_calls else None,
         },
+        "research": cohort_research_rollup(children),
         "probe": probe,
         "cost": cost_block,
     }
@@ -197,5 +205,6 @@ def build_pilot_evidence_report(learners: list[dict], *, cost_per_child: float |
             "primary_outcome": "TaRL level movement (baseline placement -> current); % of cohort up >=1 level.",
             "probe": "Effect size populates once a monthly baseline/endline probe is captured per child.",
             "child_only": "Adult testers are excluded from all cohort figures.",
+            "research_design": "Pre-pilot evidence is TEP/LEARNigeria assessment-validity plus TaRL placement/remediation/reassessment, with RCT-ready assignment and pre/mid/post fields.",
         },
     }

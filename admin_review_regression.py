@@ -155,6 +155,25 @@ def main() -> int:
     # Board workflows
     ok &= check("supports_board_workflows", "Download CSV" in html and "Recent Conversations" in html and "Conversation Transcript" in html)
     ok &= check(
+        "renders_rct_advancement_board_view",
+        "RCT Advancement" in html
+        and "protocol, instruments, consent, data quality, outcomes, and publication pack" in html
+        and "item-response rows" in html,
+    )
+    ok &= check(
+        "renders_board_training",
+        "World-Class Measurement Standard" in html
+        and "Sabi Board Training" in html
+        and "deliver the measurement" in html
+        and "Do not:" in html,
+    )
+    ok &= check(
+        "renders_partner_evidence_service",
+        "Partner Evidence Service" in html
+        and "/admin/evidence-protocol-kit" in html
+        and "ship the same protocol to outside teams" in html,
+    )
+    ok &= check(
         "renders_learning_ops_overview",
         "Review Queue" in html
         and "Learners Needing Attention" in html

@@ -12,6 +12,9 @@ feeds it the learner review records; this module does the math.
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
 import statistics
 from typing import Any
 
@@ -155,6 +158,7 @@ def cohort_rollup(children: list[dict], *, cost_per_child: float | None = None) 
     with_calls = [c for c in children if c["dosage"]["calls"] > 0]
     returned = [c for c in with_calls if c["dosage"]["second_call_returned"]]
     probe = _probe_stats(children)
+    research = cohort_research_rollup(children)
 
     cost_block: dict[str, Any] = {"cost_per_child_usd": cost_per_child}
     if cost_per_child and probe.get("effect_size_d"):
@@ -166,28 +170,164 @@ def cohort_rollup(children: list[dict], *, cost_per_child: float | None = None) 
         "cost, and compare against ConnectEd (3.4 LAYS per $100) and Rori ($5/child)."
     )
 
+    tarl_movement = {
+        "numeracy": _course_movement(children, "numeracy"),
+        "literacy": _course_movement(children, "literacy"),
+    }
+    mastery = {
+        "skills_mastered_total": sum(
+            c["numeracy"]["mastered_modules"] + c["literacy"]["mastered_modules"] for c in children
+        ),
+    }
+    dosage = {
+        "median_calls": _median([c["dosage"]["calls"] for c in with_calls]),
+        "median_minutes": _median([c["dosage"]["minutes"] for c in with_calls]),
+        "median_hours": _median([c["dosage"]["hours"] for c in with_calls]),
+        "second_call_return_rate": round(len(returned) / len(with_calls), 3) if with_calls else None,
+    }
+
     return {
         "children": n,
         "consented": sum(1 for c in children if c["consented"]),
         "with_calls": len(with_calls),
-        "tarl_movement": {
-            "numeracy": _course_movement(children, "numeracy"),
-            "literacy": _course_movement(children, "literacy"),
-        },
-        "mastery": {
-            "skills_mastered_total": sum(
-                c["numeracy"]["mastered_modules"] + c["literacy"]["mastered_modules"] for c in children
-            ),
-        },
-        "dosage": {
-            "median_calls": _median([c["dosage"]["calls"] for c in with_calls]),
-            "median_minutes": _median([c["dosage"]["minutes"] for c in with_calls]),
-            "median_hours": _median([c["dosage"]["hours"] for c in with_calls]),
-            "second_call_return_rate": round(len(returned) / len(with_calls), 3) if with_calls else None,
-        },
-        "research": cohort_research_rollup(children),
+        "tarl_movement": tarl_movement,
+        "mastery": mastery,
+        "dosage": dosage,
+        "research": research,
         "probe": probe,
         "cost": cost_block,
+        "rct_advancement": _rct_advancement(
+            cohort_n=n,
+            consented=sum(1 for c in children if c["consented"]),
+            with_calls=len(with_calls),
+            tarl_movement=tarl_movement,
+            mastery=mastery,
+            dosage=dosage,
+            probe=probe,
+            research=research,
+        ),
+    }
+
+
+def _pct(numerator: int, denominator: int) -> float | None:
+    if not denominator:
+        return None
+    return round(float(numerator) / float(denominator), 3)
+
+
+def _rct_advancement(
+    *,
+    cohort_n: int,
+    consented: int,
+    with_calls: int,
+    tarl_movement: dict[str, Any],
+    mastery: dict[str, Any],
+    dosage: dict[str, Any],
+    probe: dict[str, Any],
+    research: dict[str, Any],
+) -> dict[str, Any]:
+    protocol = research.get("protocol") or {}
+    measurement_counts = research.get("measurement_counts") or {}
+    consent_counts = research.get("consent_counts") or {}
+    readiness = research.get("rct_readiness") or {}
+    data_quality = research.get("data_quality") or {}
+    instruments = research.get("instrument_readiness") or {}
+    publication_pack = research.get("publication_pack") or {}
+    num = tarl_movement.get("numeracy") or {}
+    lit = tarl_movement.get("literacy") or {}
+
+    cards = [
+        {
+            "key": "protocol",
+            "label": "Protocol",
+            "status": protocol.get("status") or "draft",
+            "metric": protocol.get("stage_label") or research.get("stage_label"),
+            "detail": "Versioned protocol, outcomes, sample plan, registry/PAP fields, and ethics state.",
+        },
+        {
+            "key": "instruments",
+            "label": "Instruments",
+            "status": instruments.get("status") or "missing",
+            "metric": f"{instruments.get('total_instruments', 0)} forms / {instruments.get('total_items', 0)} items",
+            "detail": instruments.get("review_status") or "TEP/LEARNigeria review pending.",
+        },
+        {
+            "key": "consent",
+            "label": "Consent",
+            "status": "ready" if cohort_n and consent_counts.get("caregiver_consent", 0) == cohort_n else "partial",
+            "metric": f"{consent_counts.get('caregiver_consent', 0)}/{cohort_n} caregiver; {consent_counts.get('child_assent', 0)}/{cohort_n} assent",
+            "detail": "Tracks caregiver consent, child assent, withdrawal, and raw-audio export permission.",
+        },
+        {
+            "key": "baseline",
+            "label": "Baseline",
+            "status": "ready" if cohort_n and measurement_counts.get("pre_baseline", 0) == cohort_n else "in_progress",
+            "metric": f"{measurement_counts.get('pre_baseline', 0)}/{cohort_n}",
+            "detail": "TaRL placement and fixed baseline probe coverage before adaptive teaching claims.",
+        },
+        {
+            "key": "randomization",
+            "label": "Randomization",
+            "status": "single_arm" if research.get("stage") == "ten_child_prepilot" else "assignment_ready",
+            "metric": f"{readiness.get('assignment_recorded', 0)} assignments",
+            "detail": "Single-arm pre-pilot now; sealed randomization batch required before 30-child micro-RCT.",
+        },
+        {
+            "key": "midline",
+            "label": "Midline",
+            "status": "ready" if cohort_n and measurement_counts.get("midline", 0) == cohort_n else "pending",
+            "metric": f"{measurement_counts.get('midline', 0)}/{cohort_n}",
+            "detail": "Early fixed-probe signal before changing instruction or scaling.",
+        },
+        {
+            "key": "endline",
+            "label": "Endline",
+            "status": "ready" if cohort_n and measurement_counts.get("post_endline", 0) == cohort_n else "pending",
+            "metric": f"{measurement_counts.get('post_endline', 0)}/{cohort_n}",
+            "detail": "Primary endline availability for learning-signal and data-quality report.",
+        },
+        {
+            "key": "data_quality",
+            "label": "Data Quality",
+            "status": data_quality.get("status") or "awaiting_child_baselines",
+            "metric": f"{data_quality.get('item_response_records', 0)} item rows; {data_quality.get('pending_item_scores', 0)} pending scores",
+            "detail": "Tracks coverage, fixed-probe events, missingness, and item-scoring completion.",
+        },
+        {
+            "key": "learning_outcomes",
+            "label": "Learning Outcomes",
+            "status": "signal_visible" if (num.get("children_up_one_plus_level", 0) or lit.get("children_up_one_plus_level", 0)) else "collecting",
+            "metric": f"Num +1: {num.get('children_up_one_plus_level', 0)}; Lit +1: {lit.get('children_up_one_plus_level', 0)}; probe d={probe.get('effect_size_d')}",
+            "detail": f"{mastery.get('skills_mastered_total', 0)} mastered skill-modules; median calls {dosage.get('median_calls')}.",
+        },
+        {
+            "key": "safety_fidelity",
+            "label": "Safety/Fidelity",
+            "status": "needs_review_rows",
+            "metric": f"{with_calls}/{cohort_n} with calls",
+            "detail": "First-call review, no-coaching measurement compliance, and safety incidents must be tracked for publication.",
+        },
+        {
+            "key": "publication_pack",
+            "label": "Publication Pack",
+            "status": publication_pack.get("status") or "not_started",
+            "metric": f"{publication_pack.get('ready_count', 0)}/{publication_pack.get('total_count', 0)} artifacts ready",
+            "detail": "Protocol, codebook, de-identified data, item responses, assignment, and reproducibility README.",
+        },
+    ]
+    return {
+        "stage": research.get("stage"),
+        "stage_label": research.get("stage_label"),
+        "claim_tier": research.get("claim_boundary"),
+        "cohort_progress": {
+            "children": cohort_n,
+            "consented_rate": _pct(consented, cohort_n),
+            "call_coverage": _pct(with_calls, cohort_n),
+            "baseline_coverage": data_quality.get("baseline_coverage"),
+            "midline_coverage": data_quality.get("midline_coverage"),
+            "endline_coverage": data_quality.get("endline_coverage"),
+        },
+        "cards": cards,
     }
 
 
@@ -208,3 +348,88 @@ def build_pilot_evidence_report(learners: list[dict], *, cost_per_child: float |
             "research_design": "Pre-pilot evidence uses publishable-grade methods from call one: TEP/LEARNigeria assessment validity, TaRL placement/remediation/reassessment, UNESCO/GPF outcome language, and J-PAL-style protocol/assignment/pre-mid-post fields.",
         },
     }
+
+
+def pilot_evidence_csv(report: dict, *, mode: str = "board") -> str:
+    """Export child evidence with board/evaluator/public redaction modes."""
+    export_mode = str(mode or "board").strip().lower()
+    if export_mode not in {"board", "evaluator", "public"}:
+        export_mode = "board"
+    identity_fields = ["id", "name"] if export_mode == "board" else ["child_code"]
+    fields = [
+        *identity_fields,
+        "export_mode", "consented",
+        "caregiver_consent", "child_assent", "training_audio_consent", "raw_audio_export_allowed",
+        "protocol_id", "protocol_version", "study_stage", "study_arm", "next_assessment_due",
+        "pre_baseline_recorded", "midline_recorded", "post_endline_recorded", "retention_recorded",
+        "assessment_event_count", "item_response_count", "pending_item_scores",
+        "numeracy_baseline", "numeracy_current", "numeracy_levels_gained", "numeracy_mastered_modules",
+        "literacy_baseline", "literacy_current", "literacy_levels_gained", "literacy_mastered_modules",
+        "calls", "minutes", "hours", "second_call_returned",
+        "correct", "wrong", "sessions", "probe_gain",
+    ]
+    if export_mode == "public":
+        fields = [
+            field for field in fields
+            if field not in {"training_audio_consent", "raw_audio_export_allowed", "correct", "wrong"}
+        ]
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(fields)
+    for index, child in enumerate(report.get("children") or [], start=1):
+        num = child.get("numeracy") or {}
+        lit = child.get("literacy") or {}
+        dosage = child.get("dosage") or {}
+        totals = child.get("totals") or {}
+        probe = child.get("probe") or {}
+        research = child.get("research") or {}
+        consent = research.get("consent") or {}
+        assignment = research.get("assignment") or {}
+        status = research.get("assessment_status") or {}
+        phases = {str(item.get("phase")) for item in (research.get("measurements") or []) if isinstance(item, dict)}
+        events = [item for item in (research.get("assessment_events") or []) if isinstance(item, dict)]
+        responses = [item for item in (research.get("item_responses") or []) if isinstance(item, dict)]
+        child_key = str(child.get("id") or child.get("name") or index)
+        child_code = "sabi-child-" + hashlib.sha256(child_key.encode("utf-8")).hexdigest()[:10]
+        row = {
+            "id": child.get("id"),
+            "name": child.get("name"),
+            "child_code": child_code,
+            "export_mode": export_mode,
+            "consented": child.get("consented"),
+            "caregiver_consent": consent.get("caregiver_consent_recorded"),
+            "child_assent": consent.get("child_assent_recorded"),
+            "training_audio_consent": consent.get("training_audio_consent_recorded"),
+            "raw_audio_export_allowed": consent.get("raw_audio_export_allowed"),
+            "protocol_id": research.get("protocol_id"),
+            "protocol_version": research.get("protocol_version"),
+            "study_stage": research.get("study_stage"),
+            "study_arm": assignment.get("arm"),
+            "next_assessment_due": status.get("next_due_phase"),
+            "pre_baseline_recorded": "pre_baseline" in phases,
+            "midline_recorded": "midline" in phases,
+            "post_endline_recorded": "post_endline" in phases,
+            "retention_recorded": "retention_followup" in phases,
+            "assessment_event_count": len(events),
+            "item_response_count": len(responses),
+            "pending_item_scores": sum(1 for response in responses if response.get("score") is None),
+            "numeracy_baseline": num.get("baseline_level"),
+            "numeracy_current": num.get("current_level"),
+            "numeracy_levels_gained": num.get("levels_gained"),
+            "numeracy_mastered_modules": num.get("mastered_modules"),
+            "literacy_baseline": lit.get("baseline_level"),
+            "literacy_current": lit.get("current_level"),
+            "literacy_levels_gained": lit.get("levels_gained"),
+            "literacy_mastered_modules": lit.get("mastered_modules"),
+            "calls": dosage.get("calls"),
+            "minutes": dosage.get("minutes"),
+            "hours": dosage.get("hours"),
+            "second_call_returned": dosage.get("second_call_returned"),
+            "correct": totals.get("correct"),
+            "wrong": totals.get("wrong"),
+            "sessions": totals.get("sessions"),
+            "probe_gain": probe.get("gain"),
+        }
+        writer.writerow([row.get(field) for field in fields])
+    return buffer.getvalue()

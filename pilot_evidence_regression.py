@@ -6,7 +6,7 @@ from __future__ import annotations
 import sys
 
 from launch_gates import build_launch_gate_report
-from pilot_evidence import build_pilot_evidence_report, child_evidence
+from pilot_evidence import build_pilot_evidence_report, child_evidence, pilot_evidence_csv
 
 
 def check(name: str, condition: bool, detail: object = "") -> bool:
@@ -21,6 +21,7 @@ def _child(cid, base_num, cur_num, calls, seconds, *, mastered_num=0, probe=None
         "name": cid,
         "participant_type": "child",
         "consent_status": "consented" if consent else None,
+        "assent_recorded": bool(consent),
         "baseline_tarl_level": base_num,
         "baseline_reading_level": 0,
         "effective_state": {"tarl_level": cur_num, "current_module": 2, "literacy": {"tarl_reading_level": 0}},
@@ -60,7 +61,17 @@ def main() -> int:
     ok &= check("benchmarks_included", "connected" in report["benchmarks"] and "rori" in report["benchmarks"])
     ok &= check("research_protocol_rollup_present", cohort["research"]["stage"] == "ten_child_prepilot", cohort["research"])
     ok &= check("research_arm_distribution_present", cohort["research"]["arm_distribution"].get("measured_sabi_pre_pilot") == 3, cohort["research"])
+    ok &= check("rct_advancement_present", len(cohort["rct_advancement"]["cards"]) >= 10, cohort["rct_advancement"])
+    ok &= check("data_quality_present", "baseline_coverage" in cohort["research"]["data_quality"], cohort["research"]["data_quality"])
+    ok &= check("publication_pack_present", cohort["research"]["publication_pack"]["total_count"] >= 10, cohort["research"]["publication_pack"])
+    ok &= check("measurement_benchmark_ladder_present", len(cohort["research"]["measurement_quality_benchmarks"]) >= 5, cohort["research"])
+    ok &= check("board_training_present", "no coaching" in cohort["research"]["board_training"]["facilitator_script"].lower(), cohort["research"]["board_training"])
+    ok &= check("partner_implementation_kit_present", len(cohort["research"]["partner_implementation_kit"]["api_surfaces"]) >= 4, cohort["research"]["partner_implementation_kit"])
     ok &= check("research_design_note_present", "research_design" in report["notes"], report["notes"])
+
+    public_csv = pilot_evidence_csv(report, mode="public")
+    ok &= check("public_export_deidentifies_name", "name" not in public_csv.splitlines()[0] and "child_code" in public_csv.splitlines()[0], public_csv.splitlines()[0])
+    ok &= check("public_export_strips_raw_audio_permission", "raw_audio_export_allowed" not in public_csv.splitlines()[0], public_csv.splitlines()[0])
 
     # Child record shape and no-baseline handling.
     rec = child_evidence(_child("cx", None, 3, 5, 1500))
@@ -87,6 +98,11 @@ def main() -> int:
     ok &= check(
         "gate6_evidence_includes_protocol_counts",
         any("pre/mid/post records" in e for e in ten_child["evidence"]),
+        ten_child["evidence"],
+    )
+    ok &= check(
+        "gate6_evidence_includes_publication_pack",
+        any("publication pack" in e for e in ten_child["evidence"]),
         ten_child["evidence"],
     )
 

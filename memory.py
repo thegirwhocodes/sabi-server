@@ -86,6 +86,9 @@ OPTIONAL_STUDENT_COLUMNS = {
     "probe_history",
     "research_state",
     "research_measurements",
+    "assessment_events",
+    "item_responses",
+    "consent_state",
     "study_stage",
     "study_arm",
     "latest_assessment_phase",
@@ -1580,12 +1583,14 @@ def build_learner_mastery_map(student: dict, effective_state: dict | None) -> di
 def _student_review_record(student: dict, effective_state: dict, sessions: list[dict]) -> dict:
     identity = _student_display_identity(student)
     research_state = student.get("research_state") if isinstance(student.get("research_state"), dict) else None
-    if research_state is None:
+    if research_state is None or not research_state.get("protocol_id") or not research_state.get("fixed_probe_plan"):
         research_state = build_research_state(
             {
                 **student,
                 "effective_state": effective_state,
                 "research_measurements": student.get("research_measurements"),
+                "assessment_events": student.get("assessment_events"),
+                "item_responses": student.get("item_responses"),
             },
             calls_completed=student.get("total_sessions") or len(sessions),
         )
@@ -1625,6 +1630,9 @@ def _student_review_record(student: dict, effective_state: dict, sessions: list[
         "probe_history": student.get("probe_history"),
         "research_state": research_state,
         "research_measurements": student.get("research_measurements") or research_state.get("measurements"),
+        "assessment_events": student.get("assessment_events") or research_state.get("assessment_events"),
+        "item_responses": student.get("item_responses") or research_state.get("item_responses"),
+        "consent_state": student.get("consent_state") or research_state.get("consent"),
         "study_stage": student.get("study_stage") or research_state.get("study_stage"),
         "study_arm": student.get("study_arm") or (research_state.get("assignment") or {}).get("arm"),
         "latest_assessment_phase": student.get("latest_assessment_phase"),

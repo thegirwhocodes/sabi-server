@@ -57,6 +57,9 @@ def build_launch_gate_report(
         research = cohort.get("research") or {}
         readiness = research.get("rct_readiness") or {}
         measurement_counts = research.get("measurement_counts") or {}
+        consent_counts = research.get("consent_counts") or {}
+        data_quality = research.get("data_quality") or {}
+        publication_pack = research.get("publication_pack") or {}
         movement_evidence = [
             f"{num_move.get('children_up_one_plus_level') or 0} children up 1+ numeracy level (pct {num_move.get('pct_up_one_plus_level')})",
             f"{lit_move.get('children_up_one_plus_level') or 0} children up 1+ literacy level (pct {lit_move.get('pct_up_one_plus_level')})",
@@ -70,6 +73,21 @@ def build_launch_gate_report(
                 f"{measurement_counts.get('post_endline', readiness.get('endline_records', 0))}"
             ),
             f"study arms recorded: {readiness.get('assignment_recorded', 0)}",
+            (
+                "consent/assent: "
+                f"{consent_counts.get('caregiver_consent', 0)} caregiver / "
+                f"{consent_counts.get('child_assent', 0)} child assent"
+            ),
+            (
+                "data quality: "
+                f"{data_quality.get('fixed_probe_events', 0)} fixed-probe events / "
+                f"{data_quality.get('item_response_records', 0)} item responses / "
+                f"{data_quality.get('pending_item_scores', 0)} pending item scores"
+            ),
+            (
+                "publication pack: "
+                f"{publication_pack.get('ready_count', 0)}/{publication_pack.get('total_count', 0)} artifacts ready"
+            ),
         ]
 
     gates = [

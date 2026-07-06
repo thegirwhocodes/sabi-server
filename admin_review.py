@@ -1642,8 +1642,18 @@ def render_admin_review_page() -> str:
       const dosage = cohort.dosage || {};
       const cost = cohort.cost || {};
       const research = cohort.research || {};
+      const advancement = cohort.rct_advancement || {};
+      const advancementCards = advancement.cards || [];
       const measurementCounts = research.measurement_counts || {};
       const readiness = research.rct_readiness || {};
+      const dataQuality = research.data_quality || {};
+      const publicationPack = research.publication_pack || {};
+      const measurementQuality = research.measurement_quality_benchmarks || [];
+      const boardTraining = research.board_training || {};
+      const trainingModules = boardTraining.modules || [];
+      const partnerKit = research.partner_implementation_kit || {};
+      const apiSurfaces = partnerKit.api_surfaces || [];
+      const claimLadder = partnerKit.claim_ladder || [];
       const benchmarks = report.benchmarks || {};
       const children = report.children || [];
       const rows = children.map(child => {
@@ -1693,6 +1703,67 @@ def render_admin_review_page() -> str:
             <div class="feedback-card"><strong>Claim tier</strong><p>${escapeHtml(research.claim_boundary || "Publishable-grade methods from call one; effect claims stay scaled to sample size and power.")}</p></div>
             <div class="feedback-card"><strong>Assignment recorded</strong><p>${escapeHtml(readiness.assignment_recorded || 0)} child records carry arm metadata for later evaluator review.</p></div>
             <div class="feedback-card"><strong>Next design step</strong><p>${escapeHtml(research.next_design_step || "Complete the pre/mid/post evidence loop before scaling.")}</p></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row"><h3>RCT Advancement</h3><span class="section-caption">Board view: protocol, instruments, consent, data quality, outcomes, and publication pack</span></div>
+          <div class="command-grid">
+            ${(advancementCards || []).map(card => `<div class="command-card">
+              ${pill(String(card.status || "pending").replaceAll("_", " "), statusKind(card.status))}
+              <strong>${escapeHtml(card.label || card.key || "Readiness")}</strong>
+              <p><span class="small">${escapeHtml(card.metric || "—")}</span><br>${escapeHtml(card.detail || "")}</p>
+            </div>`).join("") || `<div class="empty">RCT advancement will appear once child evidence records load.</div>`}
+          </div>
+          <div class="detail-grid">
+            <div class="feedback-card"><strong>Coverage</strong><p>Baseline ${pctLabel(dataQuality.baseline_coverage)} · midline ${pctLabel(dataQuality.midline_coverage)} · endline ${pctLabel(dataQuality.endline_coverage)} · retention ${pctLabel(dataQuality.retention_coverage)}.</p></div>
+            <div class="feedback-card"><strong>Item scoring</strong><p>${escapeHtml(dataQuality.item_response_records || 0)} item-response rows · ${escapeHtml(dataQuality.pending_item_scores || 0)} pending item scores · complete ${pctLabel(dataQuality.item_scoring_complete_rate)}.</p></div>
+            <div class="feedback-card"><strong>Publication pack</strong><p>${escapeHtml(publicationPack.ready_count || 0)} of ${escapeHtml(publicationPack.total_count || 0)} artifacts ready. Status: ${escapeHtml(publicationPack.status || "not started")}.</p></div>
+            <div class="feedback-card"><strong>Claim tier</strong><p>${escapeHtml(advancement.claim_tier || research.claim_boundary || "Publishable-grade methods from call one; effect claims scale with sample size and power.")}</p></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row"><h3>World-Class Measurement Standard</h3><span class="section-caption">Sabi compared against J-PAL, UNESCO, TEP/LEARNigeria, TaRL, EGRA, and EGMA</span></div>
+          <div class="detail-grid">
+            ${measurementQuality.map(item => `<div class="feedback-card">
+              ${pill(String(item.status || "mapped").replaceAll("_", " "), "gold")}
+              <strong>${escapeHtml(item.source || "Benchmark")}</strong>
+              <p>${escapeHtml(item.standard || "")}</p>
+              <div class="small">${escapeHtml(item.sabi_requirement || "")}</div>
+            </div>`).join("") || `<div class="empty">Measurement standards will appear when the evidence protocol loads.</div>`}
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row"><h3>Sabi Board Training</h3><span class="section-caption">How to protect the child, deliver the measurement, and explain the evidence</span></div>
+          <div class="quote">${escapeHtml(boardTraining.facilitator_script || "Consent first, neutral fixed probes, no coaching inside measured items, TaRL remediation after the measured response is frozen, and honest claim tiers.")}</div>
+          <div class="command-grid">
+            ${trainingModules.map(module => `<div class="command-card">
+              ${pill(`Module ${escapeHtml(module.module || "")}`, "gold")}
+              <strong>${escapeHtml(module.title || "Training")}</strong>
+              <p>${escapeHtml(module.board_takeaway || "")}</p>
+              <div class="small"><strong>Delivery:</strong> ${escapeHtml(module.delivery_rule || "")}</div>
+              <div class="small"><strong>Do:</strong> ${escapeHtml(module.do || "")}</div>
+              <div class="small"><strong>Do not:</strong> ${escapeHtml(module.dont || "")}</div>
+            </div>`).join("") || `<div class="empty">Board training modules will appear when the evidence protocol loads.</div>`}
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row"><h3>Partner Evidence Service</h3><span class="section-caption">Outward-facing from day one: ship the same protocol to outside teams</span></div>
+          <div class="quote">${escapeHtml(partnerKit.promise || "Partners can run Sabi's publishable-grade protocol and receive comparable protocol, consent, assessment, dosage, data-quality, outcome, and export outputs.")}</div>
+          <div class="feedback-card"><strong>Implementation kit API</strong><p><code>/admin/evidence-protocol-kit</code> returns the protocol, item bank, training modules, benchmark ladder, claim ladder, and export modes for outside teams.</p></div>
+          <div class="detail-grid">
+            ${(apiSurfaces || []).map(api => `<div class="feedback-card">
+              ${pill(escapeHtml(api.mode || "api"), "soft")}
+              <strong>${escapeHtml(api.path || "API")}</strong>
+              <p>${escapeHtml(api.purpose || "")}</p>
+            </div>`).join("") || `<div class="empty">Partner API surfaces will appear when the protocol kit loads.</div>`}
+          </div>
+          <div class="detail-grid">
+            ${claimLadder.map(claim => `<div class="feedback-card">
+              ${pill(escapeHtml(claim.stage || "stage"), "gold")}
+              <strong>Allowed claim</strong>
+              <p>${escapeHtml(claim.allowed_claim || "")}</p>
+              <div class="small"><strong>Not allowed:</strong> ${escapeHtml(claim.not_allowed || "")}</div>
+            </div>`).join("")}
           </div>
         </div>
         <div class="command-grid">

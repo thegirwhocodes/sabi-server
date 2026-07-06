@@ -48,7 +48,8 @@ from feedback_admin import (
 from admin_review import render_admin_review_page
 from curriculum_review import build_curriculum_review_map
 from launch_gates import build_launch_gate_report
-from pilot_evidence import build_pilot_evidence_report
+from pilot_evidence import build_pilot_evidence_report, pilot_evidence_csv
+from pilot_research_design import evidence_protocol_kit
 from voice import router as voice_router
 from voice_twilio import router as twilio_router
 from voice_asterisk import start_agi_server, synthesize_phone_tts
@@ -601,53 +602,25 @@ async def admin_launch_gates():
 
 
 @app.get("/admin/pilot-evidence")
-async def admin_pilot_evidence(limit: int = 200, fmt: str = "json"):
+async def admin_pilot_evidence(limit: int = 200, fmt: str = "json", mode: str = "board"):
     """Cohort pilot-proof learning-gains report (children only).
 
-    fmt=csv returns one row per child for funder due diligence / RCT analysis.
+    fmt=csv returns one row per child for board, evaluator, or public evidence export.
     """
     report = await app.state.memory.get_pilot_evidence(limit=limit)
     if str(fmt or "").lower() == "csv":
-        return Response(content=_pilot_evidence_csv(report), media_type="text/csv")
+        return Response(content=_pilot_evidence_csv(report, mode=mode), media_type="text/csv")
     return JSONResponse(report)
 
 
-def _pilot_evidence_csv(report: dict) -> str:
-    import csv
-    import io
+@app.get("/admin/evidence-protocol-kit")
+async def admin_evidence_protocol_kit(stage: str = ""):
+    """Partner-ready implementation kit for Sabi's publishable-grade evidence protocol."""
+    return JSONResponse(evidence_protocol_kit(stage or None))
 
-    fields = [
-        "id", "name", "consented",
-        "study_stage", "study_arm", "next_assessment_due",
-        "pre_baseline_recorded", "midline_recorded", "post_endline_recorded", "retention_recorded",
-        "numeracy_baseline", "numeracy_current", "numeracy_levels_gained", "numeracy_mastered_modules",
-        "literacy_baseline", "literacy_current", "literacy_levels_gained", "literacy_mastered_modules",
-        "calls", "minutes", "hours", "second_call_returned",
-        "correct", "wrong", "sessions", "probe_gain",
-    ]
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(fields)
-    for child in report.get("children") or []:
-        num = child.get("numeracy") or {}
-        lit = child.get("literacy") or {}
-        dosage = child.get("dosage") or {}
-        totals = child.get("totals") or {}
-        probe = child.get("probe") or {}
-        research = child.get("research") or {}
-        assignment = research.get("assignment") or {}
-        status = research.get("assessment_status") or {}
-        phases = {str(item.get("phase")) for item in (research.get("measurements") or []) if isinstance(item, dict)}
-        writer.writerow([
-            child.get("id"), child.get("name"), child.get("consented"),
-            research.get("study_stage"), assignment.get("arm"), status.get("next_due_phase"),
-            "pre_baseline" in phases, "midline" in phases, "post_endline" in phases, "retention_followup" in phases,
-            num.get("baseline_level"), num.get("current_level"), num.get("levels_gained"), num.get("mastered_modules"),
-            lit.get("baseline_level"), lit.get("current_level"), lit.get("levels_gained"), lit.get("mastered_modules"),
-            dosage.get("calls"), dosage.get("minutes"), dosage.get("hours"), dosage.get("second_call_returned"),
-            totals.get("correct"), totals.get("wrong"), totals.get("sessions"), probe.get("gain"),
-        ])
-    return buffer.getvalue()
+
+def _pilot_evidence_csv(report: dict, *, mode: str = "board") -> str:
+    return pilot_evidence_csv(report, mode=mode)
 
 
 @app.get("/admin/calls/{call_uuid}")

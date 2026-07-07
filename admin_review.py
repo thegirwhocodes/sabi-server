@@ -871,6 +871,7 @@ def render_admin_review_page() -> str:
       </div>
       <nav class="nav" aria-label="Sabi admin navigation">
         <button id="nav-overview" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Overview<span class="nav-count" id="count-review"></span></button>
+        <button id="nav-dashboard" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg>Dashboard</button>
         <button id="nav-learners" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>Learners<span class="nav-count" id="count-learners"></span></button>
         <button id="nav-kids" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18h16"/><path d="M6 15l4-4 3 2 5-7"/><circle cx="10" cy="11" r="1.6"/><circle cx="13" cy="13" r="1.6"/><circle cx="18" cy="6" r="1.6"/></svg>Indicators<span class="nav-count" id="count-kids"></span></button>
         <button id="nav-calls" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4h4l2 5-2.5 1.5a12 12 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>Calls<span class="nav-count" id="count-calls"></span></button>
@@ -1379,7 +1380,7 @@ def render_admin_review_page() -> str:
       const [seg, id] = raw.split("/");
       if (id && seg === "learners") { setView("learners"); openLearner(id); return; }
       if (id && seg === "calls") { setView("calls"); openCall(id); return; }
-      const views = ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates", "evidence"];
+      const views = ["overview", "dashboard", "learners", "kids", "calls", "feedback", "curriculum", "gates", "evidence"];
       if (views.includes(seg)) setView(seg);
     }
     function closeDrawer() {
@@ -1395,7 +1396,7 @@ def render_admin_review_page() -> str:
       state.selectedLearner = "";
       state.selectedCall = "";
       drawer.classList.remove("open");
-      ["overview", "learners", "kids", "calls", "feedback", "curriculum", "gates", "evidence"].forEach(name => {
+      ["overview", "dashboard", "learners", "kids", "calls", "feedback", "curriculum", "gates", "evidence"].forEach(name => {
         const el = document.getElementById(`nav-${name}`);
         if (el) el.setAttribute("aria-selected", String(view === name));
       });
@@ -1409,6 +1410,7 @@ def render_admin_review_page() -> str:
       renderToolbar();
       renderNavCounts();
       if (state.view === "overview") renderOverviewDashboard();
+      if (state.view === "dashboard") renderConciergeDashboardView();
       if (state.view === "gates") renderLaunchGatesView();
       if (state.view === "evidence") renderPilotEvidenceView();
       if (state.view === "learners") renderLearnersTable();
@@ -1420,6 +1422,7 @@ def render_admin_review_page() -> str:
     function renderHeader() {
       const titles = {
         overview: [`${greetingWord()}, Naomi`, "Here is how the children are doing and what needs your eyes today.", "Launch Control"],
+        dashboard: ["Concierge Pre-pilot", "Cohort snapshot, consent posture, and the daily operator loop.", "Concierge Desk"],
         gates: ["Launch Gates", "Evidence gates for adult canaries, child canaries, and pre-pilot launch.", "Launch Gate Report"],
         learners: ["Learners", "Every learner, their level, their journey, and their recent calls.", "Learner Database"],
         kids: ["Learning Indicators", "Actual learning indicators from the pre-pilot: TaRL movement, mastery, probes, dosage, and measurement fidelity.", "Indicator Backend"],
@@ -1672,52 +1675,6 @@ def render_admin_review_page() -> str:
             </div>`).join("")}
           </div>
         </div>` : ""}
-        ${(() => {
-          const metrics = (state.launchGates && state.launchGates.metrics) || {};
-          const target = 10;
-          const children = Number(metrics.child_profiles || 0);
-          const consented = Number(metrics.consented_children || 0);
-          const withCalls = Number(metrics.children_with_calls || 0);
-          const totalCalls = Number(metrics.recent_calls || 0);
-          const chip = (label, valueHtml, kind) => `<div class="prepilot-chip ${kind || ""}"><div class="prepilot-chip-label">${label}</div><div class="prepilot-chip-value">${valueHtml}</div></div>`;
-          const cohortKind = children >= target ? "good" : (children >= Math.ceil(target / 2) ? "" : "warn");
-          const consentKind = consented >= target ? "good" : (consented > 0 ? "" : "warn");
-          const firstKind = withCalls >= 7 ? "good" : (withCalls > 0 ? "" : "warn");
-          const callsKind = totalCalls > 0 ? "" : "warn";
-          const checklist = [
-            "Check PBX, Sabi API, Supabase, and phone-provider health.",
-            "Place one internal test call end-to-end and confirm session saved.",
-            "Review yesterday's flagged calls with audio, transcript, and TTS.",
-            "Message caregivers for any missed call windows.",
-            "Resolve open safety or urgent technical events first.",
-            "Export or screenshot today's dashboard for the pilot log.",
-          ];
-          return `<div class="section">
-            <div class="section-title-row">
-              <h3>Concierge Pre-pilot</h3>
-              <span class="section-caption">Cohort snapshot &middot; daily operator loop</span>
-            </div>
-            <div class="prepilot-grid">
-              <div class="prepilot-metrics">
-                ${chip("Cohort", `${children}<span class="small">of ${target}</span>`, cohortKind)}
-                ${chip("Consent recorded", String(consented), consentKind)}
-                ${chip("First call delivered", String(withCalls), firstKind)}
-                ${chip("Calls in window", String(totalCalls), callsKind)}
-              </div>
-              <div class="prepilot-checklist">
-                <div class="prepilot-checklist-head">
-                  <span class="prepilot-checklist-title">Today's operator loop</span>
-                  <span class="prepilot-checklist-note">Six-step ritual</span>
-                </div>
-                <ul>${checklist.map(item => `<li><span>${escapeHtml(item)}</span></li>`).join("")}</ul>
-              </div>
-            </div>
-            <div class="prepilot-foot">
-              <span>Full roster, consent forms, and event log live on the concierge desk.</span>
-              <a href="https://eduforequality.org/sabi/prepilot" target="_blank" rel="noopener">Open concierge desk &rarr;</a>
-            </div>
-          </div>`;
-        })()}
         <div class="section">
           <div class="section-title-row">
             <h3>Backend Model We Are Copying</h3>
@@ -1733,6 +1690,72 @@ def render_admin_review_page() -> str:
       </div>`;
       tableWrap.querySelectorAll("[data-call]").forEach(row => row.addEventListener("click", () => openCall(row.dataset.call)));
       tableWrap.querySelectorAll("[data-learner]").forEach(row => row.addEventListener("click", () => openLearner(row.dataset.learner)));
+    }
+
+    /* ---------------- concierge dashboard (pre-pilot) ---------------- */
+    function renderConciergeDashboardView() {
+      staticRange("Concierge desk");
+      const metrics = (state.launchGates && state.launchGates.metrics) || {};
+      const target = 10;
+      const children = Number(metrics.child_profiles || 0);
+      const consented = Number(metrics.consented_children || 0);
+      const withCalls = Number(metrics.children_with_calls || 0);
+      const totalCalls = Number(metrics.recent_calls || 0);
+      const chip = (label, valueHtml, kind) => `<div class="prepilot-chip ${kind || ""}"><div class="prepilot-chip-label">${label}</div><div class="prepilot-chip-value">${valueHtml}</div></div>`;
+      const cohortKind = children >= target ? "good" : (children >= Math.ceil(target / 2) ? "" : "warn");
+      const consentKind = consented >= target ? "good" : (consented > 0 ? "" : "warn");
+      const firstKind = withCalls >= 7 ? "good" : (withCalls > 0 ? "" : "warn");
+      const callsKind = totalCalls > 0 ? "" : "warn";
+      const checklist = [
+        "Check PBX, Sabi API, Supabase, and phone-provider health.",
+        "Place one internal test call end-to-end and confirm session saved.",
+        "Review yesterday's flagged calls with audio, transcript, and TTS.",
+        "Message caregivers for any missed call windows.",
+        "Resolve open safety or urgent technical events first.",
+        "Export or screenshot today's dashboard for the pilot log.",
+      ];
+      const gates = [
+        "10 children have caregiver consent and child assent recorded.",
+        "Every child has one working phone number, network, and preferred call window.",
+        "Baseline diagnostic is complete or scheduled for every child.",
+        "Sabi can place calls and save the session into Supabase.",
+        "Each first call gets a human review within 24 hours.",
+        "Open safety or urgent technical events are resolved before adding more children.",
+        "At least 7 of 10 children complete a first lesson without operator rescue.",
+        "At least 5 of 10 children return for a second call within 72 hours.",
+      ];
+      tableWrap.innerHTML = `<div class="overview-layout">
+        <div class="section">
+          <div class="section-title-row">
+            <h3>Cohort snapshot</h3>
+            <span class="section-caption">Metrics come from the launch-gate report &middot; refreshed with the console</span>
+          </div>
+          <div class="prepilot-metrics">
+            ${chip("Cohort", `${children}<span class="small">of ${target}</span>`, cohortKind)}
+            ${chip("Consent recorded", String(consented), consentKind)}
+            ${chip("First call delivered", String(withCalls), firstKind)}
+            ${chip("Calls in window", String(totalCalls), callsKind)}
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row">
+            <h3>Today's operator loop</h3>
+            <span class="section-caption">Six-step ritual before the first paid call each day</span>
+          </div>
+          <div class="prepilot-checklist">
+            <ul>${checklist.map(item => `<li><span>${escapeHtml(item)}</span></li>`).join("")}</ul>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title-row">
+            <h3>Pre-pilot launch gates</h3>
+            <span class="section-caption">Do not scale until every gate is green</span>
+          </div>
+          <div class="prepilot-checklist">
+            <ul>${gates.map(item => `<li><span>${escapeHtml(item)}</span></li>`).join("")}</ul>
+          </div>
+        </div>
+      </div>`;
     }
 
     /* ---------------- launch gates ---------------- */
@@ -3409,6 +3432,7 @@ def render_admin_review_page() -> str:
 
     /* ---------------- wiring ---------------- */
     document.getElementById("nav-overview").addEventListener("click", () => setView("overview"));
+    document.getElementById("nav-dashboard").addEventListener("click", () => setView("dashboard"));
     document.getElementById("nav-gates").addEventListener("click", () => setView("gates"));
     document.getElementById("nav-learners").addEventListener("click", () => setView("learners"));
     document.getElementById("nav-kids").addEventListener("click", () => setView("kids"));

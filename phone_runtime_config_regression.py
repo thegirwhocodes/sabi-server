@@ -111,6 +111,40 @@ def main() -> int:
             voice_realtime.USE_CACHED_GREETING,
         ),
         check(
+            "unclear_audio_gets_audibility_coaching",
+            voice_realtime.MAX_UNCLEAR_RETRIES >= 2
+            and "closer" in voice_realtime.UNCLEAR_AUDIO_RETRY_TEXT.lower()
+            and "slowly" in voice_realtime.UNCLEAR_AUDIO_RETRY_TEXT.lower(),
+            {
+                "MAX_UNCLEAR_RETRIES": voice_realtime.MAX_UNCLEAR_RETRIES,
+                "UNCLEAR_AUDIO_RETRY_TEXT": voice_realtime.UNCLEAR_AUDIO_RETRY_TEXT,
+            },
+        ),
+        check(
+            "unclear_retry_escalates_after_first_prompt",
+            voice_realtime._retry_text_for_unclear_audio(0) == voice_realtime.RETRY_TEXT
+            and voice_realtime._retry_text_for_unclear_audio(1) == voice_realtime.UNCLEAR_AUDIO_RETRY_TEXT,
+            {
+                "first": voice_realtime._retry_text_for_unclear_audio(0),
+                "second": voice_realtime._retry_text_for_unclear_audio(1),
+            },
+        ),
+        check(
+            "numeric_keypad_fallback_available",
+            voice_realtime.KEYPAD_NUMERIC_FALLBACK_ENABLED is True
+            and voice_realtime.KEYPAD_NUMERIC_TIMEOUT_SECONDS >= 6
+            and voice_realtime.KEYPAD_NUMERIC_MAX_DIGITS >= 3
+            and voice_realtime.KEYPAD_NUMERIC_TERMINATORS == {"#", "*"}
+            and "keypad" in voice_realtime.KEYPAD_NUMERIC_FALLBACK_TEXT.lower(),
+            {
+                "enabled": voice_realtime.KEYPAD_NUMERIC_FALLBACK_ENABLED,
+                "timeout": voice_realtime.KEYPAD_NUMERIC_TIMEOUT_SECONDS,
+                "max_digits": voice_realtime.KEYPAD_NUMERIC_MAX_DIGITS,
+                "terminators": voice_realtime.KEYPAD_NUMERIC_TERMINATORS,
+                "prompt": voice_realtime.KEYPAD_NUMERIC_FALLBACK_TEXT,
+            },
+        ),
+        check(
             "turn_budget_allows_curriculum_flow",
             voice_asterisk.MAX_TURNS >= 34 and voice_asterisk.WRAP_UP_AFTER_TURNS >= 30,
             {

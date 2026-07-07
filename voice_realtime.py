@@ -26,7 +26,13 @@ from call_admin import merge_call_hangup_event, write_call_review_record
 from call_admin import append_call_turn_review, call_turn_audio_path, write_call_learning_summary
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
-from transcript_normalizer import has_numeric_lesson_context, normalize_lesson_transcript
+from numeric_grading import analyze_latest_numeric_turn
+from transcript_normalizer import (
+    has_numeric_lesson_context,
+    is_likely_stt_hallucination_transcript,
+    is_phone_system_transcript,
+    normalize_lesson_transcript,
+)
 from voice_asterisk import (
     CONFIDENCE_THRESHOLD,
     MAX_TURNS,
@@ -75,6 +81,17 @@ STT_HALLUCINATION_PHRASES = {
     "thank you for watching",
     "captioning by",
 }
+SHORT_STT_HALLUCINATION_TRANSCRIPTS = {
+    "bye",
+    "bye bye",
+    "goodbye",
+    "see you",
+    "see you next time",
+    "thank you",
+    "thanks",
+    "got it",
+    "end card",
+}
 CARRIER_FAILURE_PHRASES = {
     "voicemail box",
     "voice mailbox",
@@ -88,8 +105,36 @@ CARRIER_FAILURE_PHRASES = {
     "cannot be reached",
     "switched off",
 }
+
+
+def _keypad_terminators_from_env() -> set[str]:
+    raw = os.getenv("SABI_KEYPAD_NUMERIC_TERMINATORS", "#*").strip()
+    if raw.lower() in {"hash_star", "hash-star", "hash,*", "hash"}:
+        return {"#", "*"}
+    return set(raw or "#*")
+
+
 MIN_USABLE_CONFIDENCE = float(os.getenv("SABI_MIN_USABLE_CONFIDENCE", "0.18"))
 RETRY_TEXT = os.getenv("SABI_RETRY_TEXT", "I didn't quite hear that. Can you say it again?")
+UNCLEAR_AUDIO_RETRY_TEXT = os.getenv(
+    "SABI_UNCLEAR_AUDIO_RETRY_TEXT",
+    "I still can't hear clearly. Please move the phone closer to your mouth, find a quieter spot if you can, and say just the answer slowly.",
+)
+MAX_UNCLEAR_RETRIES = max(1, int(os.getenv("SABI_MAX_UNCLEAR_RETRIES", "2")))
+KEYPAD_NUMERIC_FALLBACK_ENABLED = os.getenv("SABI_KEYPAD_NUMERIC_FALLBACK_ENABLED", "1").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+KEYPAD_NUMERIC_FALLBACK_TEXT = os.getenv(
+    "SABI_KEYPAD_NUMERIC_FALLBACK_TEXT",
+    "The phone is still noisy. For this number answer, you can press the digits on your keypad, then press hash.",
+)
+NUMERIC_AMBIGUITY_CONFIRMATION_TEXT = os.getenv(
+    "SABI_NUMERIC_AMBIGUITY_CONFIRMATION_TEXT",
+    "I may not have heard the full amount. Say the naira amount again slowly for me.",
+)
+KEYPAD_NUMERIC_TIMEOUT_SECONDS = int(os.getenv("SABI_KEYPAD_NUMERIC_TIMEOUT_SECONDS", "8"))
+KEYPAD_NUMERIC_MAX_DIGITS = int(os.getenv("SABI_KEYPAD_NUMERIC_MAX_DIGITS", "4"))
+KEYPAD_NUMERIC_TERMINATORS = _keypad_terminators_from_env()
 FAST_GREETING_TEXT = os.getenv(
     "SABI_FAST_GREETING_TEXT",
     "Hello! I'm Sabi, your learning friend. Sabi means to know, and together, we're going to know so much! What is your name?",
@@ -135,7 +180,14 @@ FEEDBACK_PROMPT_TEXT = os.getenv(
         "Tell us what felt good, what went wrong, if something was confusing or uncomfortable, "
         "or if you want to complain about anything that happened. This is optional. "
         "If you do not want to leave a note, you can hang up now. "
-        "If you do, just start talking after this."
+        "If you do, start talking after the beep."
+    ),
+)
+FEEDBACK_REQUESTED_PROMPT_TEXT = os.getenv(
+    "SABI_FEEDBACK_REQUESTED_PROMPT_TEXT",
+    (
+        "Okay. After the beep, leave your feedback note. You can say anything "
+        "about the call, including what went wrong or what you want us to fix."
     ),
 )
 FEEDBACK_RETRY_PROMPT_TEXT = os.getenv(
@@ -299,17 +351,30 @@ def _load_fast_greeting_pcm() -> bytes | None:
 
 def _looks_like_carrier_audio(text: str) -> bool:
     normalized = " ".join(text.lower().split())
+    if is_phone_system_transcript(text):
+        return True
     return any(phrase in normalized for phrase in CARRIER_FAILURE_PHRASES)
 
 
 def _looks_like_stt_hallucination(text: str) -> bool:
-    normalized = " ".join(text.lower().split())
+    normalized = " ".join(text.lower().strip(" .,!?:;").split())
+    if normalized in SHORT_STT_HALLUCINATION_TRANSCRIPTS:
+        return True
+    if is_likely_stt_hallucination_transcript(text):
+        return True
     return any(phrase in normalized for phrase in STT_HALLUCINATION_PHRASES)
 
 
 def _looks_like_numeric_answer(text: str) -> bool:
     """Allow math answers through even when Whisper confidence is nervous."""
     return extract_number(text) is not None
+
+
+def _retry_text_for_unclear_audio(retry_streak: int) -> str:
+    """Escalate from repeat request to concrete audibility coaching."""
+    if retry_streak <= 0:
+        return RETRY_TEXT
+    return UNCLEAR_AUDIO_RETRY_TEXT
 
 
 def _is_literacy_state(state: dict | None) -> bool:
@@ -423,6 +488,61 @@ def _feedback_enabled_for_phone(phone: str) -> bool:
             )
         )
     return False
+
+
+def _drain_dtmf(queue: asyncio.Queue) -> None:
+    while True:
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+
+
+FEEDBACK_OFFER_END_REASONS = {
+    "sabi_wrap_up",
+    "max_call_seconds",
+    "normal_loop_complete",
+    "feedback_requested",
+}
+
+
+def _should_offer_feedback(
+    student_id: str | None,
+    messages: list[dict[str, str]],
+    hungup: bool,
+    end_reason: str,
+) -> bool:
+    del student_id  # Feedback sidecars can still be useful if memory failed.
+    return bool(messages) and not hungup and end_reason in FEEDBACK_OFFER_END_REASONS
+
+
+def _looks_like_feedback_request(text: str) -> bool:
+    normalized = " ".join((text or "").lower().replace("-", " ").split()).strip(" .,!?:;")
+    if not normalized:
+        return False
+    direct_phrases = (
+        "leave feedback",
+        "give feedback",
+        "send feedback",
+        "record feedback",
+        "feedback note",
+        "leave a note",
+        "give a note",
+        "voice note",
+        "make a complaint",
+        "make complaint",
+        "i want to complain",
+        "i want to report",
+        "report a problem",
+        "say something about the call",
+        "talk about the call",
+    )
+    if any(phrase in normalized for phrase in direct_phrases):
+        return True
+    return "feedback" in normalized and any(
+        marker in normalized
+        for marker in ("i want", "can i", "let me", "need to", "want to", "please", "note")
+    )
 
 
 async def _read_packet(reader: asyncio.StreamReader) -> tuple[int, bytes]:
@@ -763,6 +883,83 @@ class RealtimeCall:
         _record_metrics("channel_closed", None)
         return None
 
+    async def wait_for_keypad_digits(
+        self,
+        timeout_seconds: int,
+        *,
+        max_digits: int = KEYPAD_NUMERIC_MAX_DIGITS,
+        terminators: set[str] | None = None,
+    ) -> str | None:
+        """Collect DTMF digits for noisy numeric-answer fallback."""
+        if timeout_seconds <= 0 or max_digits <= 0:
+            return None
+        deadline = time.monotonic() + timeout_seconds
+        terminators = terminators if terminators is not None else KEYPAD_NUMERIC_TERMINATORS
+        digits: list[str] = []
+        while not self.hungup:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                digit = await asyncio.wait_for(self.dtmf_queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            digit = str(digit or "").strip()
+            if digit in terminators:
+                break
+            if digit.isdigit():
+                digits.append(digit)
+                if len(digits) >= max_digits:
+                    break
+        return "".join(digits) if digits else None
+
+    async def prompt_for_keypad_numeric_answer(
+        self,
+        *,
+        turn: int,
+        user_audio_path: Path | None,
+        transcript: dict,
+        raw_text: str,
+        normalized_text: str,
+        learning_state_before: dict | None,
+        turn_flags: list[str],
+        turn_start: float,
+    ) -> str | None:
+        """Ask for keypad digits after repeated noisy numeric-answer failures."""
+        if not KEYPAD_NUMERIC_FALLBACK_ENABLED:
+            return None
+        _drain_dtmf(self.dtmf_queue)
+        prompt_pcm = await self.synthesize_pcm(KEYPAD_NUMERIC_FALLBACK_TEXT, "rt_keypad_retry")
+        self.persist_turn_review(
+            turn=turn,
+            user_audio_path=user_audio_path,
+            transcript=transcript,
+            raw_text=raw_text,
+            normalized_text=normalized_text,
+            learning_state_before=learning_state_before,
+            learning_state_after=learning_state_before,
+            assistant_text=KEYPAD_NUMERIC_FALLBACK_TEXT,
+            assistant_pcm=prompt_pcm,
+            flags=[*turn_flags, "retry_prompt", "keypad_numeric_fallback_prompt"],
+            timings={
+                "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+            },
+        )
+        await self.play_pcm(prompt_pcm)
+        if self.hungup:
+            return None
+        digits = await self.wait_for_keypad_digits(
+            KEYPAD_NUMERIC_TIMEOUT_SECONDS,
+            max_digits=KEYPAD_NUMERIC_MAX_DIGITS,
+            terminators=KEYPAD_NUMERIC_TERMINATORS,
+        )
+        if digits:
+            logger.info("Realtime turn %s accepted keypad numeric fallback=%s", turn, digits)
+            return digits
+        logger.info("Realtime turn %s keypad numeric fallback timed out", turn)
+        return None
+
     async def collect_utterance(
         self,
         initial_frames: list[bytes],
@@ -839,7 +1036,13 @@ class RealtimeCall:
                 except OSError:
                     pass
 
-    async def record_feedback_note(self, student_id: str | None, learning_state: dict | None) -> None:
+    async def record_feedback_note(
+        self,
+        student_id: str | None,
+        learning_state: dict | None,
+        *,
+        requested_by_caller: bool = False,
+    ) -> None:
         """Ask for one optional, open-ended tester note after the lesson.
 
         Flow:
@@ -858,8 +1061,14 @@ class RealtimeCall:
         if not _feedback_enabled_for_phone(self.phone) or self.hungup:
             return
 
+        # Clear old audio/keys before inviting feedback. Do not clear again
+        # after the beep: that can erase the first words of the actual note.
+        self.drain_audio()
+        _drain_dtmf(self.dtmf_queue)
+
         prompt_played_at = time.monotonic()
-        prompt_pcm = await self.synthesize_pcm(FEEDBACK_PROMPT_TEXT, "rt_feedback_prompt")
+        prompt_text = FEEDBACK_REQUESTED_PROMPT_TEXT if requested_by_caller else FEEDBACK_PROMPT_TEXT
+        prompt_pcm = await self.synthesize_pcm(prompt_text, "rt_feedback_prompt")
         await self.play_pcm(prompt_pcm)
         if self.hungup:
             return
@@ -871,15 +1080,6 @@ class RealtimeCall:
             await self.play_pcm(go_cue)
             if self.hungup:
                 return
-
-        # Drain any DTMF/audio that arrived during the prompt so the wait
-        # window starts from a clean baseline.
-        self.drain_audio()
-        while True:
-            try:
-                self.dtmf_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
 
         max_frames = max(1, int(FEEDBACK_MAX_SECONDS * 1000 / FRAME_MS))
         skip_digit = FEEDBACK_DTMF_SKIP_DIGIT or None
@@ -910,12 +1110,6 @@ class RealtimeCall:
                 if not self.hungup and go_cue:
                     await self.play_pcm(go_cue)
                 if not self.hungup:
-                    self.drain_audio()
-                    while True:
-                        try:
-                            self.dtmf_queue.get_nowait()
-                        except asyncio.QueueEmpty:
-                            break
                     second_metrics: dict = {}
                     feedback_pcm = await self.wait_for_optional_utterance(
                         FEEDBACK_WAIT_SECONDS,
@@ -1263,11 +1457,31 @@ class RealtimeCall:
                 if not text or _looks_like_stt_hallucination(text):
                     if _looks_like_stt_hallucination(text):
                         logger.info("Realtime turn %s: ignoring STT hallucination %r", turn, text)
-                    if retry_streak >= 1:
-                        text = "I answered, but the phone transcript was unclear."
+                    if retry_streak >= MAX_UNCLEAR_RETRIES:
+                        keypad_text = None
+                        if numeric_stt_context:
+                            keypad_text = await self.prompt_for_keypad_numeric_answer(
+                                turn=turn,
+                                user_audio_path=user_audio_path,
+                                transcript=transcript,
+                                raw_text=raw_stt_text,
+                                normalized_text=text,
+                                learning_state_before=learning_state_before_turn,
+                                turn_flags=turn_flags,
+                                turn_start=turn_start,
+                            )
+                        if keypad_text:
+                            text = keypad_text
+                            confidence = 1.0
+                            transcript["confidence"] = 1.0
+                            transcript["keypad_answer"] = keypad_text
+                            turn_flags.extend(["keypad_numeric_fallback", "dtmf_answer"])
+                        else:
+                            text = "I answered, but the phone transcript was unclear."
                     else:
+                        retry_text = _retry_text_for_unclear_audio(retry_streak)
                         retry_streak += 1
-                        retry_pcm = await self.synthesize_pcm(RETRY_TEXT, "rt_retry")
+                        retry_pcm = await self.synthesize_pcm(retry_text, "rt_retry")
                         self.persist_turn_review(
                             turn=turn,
                             user_audio_path=user_audio_path,
@@ -1276,7 +1490,7 @@ class RealtimeCall:
                             normalized_text=text,
                             learning_state_before=learning_state_before_turn,
                             learning_state_after=learning_state_before_turn,
-                            assistant_text=RETRY_TEXT,
+                            assistant_text=retry_text,
                             assistant_pcm=retry_pcm,
                             flags=[*turn_flags, "retry_prompt", "empty_or_hallucinated_transcript"],
                             timings={
@@ -1291,6 +1505,30 @@ class RealtimeCall:
                             end_silence_frames=end_silence_frames,
                         )
                         continue
+                if _looks_like_feedback_request(text):
+                    logger.info(
+                        "Realtime turn %s: caller requested feedback note uuid=%s text=%r",
+                        turn,
+                        self.call_uuid,
+                        text,
+                    )
+                    messages.append({"role": "user", "content": text})
+                    self.persist_turn_review(
+                        turn=turn,
+                        user_audio_path=user_audio_path,
+                        transcript=transcript,
+                        raw_text=raw_stt_text,
+                        normalized_text=text,
+                        learning_state_before=learning_state_before_turn,
+                        learning_state_after=learning_state_before_turn,
+                        flags=[*turn_flags, "feedback_requested"],
+                        timings={
+                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                        },
+                    )
+                    self.set_end_reason("feedback_requested")
+                    break
                 literacy_answer = _looks_like_literacy_answer(text, effective_state)
                 if confidence < CONFIDENCE_THRESHOLD and not _looks_like_numeric_answer(text) and not literacy_answer:
                     if confidence >= MIN_USABLE_CONFIDENCE and len(normalized_text) >= 3:
@@ -1301,16 +1539,34 @@ class RealtimeCall:
                             confidence,
                         )
                         turn_flags.append("usable_low_confidence")
-                    elif retry_streak >= 1:
+                    elif retry_streak >= MAX_UNCLEAR_RETRIES:
                         logger.info(
                             "Realtime turn %s: passing unclear transcript after retry %r conf=%.2f",
                             turn,
                             text,
                             confidence,
                         )
+                        if numeric_stt_context:
+                            keypad_text = await self.prompt_for_keypad_numeric_answer(
+                                turn=turn,
+                                user_audio_path=user_audio_path,
+                                transcript=transcript,
+                                raw_text=raw_stt_text,
+                                normalized_text=text,
+                                learning_state_before=learning_state_before_turn,
+                                turn_flags=turn_flags,
+                                turn_start=turn_start,
+                            )
+                            if keypad_text:
+                                text = keypad_text
+                                confidence = 1.0
+                                transcript["confidence"] = 1.0
+                                transcript["keypad_answer"] = keypad_text
+                                turn_flags.extend(["keypad_numeric_fallback", "dtmf_answer"])
                     else:
+                        retry_text = _retry_text_for_unclear_audio(retry_streak)
                         retry_streak += 1
-                        retry_pcm = await self.synthesize_pcm(RETRY_TEXT, "rt_retry")
+                        retry_pcm = await self.synthesize_pcm(retry_text, "rt_retry")
                         self.persist_turn_review(
                             turn=turn,
                             user_audio_path=user_audio_path,
@@ -1319,7 +1575,7 @@ class RealtimeCall:
                             normalized_text=text,
                             learning_state_before=learning_state_before_turn,
                             learning_state_after=learning_state_before_turn,
-                            assistant_text=RETRY_TEXT,
+                            assistant_text=retry_text,
                             assistant_pcm=retry_pcm,
                             flags=[*turn_flags, "retry_prompt", "low_confidence_rejected"],
                             timings={
@@ -1404,17 +1660,30 @@ class RealtimeCall:
                 ]
 
                 llm_start = time.monotonic()
-                response = await self.llm.generate(
-                    messages=llm_messages,
-                    student_id=student_id,
-                    current_module=module,
-                    memory=self.memory,
-                    course=str(effective_state.get("course") or "numeracy"),
-                    learning_state=effective_state,
-                    call_id=self.call_id,
-                    channel="asterisk_audiosocket",
+                latest_numeric_check = analyze_latest_numeric_turn(messages)
+                numeric_ambiguous = (
+                    latest_numeric_check.expected is not None
+                    and bool(latest_numeric_check.child_numbers)
+                    and latest_numeric_check.is_correct is None
                 )
-                if is_premature_wrap_response(response, user_turns, elapsed_seconds, MAX_CALL_SECONDS):
+                if numeric_ambiguous:
+                    response = NUMERIC_AMBIGUITY_CONFIRMATION_TEXT
+                    turn_flags.append("numeric_ambiguous_confirmation")
+                else:
+                    response = await self.llm.generate(
+                        messages=llm_messages,
+                        student_id=student_id,
+                        current_module=module,
+                        memory=self.memory,
+                        course=str(effective_state.get("course") or "numeracy"),
+                        learning_state=effective_state,
+                        call_id=self.call_id,
+                        channel="asterisk_audiosocket",
+                    )
+                if (
+                    not numeric_ambiguous
+                    and is_premature_wrap_response(response, user_turns, elapsed_seconds, MAX_CALL_SECONDS)
+                ):
                     logger.warning(
                         "Realtime turn %s produced premature wrap at %.0fs/%s turns; regenerating",
                         turn,
@@ -1483,14 +1752,13 @@ class RealtimeCall:
         finally:
             if self.end_reason == "unknown":
                 self.end_reason = "channel_closed" if self.hungup else "normal_loop_complete"
-            if (
-                student_id
-                and messages
-                and not self.hungup
-                and self.end_reason in {"sabi_wrap_up", "max_call_seconds", "normal_loop_complete"}
-            ):
+            if _should_offer_feedback(student_id, messages, self.hungup, self.end_reason):
                 try:
-                    await self.record_feedback_note(student_id, effective_state)
+                    await self.record_feedback_note(
+                        student_id,
+                        effective_state,
+                        requested_by_caller=self.end_reason == "feedback_requested",
+                    )
                 except Exception as exc:
                     logger.warning("Optional feedback capture failed uuid=%s: %s", self.call_uuid, exc)
             duration_seconds = int(time.monotonic() - call_started_at)

@@ -416,7 +416,7 @@ def learning_indicator_evidence(children: list[dict]) -> list[dict[str, Any]]:
         rows = group["rows"]
         scored = [row for row in rows if row[2].get("score") is not None]
         correct = [row for row in scored if float(row[2].get("score") or 0) > 0]
-        pending = len(rows) - len(scored)
+        unscored_count = len(rows) - len(scored)
         progress = (len(correct) / len(scored)) if scored else None
         indicators.append(_indicator_record(
             key=group["key"],
@@ -424,7 +424,7 @@ def learning_indicator_evidence(children: list[dict]) -> list[dict[str, Any]]:
             subject=group["subject"],
             construct=group["construct"],
             indicator_type="fixed_probe_construct",
-            metric=f"{len(correct)}/{len(scored)} scored correct; {pending} pending",
+            metric=f"{len(correct)}/{len(scored)} scored correct; {unscored_count} unscored",
             detail="Item-level fixed-probe evidence with scorer/adjudication fields preserved.",
             progress=round(progress, 3) if progress is not None else None,
             evidence=[
@@ -433,14 +433,14 @@ def learning_indicator_evidence(children: list[dict]) -> list[dict[str, Any]]:
                     index,
                     value=f"{response.get('phase') or 'probe'} · {response.get('item_id')}",
                     detail=(
-                        "pending score" if response.get("score") is None
+                        "unscored response" if response.get("score") is None
                         else f"score {response.get('score')}"
                     ),
-                    status="pending_score" if response.get("score") is None else "scored",
+                    status="unscored" if response.get("score") is None else "scored",
                 )
                 for child, index, response in rows[:8]
             ],
-            status="needs_scoring" if pending else None,
+            status="needs_scoring" if unscored_count else None,
             phase="fixed_probe_item",
         ))
 
@@ -582,7 +582,7 @@ def _rct_advancement(
             "label": "Instruments",
             "status": instruments.get("status") or "missing",
             "metric": f"{instruments.get('total_instruments', 0)} forms / {instruments.get('total_items', 0)} items",
-            "detail": instruments.get("review_status") or "TEP/LEARNigeria review pending.",
+            "detail": instruments.get("review_status") or "TEP/LEARNigeria review queue ready.",
         },
         {
             "key": "consent",
@@ -608,14 +608,14 @@ def _rct_advancement(
         {
             "key": "midline",
             "label": "Midline",
-            "status": "ready" if cohort_n and measurement_counts.get("midline", 0) == cohort_n else "pending",
+            "status": "ready" if cohort_n and measurement_counts.get("midline", 0) == cohort_n else "ready_after_baseline",
             "metric": f"{measurement_counts.get('midline', 0)}/{cohort_n}",
             "detail": "Early fixed-probe signal before changing instruction or scaling.",
         },
         {
             "key": "endline",
             "label": "Endline",
-            "status": "ready" if cohort_n and measurement_counts.get("post_endline", 0) == cohort_n else "pending",
+            "status": "ready" if cohort_n and measurement_counts.get("post_endline", 0) == cohort_n else "ready_after_midline",
             "metric": f"{measurement_counts.get('post_endline', 0)}/{cohort_n}",
             "detail": "Primary endline availability for learning-signal and data-quality report.",
         },
@@ -623,7 +623,7 @@ def _rct_advancement(
             "key": "data_quality",
             "label": "Data Quality",
             "status": data_quality.get("status") or "awaiting_child_baselines",
-            "metric": f"{data_quality.get('item_response_records', 0)} item rows; {data_quality.get('pending_item_scores', 0)} pending scores",
+            "metric": f"{data_quality.get('item_response_records', 0)} item rows; {data_quality.get('pending_item_scores', 0)} unscored",
             "detail": "Tracks coverage, fixed-probe events, missingness, and item-scoring completion.",
         },
         {
@@ -648,6 +648,25 @@ def _rct_advancement(
             "detail": "Protocol, codebook, de-identified data, item responses, assignment, and reproducibility README.",
         },
     ]
+    if cohort_n == 0:
+        empty_status = {
+            "protocol": ("board_ready_draft", "Protocol is ready for board lock."),
+            "instruments": ("instrumented", "Fixed oral forms and item bank are ready for the first eligible child."),
+            "consent": ("ready_to_record", "Consent and assent fields are live; no eligible child records are enrolled yet."),
+            "baseline": ("ready_to_capture", "Baseline capture is ready once the first consented child starts."),
+            "randomization": ("single_arm_ready", "Single-arm pre-pilot assignment is ready; randomization starts at the micro-RCT stage."),
+            "midline": ("ready_after_baseline", "Midline opens after baseline and early dosage are present."),
+            "endline": ("ready_after_midline", "Endline opens after the measured learning cycle."),
+            "data_quality": ("instrumented", "Item-response and scorer/audit fields are ready; no child rows exist yet."),
+            "learning_outcomes": ("awaiting_live_cohort", "Learning claims wait for eligible child records; preview indicators show the target shape."),
+            "safety_fidelity": ("ready_to_review", "Review fields are ready for first-call safety and no-coaching checks."),
+            "publication_pack": ("method_pack_ready", "Protocol, codebook, export modes, and implementation kit are ready; data files populate after enrollment."),
+        }
+        for card in cards:
+            status, detail = empty_status.get(card["key"], ("ready_to_start", card["detail"]))
+            card["status"] = status
+            card["metric"] = "ready; 0 live child records"
+            card["detail"] = detail
     return {
         "stage": research.get("stage"),
         "stage_label": research.get("stage_label"),
@@ -664,16 +683,172 @@ def _rct_advancement(
     }
 
 
+def preview_learning_children() -> list[dict[str, Any]]:
+    """Non-claim preview cohort for the board UI when no child records exist yet."""
+
+    def _research(phases: list[str], due: str, responses: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "assessment_status": {"next_due_phase": due},
+            "measurements": [{"phase": phase, "probe_score": None} for phase in phases],
+            "assessment_events": [
+                {"event_id": f"preview-{phase}", "phase": phase, "assessment_mode": "voice_fixed_oral"}
+                for phase in phases
+            ],
+            "item_responses": responses,
+            "consent": {
+                "caregiver_consent_recorded": True,
+                "child_assent_recorded": True,
+                "training_audio_consent_recorded": False,
+                "withdrawn": False,
+                "public_export_allowed": True,
+            },
+            "assignment": {
+                "arm": "measured_sabi_pre_pilot",
+                "label": "Measured Sabi pre-pilot",
+                "basis": "preview_only",
+            },
+        }
+
+    def _mastery(num_score: float, lit_score: float, support: bool = False) -> dict[str, Any]:
+        num_mastery = "emerging" if support else "mastered"
+        lit_mastery = "emerging" if lit_score < 0.7 else "mastered"
+        return {
+            "numeracy": {
+                "mastered_modules": 1 if num_mastery == "mastered" else 0,
+                "modules": [
+                    {
+                        "module": 1,
+                        "module_name": "Counting and number sense",
+                        "skill": "counting_number_sense",
+                        "score": num_score,
+                        "mastery": num_mastery,
+                        "mastery_label": "Mastered" if num_mastery == "mastered" else "Needs support",
+                        "position": "completed" if num_mastery == "mastered" else "in_progress",
+                    },
+                    {
+                        "module": 2,
+                        "module_name": "Addition fluency",
+                        "skill": "addition_fluency",
+                        "score": max(0.2, num_score - 0.18),
+                        "mastery": "emerging",
+                        "mastery_label": "Still building",
+                        "position": "in_progress",
+                    },
+                ],
+            },
+            "literacy": {
+                "mastered_modules": 1 if lit_mastery == "mastered" else 0,
+                "modules": [
+                    {
+                        "module": 1,
+                        "module_name": "Beginning sounds",
+                        "skill": "beginning_sounds",
+                        "score": lit_score,
+                        "mastery": lit_mastery,
+                        "mastery_label": "Mastered" if lit_mastery == "mastered" else "Still building",
+                        "position": "completed" if lit_mastery == "mastered" else "in_progress",
+                    },
+                    {
+                        "module": 2,
+                        "module_name": "Listening comprehension",
+                        "skill": "listening_comprehension",
+                        "score": max(0.25, lit_score - 0.12),
+                        "mastery": "emerging",
+                        "mastery_label": "Still building",
+                        "position": "in_progress",
+                    },
+                ],
+            },
+        }
+
+    def _child(
+        name: str,
+        num_base: int,
+        num_now: int,
+        lit_base: int,
+        lit_now: int,
+        calls: int,
+        hours: float,
+        probe: tuple[float, float],
+        phases: list[str],
+        due: str,
+        num_score: float,
+        lit_score: float,
+        support: bool = False,
+    ) -> dict[str, Any]:
+        responses = [
+            {"item_id": "num-pre-001", "phase": "pre_baseline", "subject": "numeracy", "construct": "number_recognition", "score": 1},
+            {"item_id": "num-mid-001", "phase": "midline", "subject": "numeracy", "construct": "single_digit_addition", "score": 0 if support else 1},
+            {"item_id": "lit-pre-001", "phase": "pre_baseline", "subject": "literacy", "construct": "beginning_sounds", "score": 1 if lit_score >= 0.7 else 0},
+            {"item_id": "lit-post-001", "phase": "post_endline", "subject": "literacy", "construct": "listening_comprehension", "score": None if "post_endline" not in phases else 1},
+        ]
+        return {
+            "id": f"preview-{name.lower()}",
+            "name": f"Preview learner {name}",
+            "consented": True,
+            "numeracy": {
+                "baseline_level": num_base,
+                "current_level": num_now,
+                "levels_gained": num_now - num_base,
+                "current_module": max(1, num_now + 1),
+                "mastered_modules": 1 if num_now > num_base else 0,
+            },
+            "literacy": {
+                "baseline_level": lit_base,
+                "current_level": lit_now,
+                "levels_gained": lit_now - lit_base,
+                "current_module": max(1, lit_now + 1),
+                "mastered_modules": 1 if lit_now > lit_base else 0,
+            },
+            "dosage": {
+                "calls": calls,
+                "total_sessions": calls,
+                "minutes": round(hours * 60, 1),
+                "hours": hours,
+                "second_call_returned": calls >= 2,
+            },
+            "totals": {
+                "correct": int(round(num_score * 10 + lit_score * 8)),
+                "wrong": 3 if support else 1,
+                "sessions": calls,
+            },
+            "probe": {
+                "baseline": probe[0],
+                "latest": probe[1],
+                "gain": round(probe[1] - probe[0], 3),
+            },
+            "research": _research(phases, due, responses),
+            "mastery_map": _mastery(num_score, lit_score, support=support),
+            "teacher_note": None,
+        }
+
+    return [
+        _child("A", 0, 2, 0, 1, 6, 1.4, (0.22, 0.64), ["pre_baseline", "midline", "post_endline"], "retention_followup", 0.88, 0.76),
+        _child("B", 1, 1, 0, 0, 4, 0.9, (0.30, 0.42), ["pre_baseline", "midline"], "post_endline", 0.44, 0.52, support=True),
+        _child("C", 0, 1, 0, 1, 5, 1.1, (0.18, 0.57), ["pre_baseline", "midline", "post_endline"], "retention_followup", 0.72, 0.81),
+        _child("D", 2, 3, 1, 1, 3, 0.7, (0.48, 0.70), ["pre_baseline", "midline", "post_endline", "retention_followup"], "monitoring", 0.93, 0.68),
+    ]
+
+
 def build_pilot_evidence_report(learners: list[dict], *, cost_per_child: float | None = None) -> dict[str, Any]:
     """Full cohort pilot-proof report. Children only; adult testers excluded."""
     child_learners = [learner for learner in (learners or []) if _is_child_profile(learner)]
     children = [child_evidence(learner) for learner in child_learners]
     rollup = cohort_rollup(children, cost_per_child=cost_per_child)
+    preview_children = preview_learning_children() if not children else []
+    preview_rollup = cohort_rollup(preview_children, cost_per_child=cost_per_child) if preview_children else None
     return {
         "status": "ok",
         "cohort": rollup,
         "children": children,
         "learning_indicators": learning_indicator_evidence(children),
+        "preview_mode": not bool(children),
+        "preview_note": (
+            "No eligible child pilot records are enrolled yet. Preview indicators show the complete "
+            "board-facing evidence shape and are not live learning claims."
+        ) if not children else None,
+        "preview_learning_indicators": learning_indicator_evidence(preview_children),
+        "preview_cohort": preview_rollup,
         "benchmarks": BENCHMARKS,
         "notes": {
             "primary_outcome": "TaRL level movement (baseline placement -> current); % of cohort up >=1 level.",

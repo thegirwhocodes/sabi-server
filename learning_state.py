@@ -45,6 +45,8 @@ MODULE_SKILLS = {
 }
 
 SKILL_MODULE = {skill: module for module, skill in MODULE_SKILLS.items()}
+MIN_NUMERACY_CORRECT_FOR_ADVANCE = 3
+MIN_NUMERACY_MASTERY_CONFIRMATIONS = 2
 
 
 SCAFFOLD_LADDERS = {
@@ -302,6 +304,7 @@ def default_learning_state() -> dict[str, Any]:
         "last_expected_answer": None,
         "last_child_numbers": [],
         "last_turn_correct": None,
+        "last_numeric_ambiguous": False,
         "repair_skill": None,
         "scaffold_ladder": None,
         "next_step": "Run a warm diagnostic disguised as a game, then start the first mini-lesson at the placed level.",
@@ -475,7 +478,7 @@ def infer_skill_from_question(question: str, fallback_module: int = 0) -> str:
         return "subtraction"
     if re.search(r"\b(enough|both|how much did you make|keep half)\b", lower):
         return "word_problems"
-    if re.search(r"\b(altogether|total|plus|add|together|in all)\b", lower):
+    if re.search(r"\b(altogether|total|plus|add|in all)\b", lower):
         return "addition"
     if re.search(r"\b(after|before|count|bigger|which number)\b", lower) or re.search(
         r"\b(which is smaller|which number is smaller|smaller number)\b",
@@ -579,12 +582,20 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
     last_expected = None
     last_child_numbers: list[int] = []
     last_turn_correct = None
+    last_numeric_ambiguous = False
 
     for index, message in enumerate(messages):
         if message.get("role") != "user":
             continue
         check = analyze_latest_numeric_turn(messages[: index + 1])
-        if check.expected is None or check.is_correct is None:
+        if check.expected is None:
+            continue
+        if check.is_correct is None:
+            if check.child_numbers:
+                last_expected = check.expected
+                last_child_numbers = check.child_numbers
+                last_turn_correct = None
+                last_numeric_ambiguous = True
             continue
         skill = infer_skill_from_question(check.assistant_question, current_module)
         if skill not in topics:
@@ -593,6 +604,7 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
         last_expected = check.expected
         last_child_numbers = check.child_numbers
         last_turn_correct = check.is_correct
+        last_numeric_ambiguous = False
         if check.is_correct:
             correct_count += 1
             correct_streak += 1
@@ -619,19 +631,42 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
         current_module == 0
         and diagnostic_progress
         and diagnostic_progress.get("status") in {"not_started", "in_progress"}
+        and diagnostic_progress.get("results")
         and _is_ordered_diagnostic_prefix(diagnostic_progress)
     ):
         recommended_module = 0
     else:
         recommended_module = _recommended_module(current_module, active_skill, correct_streak, wrong_streak, scaffold_depth)
-    should_advance = correct_streak >= 3 and wrong_count == 0 and current_module not in (0, 7)
+    current_week = int((placement or {}).get("week") or state.get("current_week") or 1)
+    current_lesson = int((placement or {}).get("lesson") or state.get("current_lesson") or 1)
+    raw_mastery_ready = (
+        correct_count >= MIN_NUMERACY_CORRECT_FOR_ADVANCE
+        and correct_streak >= MIN_NUMERACY_CORRECT_FOR_ADVANCE
+        and wrong_count == 0
+        and current_module not in (0, 7)
+    )
+    mastery_confirmation_key = f"numeracy:m{current_module}:w{current_week}:l{current_lesson}"
+    previous_confirmation_key = str(state.get("mastery_confirmation_key") or "")
+    previous_confirmation_count = int(state.get("mastery_confirmation_count") or 0)
+    if raw_mastery_ready:
+        mastery_confirmation_count = (
+            previous_confirmation_count + 1
+            if previous_confirmation_key == mastery_confirmation_key
+            else 1
+        )
+        next_mastery_confirmation_key: str | None = mastery_confirmation_key
+    elif previous_confirmation_key == mastery_confirmation_key:
+        mastery_confirmation_count = previous_confirmation_count
+        next_mastery_confirmation_key = previous_confirmation_key or None
+    else:
+        mastery_confirmation_count = 0
+        next_mastery_confirmation_key = None
+    should_advance = raw_mastery_ready and mastery_confirmation_count >= MIN_NUMERACY_MASTERY_CONFIRMATIONS
     current_level = _current_level(skill_scores, scaffold_depth, wrong_streak)
     phase = _phase_for_state(current_module, recommended_module, messages, correct_count, wrong_count, diagnostic_progress, onboarding_status)
     scaffold_ladder = scaffold_ladder_for(active_skill, scaffold_depth, wrong_streak)
     next_step = _next_step(active_skill, scaffold_depth, wrong_streak, correct_streak, scaffold_ladder)
     diagnostic_status = _diagnostic_status(current_module, recommended_module, diagnostic_progress, topics)
-    current_week = int((placement or {}).get("week") or state.get("current_week") or 1)
-    current_lesson = int((placement or {}).get("lesson") or state.get("current_lesson") or 1)
 
     updated_state = {
         **state,
@@ -650,6 +685,10 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
         "last_expected_answer": last_expected,
         "last_child_numbers": last_child_numbers,
         "last_turn_correct": last_turn_correct,
+        "last_numeric_ambiguous": last_numeric_ambiguous,
+        "mastery_ready": raw_mastery_ready,
+        "mastery_confirmation_key": next_mastery_confirmation_key,
+        "mastery_confirmation_count": mastery_confirmation_count,
         "repair_skill": active_skill if scaffold_ladder else None,
         "scaffold_ladder": scaffold_ladder,
         "next_step": next_step,

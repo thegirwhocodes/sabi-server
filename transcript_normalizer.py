@@ -66,6 +66,37 @@ MARKET_TERM_MISHEARS = (
     (re.compile(r"\b(nero|narrow|nera|nira|nyra|naire)\b", re.I), "naira"),
 )
 
+PHONE_SYSTEM_TRANSCRIPT_RE = re.compile(
+    r"\b("
+    r"not available|currently unavailable|unavailable|not reachable|"
+    r"switched off|line busy|mailbox|voice ?mail|"
+    r"leave (?:a )?message|record (?:your )?message|"
+    r"finished recording|after the tone|try again later|hang up|"
+    r"number you (?:have )?dial(?:ed|led)|press (?:one|1)"
+    r")\b",
+    re.I,
+)
+
+EMPTY_OR_NOISE_TRANSCRIPT_RE = re.compile(
+    r"^\s*(?:\[\s*)?(?:silence|inaudible|noise|background noise|no speech|unknown)(?:\s*\])?\s*$",
+    re.I,
+)
+
+SHORT_CLOSING_HALLUCINATION_RE = re.compile(
+    r"^\s*(?:bye|bye bye|goodbye|see you|see you next time|thank you|thanks|got it|end card)\s*[.!?]*\s*$",
+    re.I,
+)
+
+WHISPER_HALLUCINATION_PHRASE_RE = re.compile(
+    r"\b("
+    r"subtitles by|amara\.org|thanks for watching|thank you for watching|"
+    r"captioning by|go ahead and practice|click on|"
+    r"a bit better because|hold a bit higher|perfectly fixed|"
+    r"yeah yeah yeah|yeah, yeah, yeah"
+    r")\b",
+    re.I,
+)
+
 
 @dataclass(frozen=True)
 class NormalizeResult:
@@ -93,6 +124,17 @@ def _has_market_context(text: str) -> bool:
     return any(token in MARKET_CONTEXT_WORDS for token in _tokens(text))
 
 
+def _has_strong_five_context(text: str) -> bool:
+    tokens = set(_tokens(text))
+    weak_words = {"how", "answer"}
+    return any(
+        _is_number_like(token)
+        or token in MATH_PROMPT_CONTEXT_WORDS
+        or token in (MARKET_CONTEXT_WORDS - weak_words)
+        for token in tokens
+    )
+
+
 def has_numeric_lesson_context(messages: list[dict[str, str]]) -> bool:
     """Return true when recent tutor turns are asking for a numeric/market answer."""
     recent_assistant = " ".join(
@@ -108,6 +150,31 @@ def has_numeric_lesson_context(messages: list[dict[str, str]]) -> bool:
     return any(_is_number_like(token) for token in tokens) and any(
         token in MATH_PROMPT_CONTEXT_WORDS for token in tokens
     )
+
+
+def is_phone_system_transcript(text: str) -> bool:
+    """Return true when STT captured carrier/voicemail audio, not the child."""
+    return bool(PHONE_SYSTEM_TRANSCRIPT_RE.search(str(text or "")))
+
+
+def is_non_answer_transcript(text: str) -> bool:
+    """Return true when a transcript should trigger repeat instead of grading."""
+    raw = str(text or "")
+    if not raw.strip():
+        return True
+    if EMPTY_OR_NOISE_TRANSCRIPT_RE.match(raw):
+        return True
+    if SHORT_CLOSING_HALLUCINATION_RE.match(raw):
+        return True
+    return is_phone_system_transcript(raw)
+
+
+def is_likely_stt_hallucination_transcript(text: str) -> bool:
+    """Return true for common Whisper hallucinations on very short/noisy clips."""
+    raw = str(text or "")
+    if is_non_answer_transcript(raw):
+        return True
+    return bool(WHISPER_HALLUCINATION_PHRASE_RE.search(raw))
 
 
 def _is_price_preposition(tokens: list[str], index: int) -> bool:
@@ -187,6 +254,9 @@ def normalize_number_mishears(raw: str, *, force_numeric_context: bool = False) 
 
 def normalize_lesson_transcript(text: str, messages: list[dict[str, str]]) -> NormalizeResult:
     """Normalize an STT transcript using the last few tutor prompts as context."""
+    if is_phone_system_transcript(text):
+        return NormalizeResult(text=text, changed=False, substitutions=[])
+
     recent_assistant = " ".join(
         message.get("content", "")
         for message in messages[-4:]
@@ -197,6 +267,10 @@ def normalize_lesson_transcript(text: str, messages: list[dict[str, str]]) -> No
     result = normalize_number_mishears(text, force_numeric_context=force_numeric_context)
     normalized = result.text
     substitutions = list(result.substitutions)
+
+    if re.fullmatch(r"\s*fine[\W_]*\s*", str(normalized or ""), flags=re.I) and _has_strong_five_context(recent_assistant):
+        substitutions.append(("fine", "five"))
+        normalized = "five"
 
     if "bag" in recent_assistant:
         bag_fixed = re.sub(r"\b(bugs|bucks)\b", "bags", normalized, flags=re.I)

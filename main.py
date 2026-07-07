@@ -21,7 +21,7 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
@@ -56,6 +56,7 @@ from voice_asterisk import start_agi_server, synthesize_phone_tts
 from voice_realtime import record_hangup_event, register_call, start_audiosocket_server
 from secret_loader import get_secret
 from sentry_setup import init_sentry
+from phone_utils import normalize_phone_number
 
 load_dotenv()
 
@@ -486,16 +487,69 @@ AMI_PORT = int(os.getenv("AMI_PORT", "5038"))
 AMI_USER = os.getenv("AMI_USER", "sabi")
 AMI_SECRET = os.getenv("AMI_SECRET", "sabi_ami_secret_change_me")
 SABI_CALLER_ID = os.getenv("SABI_CALLER_ID", "+2342017001459")
-FLASH_CALLBACK_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_DELAY_SECONDS", "0"))
-FLASH_CALLBACK_RETRY_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_RETRY_DELAY_SECONDS", "6"))
+FLASH_CALLBACK_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_DELAY_SECONDS", "4"))
+FLASH_CALLBACK_RETRY_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_RETRY_DELAY_SECONDS", "10"))
 FLASH_CALLBACK_MAX_ATTEMPTS = int(os.getenv("FLASH_CALLBACK_MAX_ATTEMPTS", "3"))
-FLASH_CALLBACK_COOLDOWN_SECONDS = int(os.getenv("FLASH_CALLBACK_COOLDOWN_SECONDS", "20"))
-FLASH_CALLBACK_RETRY_ENABLED = os.getenv("FLASH_CALLBACK_RETRY_ENABLED", "0").lower() in {"1", "true", "yes"}
+FLASH_CALLBACK_COOLDOWN_SECONDS = int(os.getenv("FLASH_CALLBACK_COOLDOWN_SECONDS", "45"))
+FLASH_CALLBACK_RETRY_ENABLED = os.getenv("FLASH_CALLBACK_RETRY_ENABLED", "1").lower() in {"1", "true", "yes"}
+SABI_FLASH_CALLBACK_PHONE_ALIASES = os.getenv("SABI_FLASH_CALLBACK_PHONE_ALIASES", "")
 _last_flash_callbacks: dict[str, float] = {}
 
 
 def normalize_phone(phone: str) -> str:
-    return re.sub(r"[^\d+]", "", phone or "")
+    normalized = normalize_phone_number(phone)
+    if normalized == "unknown":
+        return ""
+    return re.sub(r"[^\d+]", "", normalized)
+
+
+def _flash_callback_aliases() -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for raw_pair in re.split(r"[,\n;]+", SABI_FLASH_CALLBACK_PHONE_ALIASES):
+        pair = raw_pair.strip()
+        if not pair:
+            continue
+        if "->" in pair:
+            source, target = pair.split("->", 1)
+        elif "=" in pair:
+            source, target = pair.split("=", 1)
+        else:
+            logger.warning("Ignoring invalid callback alias %r; use source=target", pair)
+            continue
+        source_phone = normalize_phone(source)
+        target_phone = normalize_phone(target)
+        if not source_phone or not target_phone:
+            logger.warning("Ignoring invalid callback alias %r; missing source or target phone", pair)
+            continue
+        aliases[source_phone] = target_phone
+    return aliases
+
+
+def resolve_flash_callback_phone(phone: str) -> tuple[str, str]:
+    """Return (incoming caller ID, callback target), applying test aliases."""
+    incoming_phone = normalize_phone(phone)
+    if not incoming_phone:
+        return "", ""
+    callback_phone = _flash_callback_aliases().get(incoming_phone, incoming_phone)
+    return incoming_phone, callback_phone
+
+
+@app.post("/asterisk/inbound-route")
+async def asterisk_inbound_route(phone: str = Form(...)):
+    """
+    Decide whether an inbound SIP caller should stay on direct call-in or use
+    flash-callback. Testing aliases route to callback; normal callers stay
+    direct so production behavior does not change accidentally.
+    """
+    incoming_phone, callback_phone = resolve_flash_callback_phone(phone)
+    route = "flash" if incoming_phone and callback_phone != incoming_phone else "inbound"
+    logger.info(
+        "Inbound route resolved phone=%s callback=%s route=%s",
+        incoming_phone or "unknown",
+        callback_phone or "unknown",
+        route,
+    )
+    return PlainTextResponse(route)
 
 
 @app.get("/admin/feedback")
@@ -824,32 +878,43 @@ async def flash_callback(phone: str = Form(...)):
     Initiates outbound call to the child via AMI Originate.
     Child pays ₦0. We pay ₦3/min SIP outgoing.
     """
-    normalized_phone = normalize_phone(phone)
-    if not normalized_phone or normalized_phone == "+":
+    incoming_phone, callback_phone = resolve_flash_callback_phone(phone)
+    if not incoming_phone or not callback_phone:
         logger.warning("Flash callback rejected: missing phone number")
         return JSONResponse({"status": "rejected", "reason": "missing_phone"}, status_code=400)
+    if callback_phone != incoming_phone:
+        logger.info("Flash callback alias applied: incoming=%s callback=%s", incoming_phone, callback_phone)
 
     now = time.monotonic()
-    last_requested = _last_flash_callbacks.get(normalized_phone, 0)
+    last_requested = _last_flash_callbacks.get(callback_phone, 0)
     if now - last_requested < FLASH_CALLBACK_COOLDOWN_SECONDS:
         logger.info(
             "Flash callback duplicate suppressed for %s (%.1fs since last request)",
-            normalized_phone,
+            callback_phone,
             now - last_requested,
         )
-        return JSONResponse({"status": "duplicate_ignored", "phone": normalized_phone})
+        return JSONResponse({
+            "status": "duplicate_ignored",
+            "phone": callback_phone,
+            "incoming_phone": incoming_phone,
+        })
 
-    _last_flash_callbacks[normalized_phone] = now
+    _last_flash_callbacks[callback_phone] = now
     for old_phone, timestamp in list(_last_flash_callbacks.items()):
         if now - timestamp > FLASH_CALLBACK_COOLDOWN_SECONDS * 6:
             _last_flash_callbacks.pop(old_phone, None)
 
-    logger.info(f"Flash callback requested for {normalized_phone}")
+    logger.info("Flash callback requested incoming=%s callback=%s", incoming_phone, callback_phone)
 
     # Fire and forget — don't block Asterisk's curl
-    asyncio.create_task(ami_originate(normalized_phone, attempt=1))
+    asyncio.create_task(ami_originate(callback_phone, attempt=1))
 
-    return JSONResponse({"status": "callback_initiated", "phone": normalized_phone, "attempt": 1})
+    return JSONResponse({
+        "status": "callback_initiated",
+        "phone": callback_phone,
+        "incoming_phone": incoming_phone,
+        "attempt": 1,
+    })
 
 
 @app.post("/asterisk/flash/retry")

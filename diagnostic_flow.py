@@ -11,7 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from numeric_grading import extract_numbers
+from numeric_grading import extract_numbers, is_confusable_numeric_answer
+from transcript_normalizer import is_non_answer_transcript
 
 
 @dataclass(frozen=True)
@@ -662,6 +663,8 @@ def literacy_diagnostic_results_from_messages(messages: list[dict[str, str]]) ->
         if not item:
             continue
         child_answer = message.get("content", "")
+        if is_non_answer_transcript(child_answer):
+            continue
         normalized = _normalize_text(child_answer)
         correct = any(re.search(pattern, normalized) for pattern in item.correct_patterns)
         partial = (not correct) and any(re.search(pattern, normalized) for pattern in item.partial_patterns)
@@ -712,7 +715,11 @@ def diagnostic_results_from_messages(messages: list[dict[str, str]]) -> list[Dia
         if not item:
             continue
         child_answer = message.get("content", "")
+        if is_non_answer_transcript(child_answer):
+            continue
         child_numbers = tuple(extract_numbers(child_answer))
+        if child_numbers and is_confusable_numeric_answer(item.expected, child_numbers):
+            continue
         correct = any(expected in child_numbers for expected in item.expected)
         results.append(
             DiagnosticResult(

@@ -4,6 +4,7 @@ Protects the Sabi Costs.md invariant path (phone TTS -> self-hosted Chatterbox
 at $0, ElevenLabs as paid fallback) while it is canaried safely:
 
   1. `synthesize_phone_tts` chain order is correct for every primary:
+       chatterbox_only -> chatterbox only, no paid fallback
        chatterbox  -> chatterbox, elevenlabs, yarngpt
        elevenlabs  -> elevenlabs, yarngpt          (production today — UNCHANGED)
        yarngpt     -> yarngpt, elevenlabs
@@ -22,10 +23,16 @@ Run: python tts_provider_config_regression.py  (host or in the sabi container)
 import asyncio
 import inspect
 import json
+import os
 import re
 import sys
 import tempfile
 from pathlib import Path
+
+os.environ.setdefault(
+    "SABI_SHARED_AUDIO_DIR",
+    str(Path(tempfile.gettempdir()) / "sabi-tts-provider-config-regression"),
+)
 
 import voice_asterisk
 from call_admin import append_call_turn_review, load_call_record
@@ -97,6 +104,16 @@ def main() -> int:
     print("=" * 56)
 
     # 1. Chain orders
+    provider, calls = run_chain("chatterbox_only", {})
+    check("chatterbox_only primary wins", provider == "chatterbox" and calls == ["chatterbox"])
+
+    provider, calls = run_chain("chatterbox_only", {"chatterbox": False})
+    check(
+        "chatterbox_only does not fall back to paid providers",
+        provider is None and calls == ["chatterbox"],
+        f"got provider={provider} calls={calls}",
+    )
+
     provider, calls = run_chain("chatterbox", {})
     check("chatterbox primary wins", provider == "chatterbox" and calls == ["chatterbox"])
 

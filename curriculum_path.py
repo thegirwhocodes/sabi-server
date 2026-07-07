@@ -485,6 +485,9 @@ def advance_numeracy_state_after_mastery(state: dict[str, Any]) -> dict[str, Any
             "correct_streak": 0,
             "wrong_streak": 0,
             "scaffold_depth": 0,
+            "mastery_ready": False,
+            "mastery_confirmation_key": None,
+            "mastery_confirmation_count": 0,
             "next_step": (
                 f"Start Module {next_record['module']}, Week {next_record['week']}, "
                 f"Lesson {next_record['lesson']}: {next_record['title']}. Begin with one recall question."

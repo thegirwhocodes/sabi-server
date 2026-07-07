@@ -31,7 +31,13 @@ from pathlib import Path
 from typing import Any
 
 from numeric_grading import extract_numbers
-from transcript_normalizer import normalize_lesson_transcript, normalize_number_mishears
+from transcript_normalizer import (
+    is_likely_stt_hallucination_transcript,
+    is_non_answer_transcript,
+    is_phone_system_transcript,
+    normalize_lesson_transcript,
+    normalize_number_mishears,
+)
 
 
 BUILT_IN_CASES: list[dict[str, Any]] = [
@@ -85,6 +91,20 @@ BUILT_IN_CASES: list[dict[str, Any]] = [
         "expected_numbers": [2],
     },
     {
+        "id": "fine_after_math_prompt_is_five",
+        "transcript": "fine",
+        "assistant_context": "You have two mangoes and buy three more. How many mangoes altogether?",
+        "expected_text": "five",
+        "expected_numbers": [5],
+    },
+    {
+        "id": "fine_outside_numeric_context_stays_fine",
+        "transcript": "fine",
+        "assistant_context": "How are you feeling today?",
+        "expected_text": "fine",
+        "expected_numbers": [],
+    },
+    {
         "id": "long_speech_does_not_turn_to_into_two",
         "transcript": "I think I need to work on the code before you test it",
         "assistant_context": "You buy pure water for fifty naira and groundnuts for seventy naira. How much money is left?",
@@ -133,6 +153,103 @@ BUILT_IN_CASES: list[dict[str, Any]] = [
         "expected_text": "Peter",
         "expected_numbers": [],
     },
+    {
+        "id": "carrier_not_available_detected",
+        "transcript": "The number you have dialed is not available. Press one to leave a message.",
+        "assistant_context": "What number comes after twenty-nine?",
+        "expected_text": "The number you have dialed is not available. Press one to leave a message.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": True,
+    },
+    {
+        "id": "short_not_available_detected",
+        "transcript": "Not available.",
+        "assistant_context": "What is your name?",
+        "expected_text": "Not available.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": True,
+    },
+    {
+        "id": "finished_recording_detected",
+        "transcript": "When you have finished recording, you may hang up.",
+        "assistant_context": "Tell me, do you go to school?",
+        "expected_text": "When you have finished recording, you may hang up.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": True,
+    },
+    {
+        "id": "short_bye_hallucination_is_non_answer",
+        "transcript": "Bye.",
+        "assistant_context": "You buy pure water for three naira and groundnuts for two naira. How much altogether?",
+        "expected_text": "Bye.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": False,
+    },
+    {
+        "id": "short_bye_bye_hallucination_is_non_answer",
+        "transcript": "Bye bye.",
+        "assistant_context": "Say the first sound in ball.",
+        "expected_text": "Bye bye.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": False,
+    },
+    {
+        "id": "short_see_you_next_time_hallucination_is_non_answer",
+        "transcript": "See you next time.",
+        "assistant_context": "What is two plus three?",
+        "expected_text": "See you next time.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": False,
+    },
+    {
+        "id": "short_thank_you_is_non_answer",
+        "transcript": "Thank you.",
+        "assistant_context": "What word do these sounds make: sh, i, p?",
+        "expected_text": "Thank you.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": False,
+    },
+    {
+        "id": "short_got_it_is_non_answer",
+        "transcript": "Got it.",
+        "assistant_context": "What word do these sounds make: k, a, t?",
+        "expected_text": "Got it.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": False,
+    },
+    {
+        "id": "short_end_card_is_non_answer",
+        "transcript": "End card.",
+        "assistant_context": "What word do these sounds make: k, a, t?",
+        "expected_text": "End card.",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_phone_system": False,
+    },
+    {
+        "id": "whisper_phrase_hallucination_a_bit_better",
+        "transcript": "a bit better because...",
+        "assistant_context": "What is the first sound in mango?",
+        "expected_text": "a bit better because...",
+        "expected_numbers": [],
+        "expected_hallucination": True,
+    },
+    {
+        "id": "whisper_phrase_hallucination_click_on",
+        "transcript": "And you click on...",
+        "assistant_context": "Blend these sounds: c-a-t.",
+        "expected_text": "And you click on...",
+        "expected_numbers": [],
+        "expected_hallucination": True,
+    },
 ]
 
 
@@ -165,6 +282,24 @@ def _normalize_case(case: dict[str, Any]) -> dict[str, Any]:
         ok = any(phrase in lower for phrase in expected_any)
         checks.append(ok)
         details.append(f"expected_any={'ok' if ok else f'got {result.text!r}, wanted any {expected_any!r}'}")
+    if "expected_non_answer" in case:
+        actual = is_non_answer_transcript(result.text)
+        expected = bool(case["expected_non_answer"])
+        ok = actual is expected
+        checks.append(ok)
+        details.append(f"non_answer={'ok' if ok else f'got {actual!r}, wanted {expected!r}'}")
+    if "expected_phone_system" in case:
+        actual = is_phone_system_transcript(result.text)
+        expected = bool(case["expected_phone_system"])
+        ok = actual is expected
+        checks.append(ok)
+        details.append(f"phone_system={'ok' if ok else f'got {actual!r}, wanted {expected!r}'}")
+    if "expected_hallucination" in case:
+        actual = is_likely_stt_hallucination_transcript(result.text)
+        expected = bool(case["expected_hallucination"])
+        ok = actual is expected
+        checks.append(ok)
+        details.append(f"hallucination={'ok' if ok else f'got {actual!r}, wanted {expected!r}'}")
 
     return {
         "id": case.get("id", "unnamed"),

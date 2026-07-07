@@ -168,6 +168,14 @@ def main() -> int:
         and "click a node to see the learner evidence underneath" in html,
     )
     ok &= check(
+        "renders_preview_indicator_mode",
+        "preview_learning_indicators" in html
+        and "preview_cohort" in html
+        and "Pilot evidence preview" in html
+        and "Preview only" in html
+        and "ready to capture" in html,
+    )
+    ok &= check(
         "replaces_per_child_evidence_table_with_indicators",
         "Per-child evidence" not in html
         and "Child-Safe Evidence Export" in html

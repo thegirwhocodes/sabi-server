@@ -41,6 +41,7 @@ from pilot_research_design import (
 from teacher_notes import generate_teacher_note
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from secret_loader import get_secret
+from transcript_normalizer import is_phone_system_transcript
 
 logger = logging.getLogger("sabi.memory")
 
@@ -193,7 +194,7 @@ class StudentMemory:
             student = student_result.data[0] if student_result.data else {}
             normalized_phone = normalize_phone_number(phone_number)
             variants = phone_lookup_variants(phone_number)
-            spoken_child_name = extract_child_name(cleaned_messages)
+            spoken_child_name = sanitize_child_name_for_storage(extract_child_name(cleaned_messages))
             original_student_id = student_id
             if spoken_child_name and student:
                 resolved_student = self._resolve_student_for_session(
@@ -341,7 +342,9 @@ class StudentMemory:
             for skill, score in (stats.skills or {}).items():
                 merged_skills[skill] = max(float(merged_skills.get(skill, 0) or 0), float(score))
 
-            identity_name = stats.child_name or spoken_child_name or student.get("name")
+            identity_name = sanitize_child_name_for_storage(
+                stats.child_name or spoken_child_name or student.get("name")
+            )
             probe_score, probe_source = session_probe_score(
                 learning_state=persisted_learning_state,
                 scorecard=call_scorecard,
@@ -458,6 +461,7 @@ class StudentMemory:
         if not self.client:
             return {"id": "demo", "name": None, "current_module": 0, "is_new": True}
 
+        child_name = sanitize_child_name_for_storage(child_name)
         normalized_phone = normalize_phone_number(phone_number)
         variants = phone_lookup_variants(phone_number)
 
@@ -1073,6 +1077,9 @@ class StudentMemory:
         variants: list[str],
         child_name: str,
     ) -> dict | None:
+        child_name = sanitize_child_name_for_storage(child_name)
+        if not child_name:
+            return current_student
         if one_profile_per_phone_enabled():
             return self._keep_single_phone_profile(current_student, normalized_phone, child_name)
         name_key = normalize_child_name_for_identity(child_name)
@@ -1196,7 +1203,7 @@ class StudentMemory:
             return current_student
         payload = _single_phone_identity_payload(normalized_phone)
         current_name = str(current_student.get("name") or "").strip()
-        child_name_clean = str(child_name or "").strip()
+        child_name_clean = sanitize_child_name_for_storage(child_name) or ""
         current_name_key = normalize_child_name_for_identity(current_name)
         child_name_key = normalize_child_name_for_identity(child_name_clean)
         if child_name_key and (
@@ -1368,15 +1375,36 @@ def normalize_child_name_for_identity(name: str | None) -> str | None:
     """Stable child-name key for shared family phone profiles."""
     if not name:
         return None
+    if is_phone_system_transcript(name):
+        return None
     cleaned = re.sub(r"[^a-z0-9' ]+", " ", str(name).lower())
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" '")
     if not cleaned:
         return None
     ignored = {
         "yes", "no", "okay", "ok", "hello", "hi", "thanks", "thank you",
+        "sorry", "i'm sorry", "im sorry", "i am sorry",
         "i don't know", "i dont know",
+        "not available", "currently unavailable", "unavailable",
+        "not reachable", "line busy", "busy", "voicemail", "voice mail",
+        "mailbox", "recording", "hang up",
     }
     return None if cleaned in ignored else cleaned
+
+
+def sanitize_child_name_for_storage(name: str | None) -> str | None:
+    """Return a safe human name for storage, rejecting carrier/non-answer text."""
+    name_key = normalize_child_name_for_identity(name)
+    if not name_key:
+        return None
+    cleaned = re.sub(r"[^A-Za-z' -]", "", str(name or "")).strip(" .,'-")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned or len(cleaned) > 40:
+        return None
+    words = cleaned.split()
+    if len(words) > 2:
+        return None
+    return " ".join(word.capitalize() for word in words)
 
 
 def learner_key_for(normalized_phone: str | None, child_name: str | None) -> str | None:
@@ -1411,6 +1439,7 @@ def _single_phone_identity_payload(normalized_phone: str, child_name: str | None
         "phone_number": normalized_phone,
         "phone_number_normalized": normalized_phone,
         "phone_household_key": normalized_phone,
+        "learner_key": None,
     }
     child_name_normalized = normalize_child_name_for_identity(child_name)
     if child_name_normalized:
@@ -1429,6 +1458,8 @@ def _compatibility_identity_payload(normalized_phone: str, child_name: str | Non
 
 
 def _identity_payload_for_existing_row(row: dict, normalized_phone: str, child_name: str | None = None) -> dict:
+    if one_profile_per_phone_enabled():
+        return _single_phone_identity_payload(normalized_phone, child_name)
     if _is_compatibility_learner_row(row, normalized_phone):
         return _compatibility_identity_payload(normalized_phone, child_name or row.get("name"))
     return _phone_identity_payload(normalized_phone, child_name)

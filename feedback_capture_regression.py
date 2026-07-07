@@ -72,6 +72,7 @@ class _BaseFakeCall:
         self.wait_calls: list[dict] = []
         self.audio_queue: asyncio.Queue = asyncio.Queue()
         self.dtmf_queue: asyncio.Queue = asyncio.Queue()
+        self.drain_count = 0
         self.stt = FakeSTT()
         self.memory = FakeMemory()
 
@@ -83,6 +84,7 @@ class _BaseFakeCall:
         self.played_pcm_lengths.append(len(pcm))
 
     def drain_audio(self) -> None:
+        self.drain_count += 1
         while True:
             try:
                 self.audio_queue.get_nowait()
@@ -251,11 +253,17 @@ class FakeFeedbackTimeoutCall(_BaseFakeCall):
         return None
 
 
-async def _run(call: _BaseFakeCall, learning_state: dict | None = None) -> dict:
+async def _run(
+    call: _BaseFakeCall,
+    learning_state: dict | None = None,
+    *,
+    requested_by_caller: bool = False,
+) -> dict:
     await voice_realtime.RealtimeCall.record_feedback_note(
         call,
         student_id=f"student-{call.call_uuid}",
         learning_state=learning_state or {"course": "numeracy", "current_module": 2},
+        requested_by_caller=requested_by_caller,
     )
     sidecar = ROOT / f"feedback_{call.call_uuid}.json"
     return json.loads(sidecar.read_text()) if sidecar.exists() else {}
@@ -374,6 +382,34 @@ def main() -> int:
         voice_realtime._feedback_enabled_for_phone("+2348033374126"),
         voice_realtime.FEEDBACK_MODE,
     )
+    ok &= check(
+        "feedback_request_intent_detected",
+        voice_realtime._looks_like_feedback_request("Please let me leave feedback about the call")
+        and voice_realtime._looks_like_feedback_request("I want to complain")
+        and voice_realtime._looks_like_feedback_request("Can I leave a voice note?"),
+    )
+    ok &= check(
+        "feedback_request_intent_rejects_lesson_answer",
+        not voice_realtime._looks_like_feedback_request("five naira and three naira makes eight"),
+    )
+    ok &= check(
+        "feedback_offer_allows_requested_even_without_student_id",
+        voice_realtime._should_offer_feedback(
+            None,
+            [{"role": "assistant", "content": "hello"}],
+            False,
+            "feedback_requested",
+        ),
+    )
+    ok &= check(
+        "feedback_offer_blocks_after_hangup",
+        not voice_realtime._should_offer_feedback(
+            "student-1",
+            [{"role": "assistant", "content": "hello"}],
+            True,
+            "feedback_requested",
+        ),
+    )
 
     # 3. Happy path: prompt → go cue → speech captured → audio + transcript + sidecar.
     call = FakeFeedbackCall()
@@ -390,6 +426,11 @@ def main() -> int:
         "feedback_go_cue_played_after_prompt",
         len(call.played_pcm_lengths) >= 2 and call.played_pcm_lengths[1] > 0,
         call.played_pcm_lengths,
+    )
+    ok &= check(
+        "feedback_does_not_directly_drain_after_go_cue",
+        call.drain_count == 1,
+        call.drain_count,
     )
     ok &= check(
         "feedback_wait_passes_dtmf_skip_digit",
@@ -432,6 +473,19 @@ def main() -> int:
         saved,
     )
 
+    requested_call = FakeFeedbackCall()
+    requested_call.call_uuid = "fb-regression-requested"
+    requested_call.call_id = requested_call.call_uuid
+    requested_metadata = asyncio.run(_run(requested_call, requested_by_caller=True))
+    requested_prompt = requested_call.prompt_calls[0][1] if requested_call.prompt_calls else ""
+    ok &= check(
+        "feedback_requested_prompt_is_short_and_direct",
+        requested_metadata.get("ended_reason") == "speech_captured"
+        and "After the beep" in requested_prompt
+        and len(requested_prompt) < len(voice_realtime.FEEDBACK_PROMPT_TEXT),
+        requested_prompt,
+    )
+
     # 4. Channel-closed mid-recording still persists the partial PCM.
     hangup_call = FakeFeedbackHangupCall()
     hangup_metadata = asyncio.run(_run(hangup_call))
@@ -451,6 +505,11 @@ def main() -> int:
         "feedback_retries_once_after_timeout",
         len(retry_call.wait_calls) == 2,
         retry_call.wait_calls,
+    )
+    ok &= check(
+        "feedback_retry_does_not_directly_drain_after_go_cue",
+        retry_call.drain_count == 1,
+        retry_call.drain_count,
     )
     ok &= check(
         "feedback_retry_prompt_played",

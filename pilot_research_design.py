@@ -381,7 +381,7 @@ MEASUREMENT_QUALITY_BENCHMARKS = [
     {
         "source": "EGRA / EGMA",
         "standard": "Oral one-on-one items have constructs, administration rules, scoring rules, adaptation notes, and rater review.",
-        "sabi_requirement": "Fixed voice probes create assessment events and item-response rows with pending scorer/adjudication fields.",
+        "sabi_requirement": "Fixed voice probes create assessment events and item-response rows with scorer/adjudication fields for unscored responses.",
         "status": "implemented_scaffold",
     },
 ]
@@ -921,7 +921,7 @@ def research_capture_payload(
             "call_count_after": int(call_count_after),
             "duration_seconds": int(duration_seconds or 0),
             "aggregate_probe_score": round(float(probe_score), 3) if probe_score is not None else None,
-            "scoring_status": "aggregate_scored_item_level_pending",
+            "scoring_status": "aggregate_scored_item_level_ready_for_adjudication",
             "consent_snapshot": consent,
             "interruption_flag": False,
             "blinded_flag": False,
@@ -939,7 +939,7 @@ def research_capture_payload(
                 "tarl_level": item["tarl_level"],
                 "score": None,
                 "aggregate_event_score": round(float(probe_score), 3) if probe_score is not None else None,
-                "review_status": "pending_item_level_scoring",
+                "review_status": "ready_for_item_level_scoring",
                 "scoring_rule": item["scoring_rule"],
                 "voice_only_claim_boundary": item["voice_only_claim_boundary"],
                 "captured_at": now,
@@ -1175,7 +1175,7 @@ def publication_pack_status(
     items["deidentified_child_csv"] = {"ready": True, "note": "Available through board/evaluator/public export modes."}
     items["item_response_csv"] = {
         "ready": data_quality["item_response_records"] > 0,
-        "note": "Ready after fixed probes create item-response rows; pending scores are flagged.",
+        "note": "Ready after fixed probes create item-response rows; unscored responses are flagged.",
     }
     items["assessment_event_csv"] = {
         "ready": data_quality["fixed_probe_events"] > 0,

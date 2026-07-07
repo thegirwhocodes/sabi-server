@@ -14,7 +14,7 @@ paid ElevenLabs. This lane closes that gap safely.
 | Lane | AudioSocket | TTS chain | Cost |
 |---|---|---|---|
 | Production (`sabi-callback` / `sabi-inbound`) | 9019 | ElevenLabs → YarnGPT (**unchanged**) | paid |
-| Test lane (`sabi-callback-intron`) | 9020 | **Chatterbox → ElevenLabs → YarnGPT** | $0 when Chatterbox answers |
+| Test lane (`sabi-callback-intron`) | 9020 | **Chatterbox only** via `SABI_TTS_TEST_PRIMARY=chatterbox_only` | $0; fails loudly if Chatterbox is down |
 | Web demo (`/afro-tts/*` via nginx) | — | Chatterbox direct (restored) | $0 |
 
 - Container: `sabi-chatterbox` (image `sabi-server-chatterbox-tts:latest`, built Jun 29),
@@ -33,7 +33,7 @@ docker run -d --name sabi-chatterbox --restart unless-stopped --gpus all \
 
 - Env on Hetzner (`/opt/sabi/sabi-server/.env`):
   `SABI_TTS_PRIMARY=elevenlabs` (prod, unchanged) ·
-  `SABI_TTS_TEST_PRIMARY=chatterbox` · `SABI_CHATTERBOX_URL=http://chatterbox:8001/tts` ·
+  `SABI_TTS_TEST_PRIMARY=chatterbox_only` · `SABI_CHATTERBOX_URL=http://chatterbox:8001/tts` ·
   `SABI_CHATTERBOX_SPEAKER=naomi`
 - Evidence: every turn sidecar records `assistant.tts_provider`; calls roll up
   `tts_providers_used` (mirrors the STT provider evidence).
@@ -48,7 +48,7 @@ curl -X POST https://api.eduforequality.org/admin/asterisk/direct-call-intron \
 ```
 
 The 9020 lane now differs from production in TWO ways: Intron-first STT (falls
-back to Groq while INTRON_API_KEY is unset) and Chatterbox-first TTS. Inspect
+back to Groq while INTRON_API_KEY is unset) and Chatterbox-only TTS. Inspect
 afterwards: `GET /admin/calls/<uuid>` → each turn's `assistant.tts_provider`
 should read `chatterbox`; listen to the Sabi-side clips.
 

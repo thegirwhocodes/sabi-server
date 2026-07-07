@@ -463,6 +463,49 @@ def render_admin_review_page() -> str:
     .feedback-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); padding: 14px 16px; display: grid; gap: 9px; }
     .feedback-card.gold { border-color: #e0cd9f; background: var(--gold-wash); }
 
+    /* ---------- Concierge pre-pilot (demure summary of /sabi/prepilot) ---------- */
+    .prepilot-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; }
+    .prepilot-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; }
+    .prepilot-chip {
+      border: 1px solid var(--line); border-radius: 11px; background: var(--card);
+      padding: 10px 12px; display: grid; gap: 3px; min-width: 0;
+    }
+    .prepilot-chip-label { font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .prepilot-chip-value { font-family: var(--serif); font-size: 20px; font-weight: 600; color: var(--ink); line-height: 1.05; }
+    .prepilot-chip-value .small { font-size: 12px; font-weight: 400; color: var(--muted); font-family: var(--sans); margin-left: 4px; }
+    .prepilot-chip.warn { border-color: var(--warn-line); background: var(--warn-bg); }
+    .prepilot-chip.warn .prepilot-chip-value { color: var(--warn); }
+    .prepilot-chip.good { border-color: var(--green-line); background: var(--green-soft); }
+    .prepilot-chip.good .prepilot-chip-value { color: var(--green); }
+    .prepilot-checklist {
+      border: 1px solid var(--line); border-radius: 13px; background: var(--card);
+      padding: 12px 14px; display: grid; gap: 6px; min-width: 0;
+    }
+    .prepilot-checklist-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+      padding-bottom: 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
+    }
+    .prepilot-checklist-title { font-family: var(--serif); font-size: 15px; font-weight: 600; color: var(--ink); }
+    .prepilot-checklist-note { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--gold-deep); font-weight: 500; }
+    .prepilot-checklist ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+    .prepilot-checklist li {
+      display: grid; grid-template-columns: 14px 1fr; align-items: baseline;
+      gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft);
+    }
+    .prepilot-checklist li::before {
+      content: ""; display: block; width: 5px; height: 5px; border-radius: 99px;
+      background: var(--gold); margin-top: 8px;
+    }
+    .prepilot-foot {
+      margin-top: 10px; font-size: 12px; color: var(--muted);
+      display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    }
+    .prepilot-foot a { color: var(--gold-deep); text-decoration: none; font-weight: 500; border-bottom: 1px dotted var(--gold); }
+    .prepilot-foot a:hover { color: var(--ink); border-bottom-color: var(--ink); }
+    @media (max-width: 900px) {
+      .prepilot-grid { grid-template-columns: 1fr; }
+    }
+
     /* ---------- Curriculum ---------- */
     .curriculum-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); padding: 15px; display: grid; gap: 10px; }
     .curriculum-card.compact { padding: 17px; }
@@ -968,7 +1011,7 @@ def render_admin_review_page() -> str:
       const phone = displayPhone(record);
       const digits = phone.replace(/\\D/g, "");
       if (digits) return `Learner ${digits.slice(-4)}`;
-      const id = String((record && (record.id || record.browser_id)) || "pending");
+      const id = String((record && (record.id || record.browser_id)) || "profile");
       return `Profile ${id.slice(0, 8)}`;
     }
     function digitsOnly(value) {
@@ -1393,8 +1436,11 @@ def render_admin_review_page() -> str:
     }
     function renderNavCounts() {
       const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value || ""; };
+      const indicatorCount = state.pilotEvidence?.preview_mode
+        ? ((state.pilotEvidence?.preview_learning_indicators || []).length || (state.pilotEvidence?.learning_indicators || []).length)
+        : (state.pilotEvidence?.learning_indicators || []).length;
       set("count-learners", state.learners.length);
-      set("count-kids", (state.pilotEvidence?.learning_indicators || []).length || kidItems().length);
+      set("count-kids", indicatorCount || kidItems().length);
       set("count-calls", state.calls.length);
       set("count-feedback", state.feedback.length);
       set("count-review", reviewQueueCalls().length || "");
@@ -1552,9 +1598,11 @@ def render_admin_review_page() -> str:
       return "Review turns";
     }
     function statusKind(status) {
-      if (status === "pass") return "good";
-      if (status === "blocked") return "bad";
-      if (status === "watch" || status === "not_started") return "warn";
+      const key = String(status || "").toLowerCase();
+      if (key === "pass" || ["instrumented", "ready_to_record", "ready_to_capture", "ready_to_review", "method_pack_ready"].includes(key)) return "good";
+      if (key === "blocked") return "bad";
+      if (key === "watch" || key === "not_started" || ["ready_after_baseline", "ready_after_midline", "awaiting_live_cohort"].includes(key)) return "warn";
+      if (["board_ready_draft", "single_arm_ready"].includes(key)) return "gold";
       return "soft";
     }
     function renderOverviewDashboard() {
@@ -1624,6 +1672,52 @@ def render_admin_review_page() -> str:
             </div>`).join("")}
           </div>
         </div>` : ""}
+        ${(() => {
+          const metrics = (state.launchGates && state.launchGates.metrics) || {};
+          const target = 10;
+          const children = Number(metrics.child_profiles || 0);
+          const consented = Number(metrics.consented_children || 0);
+          const withCalls = Number(metrics.children_with_calls || 0);
+          const totalCalls = Number(metrics.recent_calls || 0);
+          const chip = (label, valueHtml, kind) => `<div class="prepilot-chip ${kind || ""}"><div class="prepilot-chip-label">${label}</div><div class="prepilot-chip-value">${valueHtml}</div></div>`;
+          const cohortKind = children >= target ? "good" : (children >= Math.ceil(target / 2) ? "" : "warn");
+          const consentKind = consented >= target ? "good" : (consented > 0 ? "" : "warn");
+          const firstKind = withCalls >= 7 ? "good" : (withCalls > 0 ? "" : "warn");
+          const callsKind = totalCalls > 0 ? "" : "warn";
+          const checklist = [
+            "Check PBX, Sabi API, Supabase, and phone-provider health.",
+            "Place one internal test call end-to-end and confirm session saved.",
+            "Review yesterday's flagged calls with audio, transcript, and TTS.",
+            "Message caregivers for any missed call windows.",
+            "Resolve open safety or urgent technical events first.",
+            "Export or screenshot today's dashboard for the pilot log.",
+          ];
+          return `<div class="section">
+            <div class="section-title-row">
+              <h3>Concierge Pre-pilot</h3>
+              <span class="section-caption">Cohort snapshot &middot; daily operator loop</span>
+            </div>
+            <div class="prepilot-grid">
+              <div class="prepilot-metrics">
+                ${chip("Cohort", `${children}<span class="small">of ${target}</span>`, cohortKind)}
+                ${chip("Consent recorded", String(consented), consentKind)}
+                ${chip("First call delivered", String(withCalls), firstKind)}
+                ${chip("Calls in window", String(totalCalls), callsKind)}
+              </div>
+              <div class="prepilot-checklist">
+                <div class="prepilot-checklist-head">
+                  <span class="prepilot-checklist-title">Today's operator loop</span>
+                  <span class="prepilot-checklist-note">Six-step ritual</span>
+                </div>
+                <ul>${checklist.map(item => `<li><span>${escapeHtml(item)}</span></li>`).join("")}</ul>
+              </div>
+            </div>
+            <div class="prepilot-foot">
+              <span>Full roster, consent forms, and event log live on the concierge desk.</span>
+              <a href="https://eduforequality.org/sabi/prepilot" target="_blank" rel="noopener">Open concierge desk &rarr;</a>
+            </div>
+          </div>`;
+        })()}
         <div class="section">
           <div class="section-title-row">
             <h3>Backend Model We Are Copying</h3>
@@ -1704,10 +1798,31 @@ def render_admin_review_page() -> str:
         retention_followup: "retention",
         monitoring: "monitor",
       };
-      return map[phase] || String(phase || "pending").replaceAll("_", " ");
+      return map[phase] || String(phase || "ready").replaceAll("_", " ");
     }
     function phaseRecorded(research, phase) {
       return (research?.measurements || []).some(item => item && item.phase === phase);
+    }
+    function statusText(status) {
+      const key = String(status || "").toLowerCase();
+      const labels = {
+        not_started: "ready to start",
+        board_ready_draft: "board-ready draft",
+        instrumented: "instrumented",
+        ready_to_record: "ready to record",
+        ready_to_capture: "ready to capture",
+        ready_after_baseline: "ready after baseline",
+        ready_after_midline: "ready after midline",
+        single_arm_ready: "single-arm ready",
+        awaiting_live_cohort: "awaiting live cohort",
+        ready_to_review: "ready to review",
+        method_pack_ready: "method pack ready",
+        signal_visible: "signal visible",
+        needs_scoring: "needs scoring",
+        needs_support: "needs support",
+        unscored: "unscored",
+      };
+      return labels[key] || String(status || "collecting").replaceAll("_", " ");
     }
     function distributionChips(dist) {
       const entries = Object.entries(dist || {});
@@ -1716,10 +1831,10 @@ def render_admin_review_page() -> str:
     }
     function indicatorKind(status) {
       const key = String(status || "").toLowerCase();
-      if (["strong", "signal_visible", "mastery_visible", "recorded"].includes(key)) return "good";
-      if (["needs_support", "needs_scoring", "due"].includes(key)) return "warn";
+      if (["strong", "signal_visible", "mastery_visible", "recorded", "instrumented", "ready_to_record", "ready_to_capture", "ready_to_review", "method_pack_ready"].includes(key)) return "good";
+      if (["needs_support", "needs_scoring", "due", "ready_after_baseline", "ready_after_midline", "awaiting_live_cohort"].includes(key)) return "warn";
       if (["blocked", "withdrawn"].includes(key)) return "bad";
-      if (["emerging", "collecting"].includes(key)) return "gold";
+      if (["emerging", "collecting", "board_ready_draft", "single_arm_ready"].includes(key)) return "gold";
       return "soft";
     }
     function progressWidth(value) {
@@ -1736,9 +1851,9 @@ def render_admin_review_page() -> str:
             <span class="indicator-label">${escapeHtml(indicator.label || "Learning indicator")}</span>
           </span>
         </div>
-        ${pill(String(indicator.status || "collecting").replaceAll("_", " "), indicatorKind(indicator.status))}
+        ${pill(statusText(indicator.status), indicatorKind(indicator.status))}
         <div class="indicator-meter" aria-hidden="true"><span style="width:${progress}%"></span></div>
-        <div class="indicator-metric">${escapeHtml(indicator.metric || "Evidence pending")}</div>
+        <div class="indicator-metric">${escapeHtml(indicator.metric || "Evidence ready")}</div>
       </button>`;
     }
     function renderIndicatorEvidenceRow(row) {
@@ -1757,7 +1872,7 @@ def render_admin_review_page() -> str:
       return `<div class="indicator-detail">
         <div class="indicator-detail-head">
           <div class="flag-wrap">
-            ${pill(String(indicator.status || "collecting").replaceAll("_", " "), indicatorKind(indicator.status))}
+            ${pill(statusText(indicator.status), indicatorKind(indicator.status))}
             ${pill(`${escapeHtml(indicator.evidence_count || evidence.length || 0)} evidence points`, "soft")}
             ${indicator.phase ? pill(String(indicator.phase).replaceAll("_", " "), "gold") : ""}
           </div>
@@ -1793,7 +1908,15 @@ def render_admin_review_page() -> str:
       const claimLadder = partnerKit.claim_ladder || [];
       const benchmarks = report.benchmarks || {};
       const children = report.children || [];
-      const indicators = report.learning_indicators || [];
+      const previewMode = Boolean(report.preview_mode);
+      const displayCohort = previewMode && report.preview_cohort ? report.preview_cohort : cohort;
+      const displayNum = displayCohort.tarl_movement?.numeracy || {};
+      const displayLit = displayCohort.tarl_movement?.literacy || {};
+      const displayProbe = displayCohort.probe || {};
+      const displayDosage = displayCohort.dosage || {};
+      const indicators = previewMode && (report.preview_learning_indicators || []).length
+        ? report.preview_learning_indicators
+        : (report.learning_indicators || []);
       if (!state.activeIndicatorKey || !indicators.some(item => item.key === state.activeIndicatorKey)) {
         state.activeIndicatorKey = (indicators[0] || {}).key || "";
       }
@@ -1802,23 +1925,23 @@ def render_admin_review_page() -> str:
       tableWrap.innerHTML = `<div class="overview-layout">
         <div class="command-grid">
           <div class="command-card">
-            ${pill(`${cohort.children || 0} learning records`, "gold")}
-            <strong>Evidence set</strong>
-            <p>${escapeHtml(cohort.consented || 0)} consented · ${escapeHtml(cohort.with_calls || 0)} with calls. Adult testers excluded.</p>
+            ${pill(previewMode ? `${indicators.length} preview indicators` : `${cohort.children || 0} learning records`, previewMode ? "gold" : "good")}
+            <strong>${previewMode ? "Pilot evidence preview" : "Evidence set"}</strong>
+            <p>${escapeHtml(previewMode ? (report.preview_note || "Preview indicators show the complete evidence shape before live child enrollment.") : `${cohort.consented || 0} consented · ${cohort.with_calls || 0} with calls. Adult testers excluded.`)}</p>
           </div>
           <div class="command-card">
-            ${pill(pctLabel(num.pct_up_one_plus_level), num.pct_up_one_plus_level >= 0.5 ? "good" : "soft")}
+            ${pill(pctLabel(displayNum.pct_up_one_plus_level), displayNum.pct_up_one_plus_level >= 0.5 ? "good" : "soft")}
             <strong>TaRL movement (numeracy)</strong>
-            <p>${escapeHtml(num.children_up_one_plus_level || 0)} of ${escapeHtml(num.children_with_baseline_and_current || 0)} children up ≥1 level.</p>
+            <p>${escapeHtml(displayNum.children_up_one_plus_level || 0)} of ${escapeHtml(displayNum.children_with_baseline_and_current || 0)} ${previewMode ? "preview learners" : "children"} up ≥1 level.</p>
           </div>
           <div class="command-card">
-            ${pill(probe.effect_size_d != null ? `d=${probe.effect_size_d}` : "probe pending", probe.effect_size_d >= 0.3 ? "good" : "soft")}
+            ${pill(displayProbe.effect_size_d != null ? `d=${displayProbe.effect_size_d}` : "probe ready", displayProbe.effect_size_d >= 0.3 ? "good" : "gold")}
             <strong>Probe effect size</strong>
-            <p>${escapeHtml(probe.n_paired || 0)} paired probes · mean gain ${escapeHtml(probe.mean_gain ?? "—")} · target d ≥ 0.30.</p>
+            <p>${escapeHtml(displayProbe.n_paired || 0)} paired probes · mean gain ${escapeHtml(displayProbe.mean_gain ?? "—")} · target d ≥ 0.30.${previewMode ? " Preview only." : ""}</p>
           </div>
         </div>
         <div class="section">
-          <div class="section-title-row"><h3>Learning Indicator Map</h3><span class="section-caption">${escapeHtml(indicators.length)} indicators · click a node to see the learner evidence underneath</span></div>
+          <div class="section-title-row"><h3>Learning Indicator Map</h3><span class="section-caption">${escapeHtml(indicators.length)} ${previewMode ? "preview " : ""}indicators · click a node to see the learner evidence underneath</span></div>
           <div class="indicator-map">
             ${primaryIndicators.map(indicator => renderIndicatorNode(indicator, activeIndicator && indicator.key === activeIndicator.key)).join("") || `<div class="empty">Learning indicators will appear once learner evidence records load.</div>`}
           </div>
@@ -1827,7 +1950,7 @@ def render_admin_review_page() -> str:
         <div class="section">
           <div class="section-title-row"><h3>Publishable-grade evidence protocol</h3><span class="section-caption">J-PAL discipline + UNESCO/GPF outcomes + TEP assessment validity + TaRL reassessment</span></div>
           <div class="detail-grid">
-            <div class="feedback-card"><strong>${escapeHtml(research.stage_label || "10-child pre-pilot")}</strong><p>${escapeHtml(research.design || "Pre/mid/post protocol pending.")}</p></div>
+            <div class="feedback-card"><strong>${escapeHtml(research.stage_label || "10-child pre-pilot")}</strong><p>${escapeHtml(research.design || "Pre/mid/post protocol ready to load.")}</p></div>
             <div class="feedback-card"><strong>Pre / mid / post records</strong><p>${escapeHtml(measurementCounts.pre_baseline || 0)} baseline · ${escapeHtml(measurementCounts.midline || 0)} midline · ${escapeHtml(measurementCounts.post_endline || 0)} endline · ${escapeHtml(measurementCounts.retention_followup || 0)} retention.</p></div>
             <div class="feedback-card"><strong>Study arms</strong><div class="skill-chips">${distributionChips(research.arm_distribution)}</div></div>
             <div class="feedback-card"><strong>Claim tier</strong><p>${escapeHtml(research.claim_boundary || "Publishable-grade methods from call one; effect claims stay scaled to sample size and power.")}</p></div>
@@ -1839,14 +1962,14 @@ def render_admin_review_page() -> str:
           <div class="section-title-row"><h3>RCT Advancement</h3><span class="section-caption">Board view: protocol, instruments, consent, data quality, outcomes, and publication pack</span></div>
           <div class="command-grid">
             ${(advancementCards || []).map(card => `<div class="command-card">
-              ${pill(String(card.status || "pending").replaceAll("_", " "), statusKind(card.status))}
+              ${pill(statusText(card.status), statusKind(card.status))}
               <strong>${escapeHtml(card.label || card.key || "Readiness")}</strong>
               <p><span class="small">${escapeHtml(card.metric || "—")}</span><br>${escapeHtml(card.detail || "")}</p>
             </div>`).join("") || `<div class="empty">RCT advancement will appear once child evidence records load.</div>`}
           </div>
           <div class="detail-grid">
             <div class="feedback-card"><strong>Coverage</strong><p>Baseline ${pctLabel(dataQuality.baseline_coverage)} · midline ${pctLabel(dataQuality.midline_coverage)} · endline ${pctLabel(dataQuality.endline_coverage)} · retention ${pctLabel(dataQuality.retention_coverage)}.</p></div>
-            <div class="feedback-card"><strong>Item scoring</strong><p>${escapeHtml(dataQuality.item_response_records || 0)} item-response rows · ${escapeHtml(dataQuality.pending_item_scores || 0)} pending item scores · complete ${pctLabel(dataQuality.item_scoring_complete_rate)}.</p></div>
+            <div class="feedback-card"><strong>Item scoring</strong><p>${escapeHtml(dataQuality.item_response_records || 0)} item-response rows · ${escapeHtml(dataQuality.pending_item_scores || 0)} unscored item scores · complete ${pctLabel(dataQuality.item_scoring_complete_rate)}.</p></div>
             <div class="feedback-card"><strong>Publication pack</strong><p>${escapeHtml(publicationPack.ready_count || 0)} of ${escapeHtml(publicationPack.total_count || 0)} artifacts ready. Status: ${escapeHtml(publicationPack.status || "not started")}.</p></div>
             <div class="feedback-card"><strong>Claim tier</strong><p>${escapeHtml(advancement.claim_tier || research.claim_boundary || "Publishable-grade methods from call one; effect claims scale with sample size and power.")}</p></div>
           </div>
@@ -1899,11 +2022,11 @@ def render_admin_review_page() -> str:
         <div class="command-grid">
           <div class="command-card">
             <strong>Dosage</strong>
-            <p>Median ${escapeHtml(dosage.median_calls ?? "—")} calls · ${escapeHtml(dosage.median_hours ?? "—")} hours · second-call return ${pctLabel(dosage.second_call_return_rate)}.</p>
+            <p>Median ${escapeHtml(displayDosage.median_calls ?? "—")} calls · ${escapeHtml(displayDosage.median_hours ?? "—")} hours · second-call return ${pctLabel(displayDosage.second_call_return_rate)}.${previewMode ? " Preview only." : ""}</p>
           </div>
           <div class="command-card">
             <strong>Mastery velocity</strong>
-            <p>${escapeHtml((cohort.mastery || {}).skills_mastered_total || 0)} skill-modules mastered across the cohort.</p>
+            <p>${escapeHtml((displayCohort.mastery || {}).skills_mastered_total || 0)} skill-modules mastered across the ${previewMode ? "preview cohort" : "cohort"}.</p>
           </div>
           <div class="command-card">
             <strong>Cost framing</strong>
@@ -1913,10 +2036,10 @@ def render_admin_review_page() -> str:
         <div class="section">
           <div class="section-title-row"><h3>TaRL level distributions</h3><span class="section-caption">Baseline vs current (children only)</span></div>
           <div class="detail-grid">
-            <div class="feedback-card"><strong>Numeracy baseline</strong><div class="skill-chips">${distHtml(num.baseline_distribution)}</div></div>
-            <div class="feedback-card"><strong>Numeracy current</strong><div class="skill-chips">${distHtml(num.current_distribution)}</div></div>
-            <div class="feedback-card"><strong>Literacy baseline</strong><div class="skill-chips">${distHtml(lit.baseline_distribution)}</div></div>
-            <div class="feedback-card"><strong>Literacy current</strong><div class="skill-chips">${distHtml(lit.current_distribution)}</div></div>
+            <div class="feedback-card"><strong>Numeracy baseline</strong><div class="skill-chips">${distHtml(displayNum.baseline_distribution)}</div></div>
+            <div class="feedback-card"><strong>Numeracy current</strong><div class="skill-chips">${distHtml(displayNum.current_distribution)}</div></div>
+            <div class="feedback-card"><strong>Literacy baseline</strong><div class="skill-chips">${distHtml(displayLit.baseline_distribution)}</div></div>
+            <div class="feedback-card"><strong>Literacy current</strong><div class="skill-chips">${distHtml(displayLit.current_distribution)}</div></div>
           </div>
         </div>
         <div class="section">
@@ -2002,7 +2125,10 @@ def render_admin_review_page() -> str:
     }
     function renderKidsTable() {
       const report = state.pilotEvidence || {};
-      const indicators = report.learning_indicators || [];
+      const previewMode = Boolean(report.preview_mode);
+      const indicators = previewMode && (report.preview_learning_indicators || []).length
+        ? report.preview_learning_indicators
+        : (report.learning_indicators || []);
       updateRange(indicators.length || kidItems().length);
       if (!state.activeIndicatorKey || !indicators.some(item => item.key === state.activeIndicatorKey)) {
         state.activeIndicatorKey = (indicators[0] || {}).key || "";
@@ -2010,7 +2136,7 @@ def render_admin_review_page() -> str:
       const activeIndicator = indicators.find(item => item.key === state.activeIndicatorKey) || indicators[0];
       tableWrap.innerHTML = `<div class="overview-layout">
         <div class="section">
-          <div class="section-title-row"><h3>Indicator Backend</h3><span class="section-caption">Learning signals replace the old child roster; click a node to inspect the supporting learner records</span></div>
+          <div class="section-title-row"><h3>Indicator Backend</h3><span class="section-caption">${previewMode ? "Preview indicators are active until live child records are enrolled; " : ""}learning signals replace the old child roster; click a node to inspect the supporting learner records</span></div>
           <div class="indicator-map">
             ${indicators.map(indicator => renderIndicatorNode(indicator, activeIndicator && indicator.key === activeIndicator.key)).join("") || `<div class="empty">No learning indicators yet. Complete child diagnostics and fixed probes first.</div>`}
           </div>
@@ -2021,7 +2147,7 @@ def render_admin_review_page() -> str:
           <div class="detail-grid">
             <div class="feedback-card"><strong>Consent and readiness</strong><p>Child profile records still preserve consent, assent, phone-household, and call-readiness fields.</p></div>
             <div class="feedback-card"><strong>Learning movement</strong><p>Indicator nodes pull TaRL movement, mastery-map, fixed-probe, item-response, and dosage evidence from those records.</p></div>
-            <div class="feedback-card"><strong>Review path</strong><p>Open individual learner records from Learners when you need the full transcript, audio, and curriculum path.</p></div>
+            <div class="feedback-card"><strong>Review path</strong><p>${previewMode ? "No live child records yet; the preview shows exactly what will populate after enrollment." : "Open individual learner records from Learners when you need the full transcript, audio, and curriculum path."}</p></div>
           </div>
         </div>
       </div>`;

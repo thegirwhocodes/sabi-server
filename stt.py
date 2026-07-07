@@ -13,6 +13,10 @@ import io
 import logging
 import os
 from pathlib import Path
+import subprocess
+import tempfile
+import time
+import wave
 
 import httpx
 
@@ -22,7 +26,18 @@ INTRON_SYNC_URL = os.getenv(
     "INTRON_STT_SYNC_URL",
     "https://infer.voice.intron.io/file/v1/upload/sync",
 )
+INTRON_ASYNC_UPLOAD_URL = os.getenv(
+    "INTRON_STT_ASYNC_UPLOAD_URL",
+    "https://infer.voice.intron.io/file/v1/upload",
+)
+INTRON_STATUS_URL_TEMPLATE = os.getenv(
+    "INTRON_STT_STATUS_URL_TEMPLATE",
+    "https://infer.voice.intron.io/file/v1/status/{file_id}",
+)
 INTRON_TIMEOUT_SECONDS = float(os.getenv("INTRON_STT_TIMEOUT_SECONDS", "8"))
+INTRON_ASYNC_MAX_WAIT_SECONDS = float(os.getenv("INTRON_STT_ASYNC_MAX_WAIT_SECONDS", "15"))
+INTRON_ASYNC_POLL_INTERVAL_SECONDS = float(os.getenv("INTRON_STT_ASYNC_POLL_INTERVAL_SECONDS", "1.5"))
+INTRON_MIN_AUDIO_SECONDS = float(os.getenv("INTRON_STT_MIN_AUDIO_SECONDS", "1.2"))
 INTRON_LANGUAGE = os.getenv("INTRON_STT_LANGUAGE", "en")
 INTRON_CATEGORY = os.getenv("INTRON_STT_CATEGORY", "file_category_general")
 
@@ -63,6 +78,8 @@ LITERACY_WORDS = {
     "cat", "mat", "hat", "rat", "sat", "fat", "pat", "bat",
     "dog", "log", "fog", "hog", "big", "dig", "pig",
 }
+
+WHISPER_CLI_PROVIDERS = {"whisper_cli", "openai_whisper", "openai-whisper", "cli_whisper"}
 
 
 def _clean_prompt_context(context: str, limit: int = 220) -> str:
@@ -118,8 +135,8 @@ class SpeechToText:
         self._literacy_provider = (
             literacy_provider or env_literacy_provider
         ).strip().lower() or self._provider
-        self._model_size = model_size
-        self._device = device
+        self._model_size = os.getenv("SABI_LOCAL_WHISPER_MODEL_SIZE", model_size).strip() or model_size
+        self._device = os.getenv("SABI_LOCAL_WHISPER_DEVICE", device).strip() or device
 
         if self._groq_key and self._provider != "local":
             self._use_groq = True
@@ -133,7 +150,13 @@ class SpeechToText:
                 self._literacy_provider,
                 bool(self._intron_key),
             )
-        if not self._use_groq and not (self._intron_key and self._provider in {"intron", "intron_first"}):
+        if self._provider in WHISPER_CLI_PROVIDERS or self._literacy_provider in WHISPER_CLI_PROVIDERS:
+            logger.info("STT: Homebrew/openai-whisper CLI configured for local harness probes")
+        if (
+            not self._use_groq
+            and not (self._intron_key and self._provider in {"intron", "intron_first"})
+            and self._provider not in WHISPER_CLI_PROVIDERS
+        ):
             self._load_local_model(model_size, device)
 
     def _load_local_model(self, model_size: str | None = None, device: str | None = None) -> None:
@@ -165,19 +188,32 @@ class SpeechToText:
             dict with 'text' and 'confidence' keys
         """
         provider = self._provider_for_mode(mode)
+        primary_error: Exception | None = None
         if provider in {"intron", "intron_first"}:
             if self._intron_key:
                 try:
                     return self._transcribe_intron(audio_path, mode=mode)
                 except Exception as e:
+                    primary_error = e
                     logger.warning("Intron STT failed (%s), falling back to Groq/Whisper", e)
             else:
                 logger.warning("Intron STT requested but INTRON_API_KEY is not configured; using Groq/Whisper")
         if provider == "local":
             return self._transcribe_local(audio_path, mode=mode, context=context)
+        if provider in WHISPER_CLI_PROVIDERS:
+            return self._transcribe_whisper_cli(audio_path, mode=mode, context=context)
         if self._use_groq:
             return self._transcribe_groq(audio_path, mode=mode, context=context)
-        return self._transcribe_local(audio_path, mode=mode, context=context)
+        try:
+            return self._transcribe_local(audio_path, mode=mode, context=context)
+        except Exception as fallback_error:
+            if primary_error is not None:
+                raise RuntimeError(
+                    "STT providers failed: "
+                    f"primary {provider}={primary_error.__class__.__name__}: {_safe_error_text(primary_error)}; "
+                    f"fallback local={fallback_error.__class__.__name__}: {_safe_error_text(fallback_error)}"
+                ) from fallback_error
+            raise
 
     def _provider_for_mode(self, mode: str) -> str:
         if str(mode or "").lower() == "literacy":
@@ -202,24 +238,35 @@ class SpeechToText:
         ext = Path(audio_path).suffix.lower() or ".wav"
         mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
         filename = Path(audio_path).name or f"audio{ext}"
+        audio_bytes = _pad_short_wav_for_intron(audio_bytes, ext=ext)
+        form_data = {
+            "audio_file_name": filename,
+            "use_diarization": "FALSE",
+            "use_language_asr_input": INTRON_LANGUAGE,
+            "use_category": INTRON_CATEGORY,
+        }
 
         response = httpx.post(
             INTRON_SYNC_URL,
             headers={"Authorization": f"Bearer {self._intron_key}"},
             files={"audio_file_blob": (filename, audio_bytes, mime)},
-            data={
-                "audio_file_name": filename,
-                "use_diarization": "FALSE",
-                "use_language_asr_input": INTRON_LANGUAGE,
-                "use_category": INTRON_CATEGORY,
-            },
+            data=form_data,
             timeout=INTRON_TIMEOUT_SECONDS,
         )
         if response.status_code == 503:
             data = _safe_json(response)
             raise RuntimeError(f"Intron sync still processing file_id={_extract_intron_file_id(data)}")
-        response.raise_for_status()
-        data = response.json()
+        if response.status_code == 403 and _should_try_intron_async(response):
+            logger.info("Intron sync denied for non-integrator key; using async upload/status flow")
+            data = self._transcribe_intron_async(
+                audio_bytes=audio_bytes,
+                filename=filename,
+                mime=mime,
+                form_data=form_data,
+            )
+        else:
+            response.raise_for_status()
+            data = response.json()
         text = _extract_intron_text(data)
         return {
             "text": text,
@@ -228,7 +275,52 @@ class SpeechToText:
             "duration_seconds": _extract_intron_duration(data),
             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
             "provider": "intron",
+            "intron_status": _extract_intron_processing_status(data),
         }
+
+    def _transcribe_intron_async(
+        self,
+        audio_bytes: bytes,
+        filename: str,
+        mime: str,
+        form_data: dict,
+    ) -> dict:
+        upload_response = httpx.post(
+            INTRON_ASYNC_UPLOAD_URL,
+            headers={"Authorization": f"Bearer {self._intron_key}"},
+            files={"audio_file_blob": (filename, audio_bytes, mime)},
+            data=form_data,
+            timeout=INTRON_TIMEOUT_SECONDS,
+        )
+        upload_response.raise_for_status()
+        upload_data = upload_response.json()
+        file_id = _extract_intron_file_id(upload_data)
+        if not file_id or file_id == "unknown":
+            raise RuntimeError(f"Intron async upload missing file_id: {_safe_json_excerpt(upload_data)}")
+
+        deadline = time.monotonic() + max(1.0, INTRON_ASYNC_MAX_WAIT_SECONDS)
+        last_data: dict = upload_data
+        while time.monotonic() < deadline:
+            status_url = INTRON_STATUS_URL_TEMPLATE.format(file_id=file_id)
+            status_response = httpx.get(
+                status_url,
+                headers={"Authorization": f"Bearer {self._intron_key}"},
+                timeout=INTRON_TIMEOUT_SECONDS,
+            )
+            if status_response.status_code == 429:
+                retry_after = _retry_after_seconds(status_response, default=INTRON_ASYNC_POLL_INTERVAL_SECONDS)
+                if time.monotonic() + retry_after >= deadline:
+                    status_response.raise_for_status()
+                time.sleep(retry_after)
+                continue
+            status_response.raise_for_status()
+            last_data = status_response.json()
+            if _intron_file_transcribed(last_data):
+                return last_data
+            if _intron_file_failed(last_data):
+                raise RuntimeError(f"Intron async failed for file_id={file_id}: {_safe_json_excerpt(last_data)}")
+            time.sleep(max(0.2, INTRON_ASYNC_POLL_INTERVAL_SECONDS))
+        raise RuntimeError(f"Intron async timed out file_id={file_id}: {_safe_json_excerpt(last_data)}")
 
     def _transcribe_groq(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """Transcribe via Groq Whisper API (~200ms, free tier: 28,800 sec/day)."""
@@ -334,6 +426,78 @@ class SpeechToText:
             "provider": "local_whisper",
         }
 
+    def _transcribe_whisper_cli(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
+        """Transcribe using the Homebrew/openai-whisper CLI for local harness probes."""
+        cli_path = os.getenv("SABI_WHISPER_CLI_PATH", "whisper").strip() or "whisper"
+        model = os.getenv("SABI_WHISPER_CLI_MODEL", "tiny.en").strip() or "tiny.en"
+        device = os.getenv("SABI_WHISPER_CLI_DEVICE", "cpu").strip() or "cpu"
+        timeout = float(os.getenv("SABI_WHISPER_CLI_TIMEOUT_SECONDS", "120"))
+        threads = os.getenv("SABI_WHISPER_CLI_THREADS", "").strip()
+        use_prompt = os.getenv("SABI_WHISPER_CLI_INITIAL_PROMPT", "0").strip().lower() in {"1", "true", "yes", "on"}
+        with tempfile.TemporaryDirectory(prefix="sabi-whisper-cli-") as tmpdir:
+            output_dir = Path(tmpdir)
+            cmd = [
+                cli_path,
+                audio_path,
+                "--model",
+                model,
+                "--device",
+                device,
+                "--language",
+                "en",
+                "--task",
+                "transcribe",
+                "--output_format",
+                "txt",
+                "--output_dir",
+                str(output_dir),
+                "--verbose",
+                "False",
+                "--fp16",
+                "False",
+                "--condition_on_previous_text",
+                "False",
+                "--temperature",
+                "0",
+                "--best_of",
+                "1",
+                "--beam_size",
+                "1",
+            ]
+            if threads:
+                cmd.extend(["--threads", threads])
+            if use_prompt:
+                cmd.extend(["--initial_prompt", self._prompt_for_mode(mode, context=context)])
+            try:
+                completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            except subprocess.TimeoutExpired as error:
+                raise TimeoutError(
+                    "whisper CLI timed out after "
+                    f"{timeout:g}s: stdout={_safe_subprocess_text(error.stdout)} "
+                    f"stderr={_safe_subprocess_text(error.stderr)}"
+                ) from error
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    "whisper CLI failed: "
+                    f"stdout={_safe_subprocess_text(completed.stdout)} "
+                    f"stderr={_safe_subprocess_text(completed.stderr)}"
+                )
+            txt_path = output_dir / f"{Path(audio_path).stem}.txt"
+            if not txt_path.exists():
+                matches = list(output_dir.glob("*.txt"))
+                txt_path = matches[0] if matches else txt_path
+            text = txt_path.read_text().strip() if txt_path.exists() else ""
+        return {
+            "text": text,
+            "confidence": 0.7 if text else 0.0,
+            "language": "en",
+            "duration_seconds": _audio_duration_seconds(audio_path),
+            "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+            "provider": "whisper_cli",
+            "model": model,
+            "initial_prompt": use_prompt,
+        }
+
 
 def _safe_json(response) -> dict:
     try:
@@ -341,6 +505,83 @@ def _safe_json(response) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _safe_json_excerpt(data: dict, limit: int = 500) -> str:
+    try:
+        import json
+        return json.dumps(data, sort_keys=True)[:limit]
+    except Exception:
+        return str(data)[:limit]
+
+
+def _should_try_intron_async(response) -> bool:
+    text = str(getattr(response, "text", "") or "").lower()
+    return (
+        "integrator account" in text
+        or "access-key error" in text
+        or "permission denied" in text
+    )
+
+
+def _retry_after_seconds(response, default: float = 1.5) -> float:
+    raw = ""
+    try:
+        raw = response.headers.get("Retry-After", "")
+        value = float(raw)
+    except Exception:
+        value = default
+    return max(0.5, min(value, 10.0))
+
+
+def _safe_error_text(error: Exception, limit: int = 300) -> str:
+    return " ".join(str(error).split())[:limit]
+
+
+def _safe_subprocess_text(value, limit: int = 500) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return " ".join(str(value).split())[-limit:]
+
+
+def _audio_duration_seconds(audio_path: str) -> float:
+    try:
+        with wave.open(str(audio_path), "rb") as handle:
+            frames = handle.getnframes()
+            rate = handle.getframerate()
+        return round(frames / rate, 1) if rate else 0.0
+    except Exception:
+        return 0.0
+
+
+def _pad_short_wav_for_intron(audio_bytes: bytes, ext: str) -> bytes:
+    if ext.lower() != ".wav" or INTRON_MIN_AUDIO_SECONDS <= 0:
+        return audio_bytes
+    try:
+        with wave.open(io.BytesIO(audio_bytes), "rb") as source:
+            params = source.getparams()
+            frames = source.readframes(source.getnframes())
+            frame_count = source.getnframes()
+            frame_rate = source.getframerate()
+            sample_width = source.getsampwidth()
+            channels = source.getnchannels()
+        if not frame_rate or not channels or not sample_width:
+            return audio_bytes
+        target_frames = int(INTRON_MIN_AUDIO_SECONDS * frame_rate)
+        if frame_count >= target_frames:
+            return audio_bytes
+        missing_frames = target_frames - frame_count
+        silence = b"\x00" * missing_frames * channels * sample_width
+        output = io.BytesIO()
+        with wave.open(output, "wb") as target:
+            target.setparams(params)
+            target.writeframes(frames + silence)
+        return output.getvalue()
+    except Exception as error:
+        logger.warning("Could not pad short WAV for Intron (%s); sending original audio", error)
+        return audio_bytes
 
 
 def _extract_intron_text(data: dict) -> str:
@@ -385,6 +626,31 @@ def _extract_intron_duration(data: dict) -> float:
             if duration:
                 return duration
     return 0.0
+
+
+def _extract_intron_processing_status(data: dict) -> str:
+    for key in ("processing_status", "file_status"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        nested_status = _extract_intron_processing_status(nested)
+        if nested_status:
+            return nested_status
+    value = data.get("status")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
+
+
+def _intron_file_transcribed(data: dict) -> bool:
+    return bool(_extract_intron_text(data))
+
+
+def _intron_file_failed(data: dict) -> bool:
+    status = _extract_intron_processing_status(data).upper()
+    return any(word in status for word in ("FAILED", "ERROR", "CANCELLED"))
 
 
 def _extract_intron_file_id(data: dict) -> str:

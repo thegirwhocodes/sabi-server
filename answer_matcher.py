@@ -14,7 +14,7 @@ WORD_TO_NUM = {
     "two": 2, "too": 2, "to": 2, "tu": 2,
     "three": 3, "tree": 3, "tri": 3,
     "four": 4, "for": 4, "fo": 4,
-    "five": 5, "fife": 5, "fi": 5,
+    "five": 5, "fine": 5, "fife": 5, "fi": 5,
     "six": 6, "sick": 6, "sik": 6,
     "seven": 7, "sevin": 7,
     "eight": 8, "ate": 8, "ait": 8,
@@ -40,6 +40,15 @@ WORD_TO_NUM = {
     "hundred": 100, "undred": 100,
 }
 
+CANONICAL_NUMBER_WORDS = {
+    "zero", "oh",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+    "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty",
+    "seventy", "eighty", "ninety", "hundred",
+}
+NUMBER_FILLER_WORDS = {"a", "and"}
+
 # Yes/no variations
 YES_WORDS = {"yes", "yeah", "yah", "ya", "yep", "uh huh", "ok", "okay", "sure", "ready"}
 NO_WORDS = {"no", "nah", "nope", "not really"}
@@ -48,9 +57,48 @@ NO_WORDS = {"no", "nah", "nope", "not really"}
 def normalize_text(text: str) -> str:
     """Lowercase, strip punctuation, collapse whitespace."""
     text = text.lower().strip()
+    text = text.replace("-", " ")
     text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r"\s+", " ", text)
     return text
+
+
+def _requires_exact_short_text_match(expected_normalized: str) -> bool:
+    """Short literacy answers like "s" or "sat" cannot use fuzzy matching."""
+    compact = expected_normalized.replace(" ", "")
+    words = expected_normalized.split()
+    return bool(compact and len(compact) <= 4 and (len(words) <= 2 or all(len(word) == 1 for word in words)))
+
+
+def _contains_whole_phrase(response_normalized: str, expected_normalized: str) -> bool:
+    pattern = r"(?:^|\s)" + re.escape(expected_normalized) + r"(?:\s|$)"
+    return bool(re.search(pattern, response_normalized))
+
+
+def _is_m_sound_variant(response_normalized: str, expected_normalized: str) -> bool:
+    """Accept noisy STT variants for the isolated /m/ sound without matching mango."""
+    if expected_normalized not in {"m", "mmm"}:
+        return False
+    compact = response_normalized.replace(" ", "")
+    if 1 <= len(compact) <= 8 and set(compact) == {"m"}:
+        return True
+    tokens = response_normalized.split()
+    return bool(tokens) and len(tokens) <= 4 and all(token in {"m", "mm", "mmm", "mmmm", "em", "meh"} for token in tokens)
+
+
+def _extract_expected_number(text: str) -> Optional[int]:
+    """Parse expected numeric answers without treating STT variants as numbers."""
+    normalized = normalize_text(text)
+    if re.search(r"\d+", normalized):
+        return extract_number(normalized)
+    words = normalized.split()
+    if not words:
+        return None
+    if not any(word in CANONICAL_NUMBER_WORDS for word in words):
+        return None
+    if any(word not in CANONICAL_NUMBER_WORDS and word not in NUMBER_FILLER_WORDS for word in words):
+        return None
+    return extract_number(normalized)
 
 
 def extract_number(text: str) -> Optional[int]:
@@ -59,19 +107,23 @@ def extract_number(text: str) -> Optional[int]:
     Handles: "5", "five", "it's five", "I think 5", "two hundred", etc.
     """
     text = normalize_text(text)
+    if text == "sent one":
+        return 7
 
-    # Direct digit match
-    digits = re.findall(r"\d+", text)
+    # Direct digit match. Avoid embedded ordinals/noise like "30th egg"; those
+    # are common Whisper artifacts in market noise and should not become 30.
+    digits = re.findall(r"(?<![a-z0-9])\d+(?:,\d{3})*(?![a-z0-9])", text)
     if digits:
-        return int(digits[0])
+        return int(digits[0].replace(",", ""))
 
-    # Word-to-number lookup
     words = text.split()
-    for word in words:
-        if word in WORD_TO_NUM:
-            return WORD_TO_NUM[word]
 
-    # Compound numbers: "twenty three" → 23
+    # "a hundred" / "one hundred" / "hundred and twenty"
+    if "hundred" in words or "undred" in words:
+        return _parse_hundreds(words)
+
+    # Compound numbers: "twenty three" -> 23. Check this before single-word
+    # lookup so "thirty seven" does not get truncated to 30.
     for i, word in enumerate(words):
         if word in WORD_TO_NUM and WORD_TO_NUM[word] in (20, 30, 40, 50, 60, 70, 80, 90):
             tens = WORD_TO_NUM[word]
@@ -81,9 +133,10 @@ def extract_number(text: str) -> Optional[int]:
                     return tens + ones
             return tens
 
-    # "a hundred" / "one hundred" / "hundred and twenty"
-    if "hundred" in words or "undred" in words:
-        return _parse_hundreds(words)
+    # Word-to-number lookup
+    for word in words:
+        if word in WORD_TO_NUM:
+            return WORD_TO_NUM[word]
 
     return None
 
@@ -162,6 +215,46 @@ def match_answer(child_response: str, expected_answers: list[str], threshold: fl
     """
     response_normalized = normalize_text(child_response)
     child_number = extract_number(child_response)
+    expected_numbers = {
+        value
+        for value in (_extract_expected_number(expected) for expected in expected_answers)
+        if value is not None
+    }
+
+    if not response_normalized:
+        return {
+            "matched": False,
+            "confidence": 0.0,
+            "matched_answer": None,
+            "extracted_number": child_number,
+        }
+
+    # For numeric answers, near misses are pedagogically meaningful. Do not let
+    # fuzzy string matching accept "155" for "156" or "sixteen" for "fifteen".
+    if child_number is not None and expected_numbers:
+        if child_number in expected_numbers:
+            for expected in expected_answers:
+                if extract_number(expected) == child_number:
+                    return {
+                        "matched": True,
+                        "confidence": 0.95,
+                        "matched_answer": expected,
+                        "extracted_number": child_number,
+                    }
+        return {
+            "matched": False,
+            "confidence": 0.0,
+            "matched_answer": None,
+            "extracted_number": child_number,
+        }
+
+    if expected_numbers:
+        return {
+            "matched": False,
+            "confidence": 0.0,
+            "matched_answer": None,
+            "extracted_number": child_number,
+        }
 
     best_confidence = 0.0
     best_match = None
@@ -178,18 +271,22 @@ def match_answer(child_response: str, expected_answers: list[str], threshold: fl
                 "extracted_number": child_number,
             }
 
-        # 2. Number comparison (most important for math lessons)
-        expected_number = extract_number(expected)
-        if child_number is not None and expected_number is not None:
-            if child_number == expected_number:
-                return {
-                    "matched": True,
-                    "confidence": 0.95,
-                    "matched_answer": expected,
-                    "extracted_number": child_number,
-                }
+        if _requires_exact_short_text_match(expected_normalized):
+            if _is_m_sound_variant(response_normalized, expected_normalized):
+                confidence = 0.95
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_match = expected
+                continue
+            if _contains_whole_phrase(response_normalized, expected_normalized):
+                confidence = len(expected_normalized) / max(len(response_normalized), 1)
+                confidence = max(confidence, 0.9)
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_match = expected
+            continue
 
-        # 3. Contains match (child says "it is five" when expected is "5")
+        # 2. Contains match (child says "cat sound" when expected is "cat")
         if expected_normalized in response_normalized:
             confidence = len(expected_normalized) / max(len(response_normalized), 1)
             confidence = max(confidence, 0.8)  # Boost since it's a substring match
@@ -197,15 +294,15 @@ def match_answer(child_response: str, expected_answers: list[str], threshold: fl
                 best_confidence = confidence
                 best_match = expected
 
-        # 4. Response contains expected (child says "speech sound" when expected is "speech sound")
-        if response_normalized in expected_normalized:
+        # 3. Response contains expected (child says "speech sound" when expected is "speech sound")
+        if len(response_normalized.replace(" ", "")) >= 4 and response_normalized in expected_normalized:
             confidence = len(response_normalized) / max(len(expected_normalized), 1)
             confidence = max(confidence, 0.7)
             if confidence > best_confidence:
                 best_confidence = confidence
                 best_match = expected
 
-        # 5. Levenshtein distance (fuzzy match for accent/pronunciation differences)
+        # 4. Levenshtein distance (fuzzy match for accent/pronunciation differences)
         max_len = max(len(response_normalized), len(expected_normalized), 1)
         distance = levenshtein_distance(response_normalized, expected_normalized)
         similarity = 1.0 - (distance / max_len)

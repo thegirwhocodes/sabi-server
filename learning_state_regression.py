@@ -41,7 +41,14 @@ from learning_state import (
     route_next_course_after_session,
     scaffold_ladder_for,
 )
-from memory import StudentMemory, _learning_state_snapshot_message, compatibility_learner_key_for, learner_key_for
+from memory import (
+    StudentMemory,
+    _learning_state_snapshot_message,
+    compatibility_learner_key_for,
+    learner_key_for,
+    normalize_child_name_for_identity,
+    sanitize_child_name_for_storage,
+)
 from phone_utils import normalize_phone_number, phone_lookup_variants
 from voice_asterisk import (
     MIN_LESSON_SECONDS,
@@ -293,6 +300,34 @@ def main() -> int:
         and len(single_phone_memory.client.rows) == 1
         and not single_phone_lookup.get("learner_key"),
         f"{single_phone_lookup} rows={single_phone_memory.client.rows}",
+    )
+
+    blocked_name_memory = StudentMemory.__new__(StudentMemory)
+    blocked_name_memory.client = FakeSupabaseClient(
+        rows=[
+            {
+                "id": "blank-phone-row",
+                "phone_number": "+18604367048",
+                "phone_number_normalized": "+18604367048",
+                "name": None,
+                "total_sessions": 1,
+                "created_at": "2026-06-01T00:00:00+00:00",
+            },
+        ],
+        has_normalized_column=True,
+        unique_phone=False,
+    )
+    blocked_name_lookup = asyncio.run(
+        blocked_name_memory.find_or_create_student("+1 860 436 7048", child_name="Not available")
+    )
+    ok &= check(
+        "one_profile_per_phone_rejects_carrier_phrase_as_name",
+        blocked_name_lookup["id"] == "blank-phone-row"
+        and blocked_name_lookup.get("name") is None
+        and blocked_name_memory.client.rows[0].get("name") is None
+        and blocked_name_memory.client.rows[0].get("child_name_normalized") is None
+        and blocked_name_memory.client.rows[0].get("learner_key") is None,
+        f"{blocked_name_lookup} rows={blocked_name_memory.client.rows}",
     )
 
     previous_identity_mode = os.environ.get("SABI_ONE_PROFILE_PER_PHONE")
@@ -565,6 +600,41 @@ def main() -> int:
         infer_skill_from_question(spend_total_question, fallback_module=2) == "addition",
         infer_skill_from_question(spend_total_question, fallback_module=2),
     )
+    diagnostic_spend_stats = analyze_session(
+        {
+            "name": "Canary",
+            "current_module": 0,
+            "learning_state": {
+                "course": "numeracy",
+                "phase": "diagnostic",
+                "onboarding_status": "complete",
+                "diagnostic_status": "in_progress",
+                "current_module": 0,
+                "active_skill": "addition",
+            },
+        },
+        [
+            {
+                "role": "assistant",
+                "content": "Welcome back, Canary! Let's continue our number game. Groundnuts cost fifteen naira and pure water costs thirty naira. How much do you spend?",
+            },
+            {"role": "user", "content": "Forty-five."},
+        ],
+    )
+    ok &= check(
+        "diagnostic_ad_hoc_total_spend_counts_correct",
+        diagnostic_spend_stats.correct_count == 1
+        and diagnostic_spend_stats.wrong_count == 0
+        and diagnostic_spend_stats.recommended_module == 2
+        and diagnostic_spend_stats.learning_state.get("last_turn_correct") is True,
+        str(diagnostic_spend_stats),
+    )
+    counting_together_question = "Let's do one together. What number comes before twelve?"
+    ok &= check(
+        "guided_together_phrase_keeps_counting_skill",
+        infer_skill_from_question(counting_together_question, fallback_module=1) == "counting",
+        infer_skill_from_question(counting_together_question, fallback_module=1),
+    )
     spend_total_stats = analyze_session(
         {
             "current_module": 2,
@@ -578,13 +648,44 @@ def main() -> int:
         },
         [
             {"role": "assistant", "content": spend_total_question},
-            {"role": "user", "content": "forty naira"},
+            {"role": "user", "content": "thirty naira"},
         ],
     )
     ok &= check(
         "spend_total_wrong_uses_addition_ladder",
         spend_total_stats.learning_state.get("repair_skill") == "addition",
         str(spend_total_stats.learning_state),
+    )
+
+    spend_total_dropped_five_stats = analyze_session(
+        {
+            "current_module": 2,
+            "learning_state": {
+                "current_module": 2,
+                "current_week": 1,
+                "current_lesson": 1,
+                "active_skill": "addition",
+                "diagnostic_status": "done",
+                "correct_streak": 0,
+                "wrong_streak": 0,
+                "scaffold_depth": 0,
+            },
+        },
+        [
+            {"role": "assistant", "content": spend_total_question},
+            {"role": "user", "content": "forty naira"},
+        ],
+    )
+    ok &= check(
+        "spend_total_dropped_five_is_ambiguous_not_wrong",
+        spend_total_dropped_five_stats.correct_count == 0
+        and spend_total_dropped_five_stats.wrong_count == 0
+        and spend_total_dropped_five_stats.learning_state.get("last_turn_correct") is None
+        and spend_total_dropped_five_stats.learning_state.get("last_numeric_ambiguous") is True
+        and spend_total_dropped_five_stats.learning_state.get("last_expected_answer") == 45
+        and spend_total_dropped_five_stats.learning_state.get("last_child_numbers") == [40]
+        and spend_total_dropped_five_stats.learning_state.get("repair_skill") is None,
+        str(spend_total_dropped_five_stats.learning_state),
     )
 
     subtraction_stats = analyze_session(
@@ -687,6 +788,35 @@ def main() -> int:
     ok &= check("correct_count", stats_correct.correct_count == 1, f"got {stats_correct.correct_count}")
     ok &= check("wrong_zero", stats_correct.wrong_count == 0, f"got {stats_correct.wrong_count}")
 
+    two_correct_after_prior_streak_messages = [
+        {"role": "assistant", "content": "You have ten naira and spend four naira. How much is left?"},
+        {"role": "user", "content": "six naira"},
+        {"role": "assistant", "content": "Good. You have fifteen naira and spend eight naira. How much is left?"},
+        {"role": "user", "content": "seven"},
+    ]
+    two_correct_after_prior_streak_stats = analyze_session(
+        {
+            "current_module": 3,
+            "learning_state": {
+                "current_module": 3,
+                "current_week": 9,
+                "current_lesson": 2,
+                "active_skill": "subtraction",
+                "diagnostic_status": "done",
+                "correct_streak": 1,
+            },
+        },
+        two_correct_after_prior_streak_messages,
+    )
+    ok &= check(
+        "two_current_correct_does_not_advance_from_prior_streak",
+        two_correct_after_prior_streak_stats.recommended_module == 3
+        and not two_correct_after_prior_streak_stats.should_advance
+        and two_correct_after_prior_streak_stats.correct_count == 2
+        and two_correct_after_prior_streak_stats.learning_state.get("correct_streak") == 3,
+        str(two_correct_after_prior_streak_stats.learning_state),
+    )
+
     mastery_messages = [
         {"role": "assistant", "content": "You have ten naira and spend four naira. How much is left?"},
         {"role": "user", "content": "six naira"},
@@ -709,16 +839,51 @@ def main() -> int:
         mastery_messages,
     )
     ok &= check(
-        "mastery_does_not_jump_module_mid_call",
-        mastery_stats.recommended_module == 3 and mastery_stats.should_advance,
+        "first_mastery_sample_confirms_without_advancing",
+        mastery_stats.recommended_module == 3
+        and not mastery_stats.should_advance
+        and mastery_stats.learning_state.get("mastery_ready") is True
+        and mastery_stats.learning_state.get("mastery_confirmation_count") == 1,
         str(mastery_stats.learning_state),
     )
-    advanced_state = advance_numeracy_state_after_mastery(mastery_stats.learning_state)
+    mastery_interrupted_stats = analyze_session(
+        {
+            "current_module": 3,
+            "learning_state": mastery_stats.learning_state,
+        },
+        [
+            {"role": "assistant", "content": "You have ten naira and spend four naira. How much is left?"},
+            {"role": "user", "content": "five"},
+        ],
+    )
+    ok &= check(
+        "non_mastery_call_preserves_same_lesson_confirmation",
+        not mastery_interrupted_stats.should_advance
+        and mastery_interrupted_stats.learning_state.get("mastery_ready") is False
+        and mastery_interrupted_stats.learning_state.get("mastery_confirmation_count") == 1,
+        str(mastery_interrupted_stats.learning_state),
+    )
+    mastery_confirmed_stats = analyze_session(
+        {
+            "current_module": 3,
+            "learning_state": mastery_interrupted_stats.learning_state,
+        },
+        mastery_messages,
+    )
+    ok &= check(
+        "second_mastery_sample_advances_after_confirmation",
+        mastery_confirmed_stats.recommended_module == 3
+        and mastery_confirmed_stats.should_advance
+        and mastery_confirmed_stats.learning_state.get("mastery_confirmation_count") == 2,
+        str(mastery_confirmed_stats.learning_state),
+    )
+    advanced_state = advance_numeracy_state_after_mastery(mastery_confirmed_stats.learning_state)
     ok &= check(
         "mastery_advances_next_lesson_for_next_call",
         advanced_state["current_module"] == 3
         and advanced_state["current_week"] == 9
         and advanced_state["current_lesson"] == 3
+        and advanced_state["mastery_confirmation_count"] == 0
         and "Lesson 3" in advanced_state["next_step"],
         str(advanced_state),
     )
@@ -1078,6 +1243,12 @@ def main() -> int:
         ]) is None,
     )
     ok &= check(
+        "identity_normalizer_rejects_phone_system_unavailable",
+        normalize_child_name_for_identity("Not available") is None
+        and sanitize_child_name_for_storage("Not available") is None
+        and learner_key_for("+18604367048", "Not available") is None,
+    )
+    ok &= check(
         "name_prompt_rejects_explicit_unavailable",
         extract_child_name([
             {"role": "assistant", "content": "What is your name?"},
@@ -1120,6 +1291,46 @@ def main() -> int:
         stale_name_stats.child_name is None
         and stale_name_stats.learning_state["onboarding_status"] == "needs_school",
         str(stale_name_stats),
+    )
+
+    carrier_diagnostic = [
+        {"role": "assistant", "content": "Let's play a quick number game. What number comes after twenty-nine?"},
+        {"role": "user", "content": "The number you have dialed is not available. Press one to leave a message."},
+    ]
+    carrier_progress = analyze_diagnostic_progress(carrier_diagnostic)
+    carrier_stats = analyze_session({"current_module": 0}, carrier_diagnostic)
+    ok &= check(
+        "carrier_phrase_does_not_place_diagnostic",
+        carrier_progress["status"] == "not_started"
+        and carrier_progress["results"] == []
+        and carrier_progress["next_item"]["id"] == "count_after_29",
+        str(carrier_progress),
+    )
+    ok &= check(
+        "carrier_phrase_does_not_move_module",
+        carrier_stats.learning_state["current_module"] == 0
+        and carrier_stats.learning_state["diagnostic_status"] in {"not_started", "in_progress"},
+        str(carrier_stats.learning_state),
+    )
+
+    ambiguous_diagnostic = [
+        {"role": "assistant", "content": "Let's play a quick number game. What number comes after twenty-nine?"},
+        {"role": "user", "content": "thirteen"},
+    ]
+    ambiguous_progress = analyze_diagnostic_progress(ambiguous_diagnostic)
+    ambiguous_stats = analyze_session({"current_module": 0}, ambiguous_diagnostic)
+    ok &= check(
+        "teen_tens_confusion_does_not_place_diagnostic",
+        ambiguous_progress["status"] == "not_started"
+        and ambiguous_progress["results"] == []
+        and ambiguous_progress["next_item"]["id"] == "count_after_29",
+        str(ambiguous_progress),
+    )
+    ok &= check(
+        "teen_tens_confusion_does_not_move_module",
+        ambiguous_stats.learning_state["current_module"] == 0
+        and ambiguous_stats.learning_state["diagnostic_status"] in {"not_started", "in_progress"},
+        str(ambiguous_stats.learning_state),
     )
 
     memory = StudentMemory.__new__(StudentMemory)

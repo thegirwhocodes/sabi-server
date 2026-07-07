@@ -125,6 +125,22 @@ def main() -> int:
     # Empty cohort is safe.
     empty = build_pilot_evidence_report([])
     ok &= check("empty_cohort_safe", empty["cohort"]["children"] == 0 and empty["cohort"]["tarl_movement"]["numeracy"]["pct_up_one_plus_level"] is None)
+    ok &= check("empty_cohort_has_preview_mode", empty["preview_mode"] is True and empty["preview_note"], empty)
+    ok &= check(
+        "empty_cohort_preview_indicators_are_complete",
+        len(empty["preview_learning_indicators"]) >= 10
+        and empty["preview_cohort"]["children"] == 4
+        and any(item["status"] == "signal_visible" for item in empty["preview_learning_indicators"]),
+        empty["preview_learning_indicators"],
+    )
+    empty_cards = {card["key"]: card for card in empty["cohort"]["rct_advancement"]["cards"]}
+    ok &= check(
+        "empty_cohort_rct_cards_are_ready_not_pending",
+        empty_cards["baseline"]["status"] == "ready_to_capture"
+        and empty_cards["data_quality"]["status"] == "instrumented"
+        and empty_cards["learning_outcomes"]["status"] == "awaiting_live_cohort",
+        empty_cards,
+    )
 
     # Gate 6 wiring: movement gates the 10-child pre-pilot pass.
     learners_10 = [

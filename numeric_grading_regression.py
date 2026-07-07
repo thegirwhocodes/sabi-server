@@ -64,6 +64,38 @@ def main() -> int:
         total_spend,
     )
 
+    total_spend_costs_phrasing = _turn(
+        "Groundnuts cost fifteen naira and pure water costs thirty naira. How much do you spend?",
+        "forty-five",
+    )
+    ok &= check(
+        "total_spend_costs_phrasing_accepts_45",
+        total_spend_costs_phrasing.expected == 45 and total_spend_costs_phrasing.is_correct is True,
+        total_spend_costs_phrasing,
+    )
+
+    total_spend_dropped_five = _turn(
+        "Groundnuts cost fifteen naira and pure water costs thirty naira. How much do you spend?",
+        "forty naira",
+    )
+    ok &= check(
+        "total_spend_dropped_five_is_ambiguous_not_wrong",
+        total_spend_dropped_five.expected == 45
+        and total_spend_dropped_five.child_numbers == [40]
+        and total_spend_dropped_five.is_correct is None,
+        total_spend_dropped_five,
+    )
+
+    fine_for_five = _turn(
+        "You have two mangoes and buy three more. How many mangoes altogether?",
+        "fine",
+    )
+    ok &= check(
+        "fine_stt_mishear_accepts_five_in_numeric_context",
+        fine_for_five.expected == 5 and fine_for_five.child_numbers == [5] and fine_for_five.is_correct is True,
+        fine_for_five,
+    )
+
     total_spend_with_budget = _turn(
         "You have five hundred naira. You buy groundnuts for one hundred and fifty naira and pure water for thirty naira. How much did you spend?",
         "one hundred and eighty naira",
@@ -114,6 +146,50 @@ def main() -> int:
         wrong_answer,
     )
 
+    guided_prompt_wrong_answer = _turn(
+        "Let's do one together. You have one hundred naira and spend forty naira. How much is left?",
+        "fifty nine naira",
+    )
+    ok &= check(
+        "guided_one_together_is_not_counted_as_math_number",
+        guided_prompt_wrong_answer.expected == 60 and guided_prompt_wrong_answer.is_correct is False,
+        guided_prompt_wrong_answer,
+    )
+
+    carrier_phrase = _turn(
+        "No hints for this one: what is two plus three?",
+        "The number you have dialed is not available. Press one to leave a message.",
+    )
+    ok &= check(
+        "carrier_phrase_is_non_answer_not_wrong",
+        carrier_phrase.expected == 5 and carrier_phrase.child_numbers == [] and carrier_phrase.is_correct is None,
+        carrier_phrase,
+    )
+
+    teen_tens_ambiguous = _turn(
+        "Biscuits cost eight naira and sweets cost seven naira. How much altogether?",
+        "fifty naira",
+    )
+    ok &= check(
+        "teen_tens_stt_confusion_is_ambiguous_not_wrong",
+        teen_tens_ambiguous.expected == 15
+        and teen_tens_ambiguous.child_numbers == [50]
+        and teen_tens_ambiguous.is_correct is None,
+        teen_tens_ambiguous,
+    )
+
+    tens_teen_ambiguous = _turn(
+        "Let's play a quick number game. What number comes after twenty-nine?",
+        "thirteen",
+    )
+    ok &= check(
+        "tens_teen_stt_confusion_is_ambiguous_not_wrong",
+        tens_teen_ambiguous.expected == 30
+        and tens_teen_ambiguous.child_numbers == [13]
+        and tens_teen_ambiguous.is_correct is None,
+        tens_teen_ambiguous,
+    )
+
     hint = build_numeric_grading_hint(
         [
             {
@@ -127,6 +203,21 @@ def main() -> int:
         "grading_hint_for_correct_unit_price_change",
         "Treat that answer as correct" in hint and "80" in hint,
         hint,
+    )
+
+    no_number_hint = build_numeric_grading_hint(
+        [
+            {
+                "role": "assistant",
+                "content": "You buy pure water for three naira and groundnuts for two naira. How much altogether?",
+            },
+            {"role": "user", "content": "I"},
+        ]
+    )
+    ok &= check(
+        "grading_hint_for_no_usable_number_retries_instead_of_wrong",
+        "no usable number" in no_number_hint and "do not mark the child wrong" in no_number_hint,
+        no_number_hint,
     )
 
     return 0 if ok else 1

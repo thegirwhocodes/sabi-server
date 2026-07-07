@@ -181,8 +181,15 @@ async def synthesize_phone_tts(tts, text: str, output_path: str, primary: str | 
     `primary` overrides the global SABI_TTS_PRIMARY for one call. The isolated
     AudioSocket test lane uses this (SABI_TTS_TEST_PRIMARY) so Chatterbox can
     be canaried on port 9020 while production keeps its known-good chain.
+    Use `chatterbox_only` for a no-ElevenLabs test lane that fails loudly if
+    the free/self-hosted TTS is unavailable.
     """
     effective_primary = (primary or TTS_PRIMARY).strip().lower()
+
+    if effective_primary in {"chatterbox_only", "chatterbox-only", "chatterbox_free", "chatterbox-free"}:
+        if await synthesize_chatterbox(text, output_path):
+            return "chatterbox"
+        return None
 
     if effective_primary == "chatterbox":
         if await synthesize_chatterbox(text, output_path):

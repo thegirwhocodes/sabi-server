@@ -68,7 +68,12 @@ def main() -> int:
     )
     ok &= check("captures_pre_baseline_measurement", capture["research_measurements"][0]["phase"] == "pre_baseline", capture)
     ok &= check("captures_assessment_event", capture["assessment_events"][0]["phase"] == "pre_baseline", capture["assessment_events"])
-    ok &= check("creates_pending_item_responses", len(capture["item_responses"]) >= 4 and capture["item_responses"][0]["review_status"] == "pending_item_level_scoring", capture["item_responses"])
+    ok &= check(
+        "creates_item_responses_ready_for_scoring",
+        len(capture["item_responses"]) >= 4
+        and capture["item_responses"][0]["review_status"] == "ready_for_item_level_scoring",
+        capture["item_responses"],
+    )
     ok &= check("next_due_midline_after_baseline", capture["next_assessment_due"] == "midline" or capture["next_assessment_due"] == "monitoring", capture)
 
     micro = assignment_for_student(placed_student, stage="thirty_child_micro_rct")

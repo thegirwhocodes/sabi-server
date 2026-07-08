@@ -460,6 +460,20 @@ class SpeechToText:
                         return alt
                 except Exception as salvage_error:
                     logger.warning("Literacy salvage STT failed (%s); using Groq result", salvage_error)
+            # Numeric salvage: Groq can't take hotwords, so when a number answer
+            # is expected but Groq didn't hear one, retry on local Whisper with
+            # number-word hotwords (validated to recover "thirty"/"fifteen" that
+            # Groq renders as "Thank you"/"She's thin").
+            if _expects_number(context) and not _looks_number_like(text):
+                try:
+                    alt = self._transcribe_local(audio_path, mode=mode, context=context)
+                    alt_text = alt.get("text", "")
+                    if alt_text and _looks_number_like(alt_text):
+                        alt["provider"] = "local_numeric_salvage"
+                        alt["salvaged_from"] = text
+                        return alt
+                except Exception as salvage_error:
+                    logger.warning("Numeric salvage STT failed (%s); using Groq result", salvage_error)
             return result
 
         except httpx.HTTPStatusError as e:

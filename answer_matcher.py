@@ -49,6 +49,14 @@ CANONICAL_NUMBER_WORDS = {
 }
 NUMBER_FILLER_WORDS = {"a", "and"}
 
+# Observed whole-answer STT/accent variants from real Sabi phone tests. Keep
+# these match-only so STT numeric salvage still retries on these transcripts.
+KNOWN_NUMERIC_MISHEARS = {
+    "tati": 30,
+    "shes thin": 15,
+    "shusin": 15,
+}
+
 # Yes/no variations
 YES_WORDS = {"yes", "yeah", "yah", "ya", "yep", "uh huh", "ok", "okay", "sure", "ready"}
 NO_WORDS = {"no", "nah", "nope", "not really"}
@@ -99,6 +107,14 @@ def _extract_expected_number(text: str) -> Optional[int]:
     if any(word not in CANONICAL_NUMBER_WORDS and word not in NUMBER_FILLER_WORDS for word in words):
         return None
     return extract_number(normalized)
+
+
+def _extract_child_number_for_match(text: str) -> Optional[int]:
+    """Parse child answers, including observed whole-answer numeric mishears."""
+    number = extract_number(text)
+    if number is not None:
+        return number
+    return KNOWN_NUMERIC_MISHEARS.get(normalize_text(text))
 
 
 def extract_number(text: str) -> Optional[int]:
@@ -214,7 +230,7 @@ def match_answer(child_response: str, expected_answers: list[str], threshold: fl
         }
     """
     response_normalized = normalize_text(child_response)
-    child_number = extract_number(child_response)
+    child_number = _extract_child_number_for_match(child_response)
     expected_numbers = {
         value
         for value in (_extract_expected_number(expected) for expected in expected_answers)

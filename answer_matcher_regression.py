@@ -86,6 +86,39 @@ def main() -> int:
         match_answer("fine", ["15", "fifteen"]),
     )
     ok &= check(
+        "accepts_observed_tati_for_thirty",
+        match_answer("Tati.", ["30", "thirty"])["matched"] is True
+        and match_answer("Tati.", ["30", "thirty"])["extracted_number"] == 30,
+        match_answer("Tati.", ["30", "thirty"]),
+    )
+    ok &= check(
+        "tati_does_not_match_thirteen",
+        match_answer("Tati.", ["13", "thirteen"])["matched"] is False,
+        match_answer("Tati.", ["13", "thirteen"]),
+    )
+    ok &= check(
+        "accepts_observed_shes_thin_for_fifteen",
+        match_answer("She's thin.", ["15", "fifteen"])["matched"] is True
+        and match_answer("She's thin.", ["15", "fifteen"])["extracted_number"] == 15,
+        match_answer("She's thin.", ["15", "fifteen"]),
+    )
+    ok &= check(
+        "accepts_observed_shusin_for_fifteen",
+        match_answer("Shusin!", ["15", "fifteen"])["matched"] is True
+        and match_answer("Shusin!", ["15", "fifteen"])["extracted_number"] == 15,
+        match_answer("Shusin!", ["15", "fifteen"]),
+    )
+    ok &= check(
+        "shes_thin_does_not_match_fifty",
+        match_answer("She's thin.", ["50", "fifty"])["matched"] is False,
+        match_answer("She's thin.", ["50", "fifty"]),
+    )
+    ok &= check(
+        "observed_mishears_do_not_poison_global_extractor",
+        extract_number("Tati.") is None and extract_number("She's thin.") is None,
+        {"tati": extract_number("Tati."), "shes_thin": extract_number("She's thin.")},
+    )
+    ok &= check(
         "single_sound_does_not_match_inside_word",
         match_answer("mango", ["m", "mmm"])["matched"] is False,
         match_answer("mango", ["m", "mmm"]),

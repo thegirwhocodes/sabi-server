@@ -75,10 +75,6 @@ NUMBER_HOTWORDS = (
     "eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen "
     "twenty thirty forty fifty sixty seventy eighty ninety hundred"
 )
-NUMERIC_PRIMING = (
-    "The child is answering a maths question with a number. "
-    "Expected answers are number words such as: " + NUMBER_HOTWORDS + "."
-)
 
 
 WORD_ANSWER_CUES = (
@@ -109,6 +105,18 @@ def _expects_number(context: str) -> bool:
         from transcript_normalizer import has_numeric_lesson_context
 
         return has_numeric_lesson_context([{"role": "assistant", "content": str(context)}])
+    except Exception:
+        return False
+
+
+def _looks_number_like(text: str) -> bool:
+    """True when the transcript parses to a number (so no numeric salvage needed)."""
+    if not text:
+        return False
+    try:
+        from answer_matcher import extract_number
+
+        return extract_number(text) is not None
     except Exception:
         return False
 
@@ -414,10 +422,6 @@ class SpeechToText:
             mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
             filename = f"audio{ext}"
 
-            prompt = self._prompt_for_mode(mode, context=context)
-            if _expects_number(context):
-                prompt = f"{prompt} {NUMERIC_PRIMING}"
-
             response = httpx.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {self._groq_key}"},
@@ -425,7 +429,7 @@ class SpeechToText:
                 data={
                     "model": "whisper-large-v3",
                     "language": "en",
-                    "prompt": prompt,
+                    "prompt": self._prompt_for_mode(mode, context=context),
                     "response_format": "verbose_json",
                 },
                 timeout=15.0,
@@ -478,12 +482,16 @@ class SpeechToText:
     def _transcribe_local(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """Transcribe using self-hosted faster-whisper (GPU)."""
         self._load_local_model()
+        numeric = _expects_number(context)
+        # On numeric-answer turns, bias with number-word hotwords and DROP the
+        # verbose prompt: hotwords alone reliably recovers "thirty"/"fifteen",
+        # while keeping the prompt makes short clips echo it back verbatim.
         segments, info = self._model.transcribe(
             audio_path,
             language="en",
             beam_size=5,
-            initial_prompt=self._prompt_for_mode(mode, context=context),
-            hotwords=NUMBER_HOTWORDS if _expects_number(context) else None,
+            initial_prompt=None if numeric else self._prompt_for_mode(mode, context=context),
+            hotwords=NUMBER_HOTWORDS if numeric else None,
             vad_filter=True,
             vad_parameters={
                 "min_silence_duration_ms": 650 if str(mode or "").lower() == "literacy" else 500,

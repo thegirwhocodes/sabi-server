@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "pixabay-sabo-yaba-busstop-lagos",
+      "path": "assets/audio/Ambient_SaboYaba_BusStop_Lagos_Nigeria.wav",
+      "source_url": "https://pixabay.com/sound-effects/city-ambient-saboyaba-busstop-lagos-nigeria-23497/",
+      "license": "Pixabay Content License",
+      "tags": ["lagos", "bus_stop", "traffic", "crowd"],
+      "allowed_for_harness": true
+    },
+    {
+      "id": "freesound-411123-sabo-yaba-busstop-lagos",
+      "path": "../outputs/fake-child-harness/assets/audio/freesound-411123-sabo-yaba-16k.wav",
+      "source_url": "https://freesound.org/people/jehoshaphatia/sounds/411123/",
+      "preview_url": "https://cdn.freesound.org/previews/411/411123_6512420-hq.mp3",
+      "license": "Creative Commons 0",
+      "tags": ["lagos", "sabo_yaba", "bus_stop", "traffic", "crowd"],
+      "allowed_for_harness": true,
+      "notes": "Original WAV requires Freesound login; the harness can use the public CC0 preview audio for noisy pre-pilot stress cases."
+    },
+    {
+      "id": "zapsplat-african-village-market-busy",
+      "path": "assets/audio/african-village-market-busy-many-people.wav",
+      "source_url": "https://www.zapsplat.com/music/african-village-market-busy-many-people/",
+      "license": "CC0 1.0 per source page on 2026-07-06",
+      "tags": ["africa", "market", "crowd"],
+      "allowed_for_harness": true
+    }
+  ]
+}

@@ -493,6 +493,11 @@ FLASH_CALLBACK_MAX_ATTEMPTS = int(os.getenv("FLASH_CALLBACK_MAX_ATTEMPTS", "3"))
 FLASH_CALLBACK_COOLDOWN_SECONDS = int(os.getenv("FLASH_CALLBACK_COOLDOWN_SECONDS", "45"))
 FLASH_CALLBACK_RETRY_ENABLED = os.getenv("FLASH_CALLBACK_RETRY_ENABLED", "1").lower() in {"1", "true", "yes"}
 SABI_FLASH_CALLBACK_PHONE_ALIASES = os.getenv("SABI_FLASH_CALLBACK_PHONE_ALIASES", "")
+# When true (default), EVERY inbound caller is flash-called back so the child is
+# never charged for the lesson (they ring us, we hang up, we call them back on
+# our line). Set SABI_FLASH_CALLBACK_ALL=0 to only flash the test aliases and
+# leave everyone else on the direct (caller-pays) inbound leg.
+FLASH_CALLBACK_ALL = os.getenv("SABI_FLASH_CALLBACK_ALL", "1").strip().lower() in {"1", "true", "yes", "on"}
 _last_flash_callbacks: dict[str, float] = {}
 
 
@@ -538,16 +543,20 @@ def resolve_flash_callback_phone(phone: str) -> tuple[str, str]:
 async def asterisk_inbound_route(phone: str = Form(...)):
     """
     Decide whether an inbound SIP caller should stay on direct call-in or use
-    flash-callback. Testing aliases route to callback; normal callers stay
-    direct so production behavior does not change accidentally.
+    flash-callback. With SABI_FLASH_CALLBACK_ALL on (default) every valid caller
+    is flashed back so the child is not charged; otherwise only test aliases
+    flash and everyone else stays on the direct (caller-pays) inbound leg.
     """
     incoming_phone, callback_phone = resolve_flash_callback_phone(phone)
-    route = "flash" if incoming_phone and callback_phone != incoming_phone else "inbound"
+    route = "inbound"
+    if incoming_phone and (FLASH_CALLBACK_ALL or callback_phone != incoming_phone):
+        route = "flash"
     logger.info(
-        "Inbound route resolved phone=%s callback=%s route=%s",
+        "Inbound route resolved phone=%s callback=%s route=%s flash_all=%s",
         incoming_phone or "unknown",
         callback_phone or "unknown",
         route,
+        FLASH_CALLBACK_ALL,
     )
     return PlainTextResponse(route)
 

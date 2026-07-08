@@ -65,6 +65,22 @@ LITERACY_ENGLISH_PROMPT = (
 )
 
 
+# Number-answer biasing. When the tutor is expecting a numeric answer, prime the
+# recognizer toward number words. Validated on real Nigerian-accented calls: it
+# recovers answers Whisper otherwise mis-hears ("Thank you" -> "thirty",
+# "She's thin" -> "fifteen"). hotwords is the strong lever for local Whisper;
+# Groq only takes a prompt, so it gets the priming sentence instead.
+NUMBER_HOTWORDS = (
+    "zero one two three four five six seven eight nine ten "
+    "eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen "
+    "twenty thirty forty fifty sixty seventy eighty ninety hundred"
+)
+NUMERIC_PRIMING = (
+    "The child is answering a maths question with a number. "
+    "Expected answers are number words such as: " + NUMBER_HOTWORDS + "."
+)
+
+
 WORD_ANSWER_CUES = (
     "another word",
     "say a word",
@@ -80,6 +96,21 @@ LITERACY_WORDS = {
 }
 
 WHISPER_CLI_PROVIDERS = {"whisper_cli", "openai_whisper", "openai-whisper", "cli_whisper"}
+
+
+def _expects_number(context: str) -> bool:
+    """True when the recent tutor prompt is asking for a numeric answer, so STT
+    should be biased toward number words. Reuses the same numeric-context
+    detector the transcript normalizer uses. Fail-safe: returns False on any
+    error so biasing never breaks a normal transcription."""
+    if not context:
+        return False
+    try:
+        from transcript_normalizer import has_numeric_lesson_context
+
+        return has_numeric_lesson_context([{"role": "assistant", "content": str(context)}])
+    except Exception:
+        return False
 
 
 def _clean_prompt_context(context: str, limit: int = 220) -> str:
@@ -383,6 +414,10 @@ class SpeechToText:
             mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
             filename = f"audio{ext}"
 
+            prompt = self._prompt_for_mode(mode, context=context)
+            if _expects_number(context):
+                prompt = f"{prompt} {NUMERIC_PRIMING}"
+
             response = httpx.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {self._groq_key}"},
@@ -390,7 +425,7 @@ class SpeechToText:
                 data={
                     "model": "whisper-large-v3",
                     "language": "en",
-                    "prompt": self._prompt_for_mode(mode, context=context),
+                    "prompt": prompt,
                     "response_format": "verbose_json",
                 },
                 timeout=15.0,
@@ -448,6 +483,7 @@ class SpeechToText:
             language="en",
             beam_size=5,
             initial_prompt=self._prompt_for_mode(mode, context=context),
+            hotwords=NUMBER_HOTWORDS if _expects_number(context) else None,
             vad_filter=True,
             vad_parameters={
                 "min_silence_duration_ms": 650 if str(mode or "").lower() == "literacy" else 500,

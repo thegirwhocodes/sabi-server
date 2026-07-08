@@ -481,7 +481,7 @@ def main() -> int:
     ok &= check(
         "feedback_requested_prompt_is_short_and_direct",
         requested_metadata.get("ended_reason") == "speech_captured"
-        and "After the beep" in requested_prompt
+        and "after the beep" in requested_prompt.lower()
         and len(requested_prompt) < len(voice_realtime.FEEDBACK_PROMPT_TEXT),
         requested_prompt,
     )

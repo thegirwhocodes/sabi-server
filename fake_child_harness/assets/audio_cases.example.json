@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "description": "Example audio-backed fake-child cases. Run from sabi-server with: python3 -m fake_child_harness.audio_runner --cases fake_child_harness/assets/audio_cases.example.json",
+  "cases": [
+    {
+      "case_id": "lagos-market-correct-five",
+      "child_id": "audio-demo-001",
+      "call_index": 1,
+      "turn_index": 1,
+      "prompt": "If you have two mangoes and buy three more, how many mangoes do you have?",
+      "item_id": "addition_2_plus_3",
+      "expected_answers": ["5", "five"],
+      "ground_truth_correct": true,
+      "child_answer_text": "five",
+      "stt_text": "five",
+      "speech_wav": "../outputs/fake-child-harness/audio-smoke/speech.wav",
+      "noise_wav": "../outputs/fake-child-harness/assets/audio/freesound-411123-sabo-yaba-16k.wav",
+      "noise_level": "lagos_market",
+      "mode": "general",
+      "notes": ["example_fixture_stt"]
+    },
+    {
+      "case_id": "carrier-not-available-negative",
+      "child_id": "audio-demo-002",
+      "call_index": 1,
+      "turn_index": 1,
+      "prompt": "What is your name?",
+      "item_id": "identity_name_prompt",
+      "expected_answers": ["Sabi test child"],
+      "ground_truth_correct": true,
+      "child_answer_text": "Sabi test child",
+      "stt_text": "Not available",
+      "speech_wav": "../outputs/fake-child-harness/audio-smoke/speech.wav",
+      "noise_wav": "../outputs/fake-child-harness/assets/audio/freesound-411123-sabo-yaba-16k.wav",
+      "noise_level": "brutal_market",
+      "mode": "general",
+      "notes": ["negative_identity_poisoning_fixture"]
+    }
+  ]
+}

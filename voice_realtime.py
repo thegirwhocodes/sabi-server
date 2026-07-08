@@ -169,6 +169,12 @@ FEEDBACK_RETRY_ENABLED = os.getenv("SABI_FEEDBACK_RETRY_ENABLED", "1").strip().l
 # DTMF digit a caller can press to skip the feedback window immediately.
 # Empty string disables.
 FEEDBACK_DTMF_SKIP_DIGIT = os.getenv("SABI_FEEDBACK_DTMF_SKIP_DIGIT", "1").strip()
+# DTMF "hotkey" a caller can press AT ANY POINT during the lesson to stop the
+# call and jump straight to the open feedback space -- so a frustrated child
+# (or tester) who would otherwise just hang up has a way to say what went
+# wrong. Defaults to the star key, which never collides with numeric answers
+# on a numeracy lesson. Empty string disables. Set SABI_FEEDBACK_HOTKEY_DIGIT.
+FEEDBACK_HOTKEY_DIGIT = os.getenv("SABI_FEEDBACK_HOTKEY_DIGIT", "*").strip()
 # Length of the audible "go" cue beep played right before the recording
 # window opens, so the caller knows recording is now live.
 FEEDBACK_GO_CUE_MS = int(os.getenv("SABI_FEEDBACK_GO_CUE_MS", "400"))
@@ -176,19 +182,46 @@ FEEDBACK_GO_CUE_FREQ_HZ = int(os.getenv("SABI_FEEDBACK_GO_CUE_FREQ_HZ", "880"))
 FEEDBACK_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_PROMPT_TEXT",
     (
-        "Before you go, this is an open space. You can leave any voice note about the call. "
-        "Tell us what felt good, what went wrong, if something was confusing or uncomfortable, "
-        "or if you want to complain about anything that happened. This is optional. "
-        "If you do not want to leave a note, you can hang up now. "
-        "If you do, start talking after the beep."
+        "Before you go, this is your space to say anything at all -- what you liked, "
+        "what was hard, anything that annoyed you. Just start talking after the beep."
     ),
 )
 FEEDBACK_REQUESTED_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_REQUESTED_PROMPT_TEXT",
+    "Of course, I'm listening. Say anything you like. Go ahead after the beep.",
+)
+# Warm, de-escalating prompt used when the caller pressed the mid-call feedback
+# hotkey -- they interrupted the lesson because something is bothering them, so
+# lead with reassurance, not survey framing.
+FEEDBACK_HOTKEY_PROMPT_TEXT = os.getenv(
+    "SABI_FEEDBACK_HOTKEY_PROMPT_TEXT",
+    "Okay, I'm listening. What is wrong? What upset you? Tell me after the beep.",
+)
+# Short line appended to the greeting so the caller knows the hotkey exists.
+# Empty string disables the announcement. Only spoken on the live-synth greeting
+# path (not the rarely-used cached greeting).
+FEEDBACK_HOTKEY_ANNOUNCE_TEXT = os.getenv(
+    "SABI_FEEDBACK_HOTKEY_ANNOUNCE_TEXT",
     (
-        "Okay. After the beep, leave your feedback note. You can say anything "
-        "about the call, including what went wrong or what you want us to fix."
+        "Anytime you want, you can say, I want to leave feedback, or press the star "
+        "key on your phone, and I will stop and listen after the beep."
     ),
+)
+# After the caller leaves a mid-call note, Sabi acknowledges it warmly and then
+# asks whether to keep going. Kept deterministic so the model can't wander.
+FEEDBACK_CONTINUE_QUESTION_TEXT = os.getenv(
+    "SABI_FEEDBACK_CONTINUE_QUESTION_TEXT",
+    "Do you want to keep learning, or should we stop here for today?",
+)
+# Spoken if the empathy model call fails, so the flow never dead-ends silently.
+FEEDBACK_EMPATHY_FALLBACK_TEXT = os.getenv(
+    "SABI_FEEDBACK_EMPATHY_FALLBACK_TEXT",
+    "Thank you for telling me. I hear you, and I am glad you said something.",
+)
+# Spoken when the caller opened the feedback space but left no note.
+FEEDBACK_EMPTY_NOTE_RESUME_TEXT = os.getenv(
+    "SABI_FEEDBACK_EMPTY_NOTE_RESUME_TEXT",
+    "That is okay. Whenever you are ready, let's keep going.",
 )
 FEEDBACK_RETRY_PROMPT_TEXT = os.getenv(
     "SABI_FEEDBACK_RETRY_PROMPT_TEXT",
@@ -503,6 +536,7 @@ FEEDBACK_OFFER_END_REASONS = {
     "max_call_seconds",
     "normal_loop_complete",
     "feedback_requested",
+    "feedback_hotkey",
 }
 
 
@@ -514,6 +548,40 @@ def _should_offer_feedback(
 ) -> bool:
     del student_id  # Feedback sidecars can still be useful if memory failed.
     return bool(messages) and not hungup and end_reason in FEEDBACK_OFFER_END_REASONS
+
+
+_STOP_LESSON_MARKERS = (
+    "stop", "no more", "not anymore", "i am done", "i'm done", "im done",
+    "finished", "that's all", "thats all", "goodbye", "good bye", "bye",
+    "end the call", "hang up", "leave", "go now", "tired", "enough",
+    "don't want to continue", "do not want to continue", "no thank",
+)
+_CONTINUE_LESSON_MARKERS = (
+    "keep learning", "keep going", "continue", "carry on", "go on", "more",
+    "yes", "yeah", "yep", "sure", "okay", "ok", "let's continue", "lets continue",
+    "i want to learn", "teach me", "keep teaching", "still learning",
+)
+
+
+def _wants_to_continue_lesson(text: str) -> bool:
+    """Decide whether a caller's reply to 'keep going or stop?' means continue.
+
+    Bias: a clear stop word stops; a clear continue word (or any other
+    non-empty answer, since they are still engaged and talking) continues;
+    an empty/no-answer stops.
+    """
+    normalized = " ".join((text or "").lower().replace("-", " ").split()).strip(" .,!?:;")
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in _STOP_LESSON_MARKERS):
+        # A bare "no" also stops.
+        return False
+    if normalized in {"no", "nope", "nah"}:
+        return False
+    if any(marker in normalized for marker in _CONTINUE_LESSON_MARKERS):
+        return True
+    # They said something else but are still talking/engaged -> keep going.
+    return True
 
 
 def _looks_like_feedback_request(text: str) -> bool:
@@ -587,10 +655,47 @@ class RealtimeCall:
         self.pre_roll: deque[bytes] = deque(maxlen=PRE_ROLL_FRAMES)
         self.hungup = False
         self.end_reason = "unknown"
+        # Set True the moment the caller presses the mid-call feedback hotkey.
+        self.feedback_hotkey_pressed = False
+        # Set True once any feedback note has been captured, so the end-of-call
+        # offer does not ask a second time.
+        self.feedback_captured = False
 
     def set_end_reason(self, reason: str) -> None:
         if self.end_reason == "unknown":
             self.end_reason = reason
+
+    def _consume_feedback_hotkey(self) -> bool:
+        """Drain pending DTMF; latch the hotkey if the caller pressed it.
+
+        Non-hotkey digits are re-queued so the numeric keypad fallback still
+        works. Returns True the first time the hotkey is seen; the latched
+        ``feedback_hotkey_pressed`` flag stays True afterward so callers that
+        drained the queue can still detect it.
+        """
+        if not FEEDBACK_HOTKEY_DIGIT:
+            return False
+        pressed = False
+        leftover: list[str] = []
+        while True:
+            try:
+                digit = self.dtmf_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if digit == FEEDBACK_HOTKEY_DIGIT:
+                pressed = True
+            else:
+                leftover.append(digit)
+        for digit in leftover:
+            try:
+                self.dtmf_queue.put_nowait(digit)
+            except asyncio.QueueFull:
+                break
+        if pressed:
+            if not self.feedback_hotkey_pressed:
+                logger.info("Feedback hotkey pressed uuid=%s digit=%r", self.call_uuid, FEEDBACK_HOTKEY_DIGIT)
+            self.feedback_hotkey_pressed = True
+        return pressed
 
     async def read_loop(self) -> None:
         try:
@@ -708,6 +813,12 @@ class RealtimeCall:
                 logger.info("Playback stopped because channel closed uuid=%s elapsed=%.2fs", self.call_uuid, time.monotonic() - playback_start)
                 return None
 
+            # A frustrated caller can press the hotkey mid-sentence: stop
+            # talking immediately and let the main loop open the feedback space.
+            if self._consume_feedback_hotkey():
+                logger.info("Playback stopped for feedback hotkey uuid=%s elapsed=%.2fs", self.call_uuid, time.monotonic() - playback_start)
+                return None
+
             frame_start = time.monotonic()
             await _send_packet(self.writer, AUDIO_TYPE_PCM_8K, pcm[offset:offset + FRAME_BYTES])
 
@@ -770,6 +881,8 @@ class RealtimeCall:
         speech_frames = 0
         threshold = speech_threshold or SPEECH_RMS_THRESHOLD
         while not self.hungup:
+            if self.feedback_hotkey_pressed or self._consume_feedback_hotkey():
+                return None
             inbound = await self.audio_queue.get()
             if inbound is None:
                 self.hungup = True
@@ -1042,8 +1155,14 @@ class RealtimeCall:
         learning_state: dict | None,
         *,
         requested_by_caller: bool = False,
-    ) -> None:
-        """Ask for one optional, open-ended tester note after the lesson.
+        hotkey: bool = False,
+        mid_call: bool = False,
+    ) -> str:
+        """Ask for one optional, open-ended tester note. Returns the transcript.
+
+        Returns the transcribed note text ("" when nothing was captured) so the
+        mid-call feedback flow can react to what the caller said. The passive
+        end-of-call callers ignore the return value.
 
         Flow:
           1. Play the long open-ended prompt.
@@ -1058,20 +1177,38 @@ class RealtimeCall:
              channel_closed). This was previously a silent return that left
              the call ending mysteriously.
         """
-        if not _feedback_enabled_for_phone(self.phone) or self.hungup:
-            return
+        # The hotkey / a spoken feedback request is an explicit "I want to talk"
+        # from the caller, so honor it even when the passive end-of-call offer
+        # is restricted by mode.
+        explicit = hotkey or requested_by_caller or mid_call
+        if self.hungup or (not explicit and not _feedback_enabled_for_phone(self.phone)):
+            return ""
+
+        base_tags = ["open_voice_note"]
+        if hotkey:
+            base_tags.append("hotkey")
+        if mid_call:
+            base_tags.append("mid_call")
 
         # Clear old audio/keys before inviting feedback. Do not clear again
         # after the beep: that can erase the first words of the actual note.
         self.drain_audio()
         _drain_dtmf(self.dtmf_queue)
+        # The hotkey press itself is now consumed; reset so a leftover latch
+        # doesn't abort the recording windows below.
+        self.feedback_hotkey_pressed = False
 
         prompt_played_at = time.monotonic()
-        prompt_text = FEEDBACK_REQUESTED_PROMPT_TEXT if requested_by_caller else FEEDBACK_PROMPT_TEXT
+        if hotkey:
+            prompt_text = FEEDBACK_HOTKEY_PROMPT_TEXT
+        elif requested_by_caller:
+            prompt_text = FEEDBACK_REQUESTED_PROMPT_TEXT
+        else:
+            prompt_text = FEEDBACK_PROMPT_TEXT
         prompt_pcm = await self.synthesize_pcm(prompt_text, "rt_feedback_prompt")
         await self.play_pcm(prompt_pcm)
         if self.hungup:
-            return
+            return ""
         prompt_played_seconds = round(time.monotonic() - prompt_played_at, 2)
 
         # Audible "you're live" cue right before opening the recording window.
@@ -1079,7 +1216,7 @@ class RealtimeCall:
         if go_cue:
             await self.play_pcm(go_cue)
             if self.hungup:
-                return
+                return ""
 
         max_frames = max(1, int(FEEDBACK_MAX_SECONDS * 1000 / FRAME_MS))
         skip_digit = FEEDBACK_DTMF_SKIP_DIGIT or None
@@ -1147,7 +1284,7 @@ class RealtimeCall:
                             "recording_path": "",
                             "transcript": "",
                             "duration_seconds": 0,
-                            "tags": ["open_voice_note", f"no_audio:{ended_reason}"],
+                            "tags": base_tags + [f"no_audio:{ended_reason}"],
                             "feedback_mode": FEEDBACK_MODE,
                             "mode": self.mode,
                             "attempt": self.attempt,
@@ -1162,11 +1299,11 @@ class RealtimeCall:
                 )
             except Exception as exc:
                 logger.warning("Could not write empty feedback sidecar uuid=%s: %s", self.call_uuid, exc)
-            return
+            return ""
 
         duration_seconds = int(len(feedback_pcm) / (SAMPLE_RATE * SAMPLE_WIDTH))
         if duration_seconds <= 0:
-            return
+            return ""
 
         feedback_path = SHARED_AUDIO_DIR / f"feedback_{self.call_uuid}.wav"
         _write_wav(feedback_path, feedback_pcm)
@@ -1189,7 +1326,7 @@ class RealtimeCall:
             "recording_path": str(feedback_path),
             "transcript": transcript_text,
             "duration_seconds": duration_seconds,
-            "tags": ["open_voice_note"],
+            "tags": list(base_tags),
             "feedback_mode": FEEDBACK_MODE,
             "mode": self.mode,
             "attempt": self.attempt,
@@ -1233,10 +1370,114 @@ class RealtimeCall:
                 "rms_telemetry": feedback_metadata["rms_telemetry"],
                 "wait_attempts": attempts,
             },
-            tags=["open_voice_note"],
+            tags=list(base_tags),
             consent_recorded=True,
             assent_recorded=False,
         )
+        self.feedback_captured = True
+        return transcript_text
+
+    async def handle_mid_call_feedback(
+        self,
+        student_id: str | None,
+        learning_state: dict | None,
+        messages: list[dict],
+        *,
+        module: int = 0,
+        course: str = "numeracy",
+        trigger: str = "hotkey",
+    ) -> bool:
+        """Run the mid-call feedback conversation. Returns True to resume.
+
+        Flow (Naomi's design):
+          1. Record + transcribe + save the caller's note.
+          2. Warmly acknowledge what they said (LLM, guardrailed; caring
+             fallback line on error) -- Sabi decides the words.
+          3. Ask whether to keep learning or stop here.
+          4. Return True to resume the lesson from where they left off, or
+             False to stop the call.
+        """
+        hotkey = trigger == "hotkey"
+        transcript_text = await self.record_feedback_note(
+            student_id,
+            learning_state,
+            requested_by_caller=True,
+            hotkey=hotkey,
+            mid_call=True,
+        )
+        if self.hungup:
+            return False
+
+        # They opened the space but left no note -> reassure and resume.
+        if not transcript_text:
+            resume_pcm = await self.synthesize_pcm(FEEDBACK_EMPTY_NOTE_RESUME_TEXT, "rt_feedback_resume")
+            await self.play_pcm_with_barge(resume_pcm)
+            return not self.hungup
+
+        # Acknowledge warmly. Reuse the LLM (guardrails + provider fallback) but
+        # steer it hard away from teaching; fall back to a fixed caring line.
+        ack_text = FEEDBACK_EMPATHY_FALLBACK_TEXT
+        try:
+            ack_messages = [
+                *messages[-6:],
+                {
+                    "role": "system",
+                    "content": (
+                        'The child just used the feedback space and said: "'
+                        + transcript_text
+                        + '". This is NOT a lesson answer. Reply as Sabi, their kind tutor, in '
+                        "ONE short spoken sentence: warmly acknowledge how they feel and thank "
+                        "them for telling you. Do NOT teach, do NOT ask a lesson question, do "
+                        "NOT give advice. Then stop."
+                    ),
+                },
+            ]
+            generated = await self.llm.generate(
+                messages=ack_messages,
+                student_id=student_id,
+                current_module=module,
+                memory=self.memory,
+                course=course,
+                learning_state=learning_state or {},
+                call_id=self.call_id,
+                channel="asterisk_audiosocket",
+            )
+            generated = (generated or "").strip()
+            if generated:
+                ack_text = generated
+        except Exception as exc:
+            logger.warning("Mid-call feedback empathy generation failed uuid=%s: %s", self.call_uuid, exc)
+
+        # One combined utterance: acknowledgement + deterministic continue/stop.
+        combined = f"{ack_text} {FEEDBACK_CONTINUE_QUESTION_TEXT}"
+        messages.append({"role": "assistant", "content": combined})
+        combined_pcm = await self.synthesize_pcm(combined, "rt_feedback_ack")
+        await self.play_pcm_with_barge(combined_pcm)
+        if self.hungup:
+            return False
+
+        # Listen for their yes/no.
+        answer_pcm = await self.wait_for_utterance()
+        if self.hungup or not answer_pcm:
+            return False
+        answer = ""
+        try:
+            result = await self.transcribe_pcm(answer_pcm, 999)
+            answer = (result.get("text") or "").strip()
+        except Exception as exc:
+            logger.warning("Mid-call feedback resume transcription failed uuid=%s: %s", self.call_uuid, exc)
+        messages.append({"role": "user", "content": answer})
+        wants_continue = _wants_to_continue_lesson(answer)
+        logger.info(
+            "Mid-call feedback resume decision uuid=%s answer=%r continue=%s",
+            self.call_uuid, answer, wants_continue,
+        )
+        if not wants_continue:
+            bye_pcm = await self.synthesize_pcm(
+                "Okay. Thank you for talking with me today. Bye for now.", "rt_feedback_bye"
+            )
+            await self.play_pcm(bye_pcm)
+        return wants_continue
 
     def persist_turn_review(
         self,
@@ -1352,7 +1593,10 @@ class RealtimeCall:
             use_static_greeting = USE_CACHED_GREETING and greeting == FAST_GREETING_TEXT
             greeting_pcm = _load_fast_greeting_pcm() if use_static_greeting else None
             if greeting_pcm is None:
-                greeting_pcm = await self.synthesize_pcm(greeting, "rt_greeting")
+                greeting_to_speak = greeting
+                if FEEDBACK_HOTKEY_DIGIT and FEEDBACK_HOTKEY_ANNOUNCE_TEXT:
+                    greeting_to_speak = f"{greeting} {FEEDBACK_HOTKEY_ANNOUNCE_TEXT}"
+                greeting_pcm = await self.synthesize_pcm(greeting_to_speak, "rt_greeting")
             interrupted = await self.play_pcm_with_barge(
                 greeting_pcm,
                 speech_threshold=_speech_threshold_for_state(effective_state),
@@ -1363,6 +1607,18 @@ class RealtimeCall:
                 return
 
             for turn in range(MAX_TURNS):
+                if self.feedback_hotkey_pressed:
+                    self.feedback_hotkey_pressed = False
+                    logger.info("Feedback hotkey -> opening mid-call feedback uuid=%s", self.call_uuid)
+                    keep_going = await self.handle_mid_call_feedback(
+                        student_id, effective_state, messages,
+                        module=module, course=str((effective_state or {}).get("course") or "numeracy"),
+                        trigger="hotkey",
+                    )
+                    if not keep_going:
+                        self.set_end_reason("feedback_then_stopped")
+                        break
+                    continue
                 if self.hungup:
                     break
                 if time.monotonic() - call_started_at >= MAX_CALL_SECONDS:
@@ -1385,6 +1641,18 @@ class RealtimeCall:
                     speech_threshold=speech_threshold,
                 )
                 interrupted = None
+                if self.feedback_hotkey_pressed:
+                    self.feedback_hotkey_pressed = False
+                    logger.info("Feedback hotkey (while listening) -> opening mid-call feedback uuid=%s", self.call_uuid)
+                    keep_going = await self.handle_mid_call_feedback(
+                        student_id, effective_state, messages,
+                        module=module, course=str((effective_state or {}).get("course") or "numeracy"),
+                        trigger="hotkey",
+                    )
+                    if not keep_going:
+                        self.set_end_reason("feedback_then_stopped")
+                        break
+                    continue
                 if not utterance:
                     if self.hungup:
                         self.set_end_reason("channel_closed_waiting_for_speech")
@@ -1527,8 +1795,15 @@ class RealtimeCall:
                             "turn_total_seconds": round(time.monotonic() - turn_start, 3),
                         },
                     )
-                    self.set_end_reason("feedback_requested")
-                    break
+                    keep_going = await self.handle_mid_call_feedback(
+                        student_id, effective_state, messages,
+                        module=module, course=str((effective_state or {}).get("course") or "numeracy"),
+                        trigger="spoken",
+                    )
+                    if not keep_going:
+                        self.set_end_reason("feedback_then_stopped")
+                        break
+                    continue
                 literacy_answer = _looks_like_literacy_answer(text, effective_state)
                 if confidence < CONFIDENCE_THRESHOLD and not _looks_like_numeric_answer(text) and not literacy_answer:
                     if confidence >= MIN_USABLE_CONFIDENCE and len(normalized_text) >= 3:
@@ -1752,12 +2027,13 @@ class RealtimeCall:
         finally:
             if self.end_reason == "unknown":
                 self.end_reason = "channel_closed" if self.hungup else "normal_loop_complete"
-            if _should_offer_feedback(student_id, messages, self.hungup, self.end_reason):
+            if not self.feedback_captured and _should_offer_feedback(student_id, messages, self.hungup, self.end_reason):
                 try:
                     await self.record_feedback_note(
                         student_id,
                         effective_state,
-                        requested_by_caller=self.end_reason == "feedback_requested",
+                        requested_by_caller=self.end_reason in ("feedback_requested", "feedback_hotkey"),
+                        hotkey=self.end_reason == "feedback_hotkey",
                     )
                 except Exception as exc:
                     logger.warning("Optional feedback capture failed uuid=%s: %s", self.call_uuid, exc)

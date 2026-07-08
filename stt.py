@@ -177,6 +177,40 @@ class SpeechToText:
             logger.exception("STT: Failed to load local Whisper fallback")
             raise
 
+    def _has_speech(self, audio_path: str) -> bool:
+        """Silero VAD pre-gate.
+
+        Returns False when the clip contains no speech above threshold, so pure
+        noise / dead air never reaches the STT model — which otherwise
+        hallucinates fluent text ("Subtitles by the Amara.org community",
+        "Thank you") on a crying-baby or silent turn. Confirmed on real Sabi
+        calls: gates the dead-air turns, keeps every real (even quiet/short)
+        child answer.
+
+        Fail-open: any error (missing dep, decode failure) returns True, so a
+        real answer is never dropped because the guard broke. Disable entirely
+        with SABI_STT_VAD_GATE=0.
+        """
+        if os.getenv("SABI_STT_VAD_GATE", "1").strip().lower() in {"0", "false", "no", "off"}:
+            return True
+        try:
+            from faster_whisper.audio import decode_audio
+            from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+            audio = decode_audio(audio_path, sampling_rate=16000)
+            options = VadOptions(
+                onset=float(os.getenv("SABI_STT_VAD_ONSET", "0.5")),
+                min_silence_duration_ms=int(os.getenv("SABI_STT_VAD_MIN_SILENCE_MS", "500")),
+                speech_pad_ms=int(os.getenv("SABI_STT_VAD_SPEECH_PAD_MS", "200")),
+            )
+            has_speech = bool(get_speech_timestamps(audio, options))
+            if not has_speech:
+                logger.info("STT VAD gate: no speech in %s — skipping model call", audio_path)
+            return has_speech
+        except Exception:
+            logger.exception("STT VAD gate failed; passing audio through (fail-open)")
+            return True
+
     def transcribe(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """
         Transcribe audio file to text.
@@ -189,6 +223,22 @@ class SpeechToText:
         """
         provider = self._provider_for_mode(mode)
         primary_error: Exception | None = None
+
+        # VAD pre-gate: skip the STT model entirely on no-speech audio so a
+        # crying baby / dead air can never be transcribed into a hallucination.
+        # Returns empty text, which the caller already handles as "say that
+        # again" — no invented words ever reach the tutor.
+        if not self._has_speech(audio_path):
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "language": "en",
+                "duration_seconds": 0.0,
+                "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+                "provider": provider,
+                "no_speech": True,
+                "vad_gated": True,
+            }
         if provider in {"intron", "intron_first"}:
             if self._intron_key:
                 try:

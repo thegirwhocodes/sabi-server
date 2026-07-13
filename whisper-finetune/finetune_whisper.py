@@ -396,7 +396,9 @@ def main():
             "fc1", "fc2",
         ],
         bias="none",
-        task_type="SEQ_2_SEQ_LM",
+        # Do not select PeftModelForSeq2SeqLM: that text-model wrapper injects
+        # input_ids, while Whisper's encoder expects input_features. Generic
+        # PeftModel applies the same LoRA modules and preserves Whisper's API.
     )
     model = get_peft_model(model, lora_config)
 

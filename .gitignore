@@ -16,6 +16,8 @@ voice-auditions/
 # ML model artifacts
 whisper-finetune/*.pt
 whisper-finetune/checkpoints/
+whisper-finetune/gold_manifest*.json
+whisper-finetune/gold_results*.json
 afro-tts/finetune/
 afro-tts/reference_audio/
 # Secrets

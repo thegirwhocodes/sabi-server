@@ -24,6 +24,7 @@ bitsandbytes>=0.44.0  # 8-bit AdamW optimizer
 
 # CTranslate2 conversion (Whisper → faster-whisper format)
 ctranslate2>=4.4.0
+faster-whisper>=1.1.0
 
 # Monitoring
 tensorboard>=2.14.0

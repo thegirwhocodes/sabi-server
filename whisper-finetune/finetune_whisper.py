@@ -145,6 +145,12 @@ class LazyAudioCollator:
                 dtype="float32",
                 always_2d=False,
             )
+            # soundfile returns stereo as (frames, channels). Downmix before
+            # either resampling branch: librosa defaults to the last axis, so
+            # passing stereo through would resample the 2-channel axis and
+            # hand Whisper a gigantic 2-D feature input.
+            if audio_array.ndim > 1:
+                audio_array = audio_array.mean(axis=1, dtype="float32")
             if audio_info.duration > MAX_INPUT_LENGTH + 0.25:
                 logger.warning(
                     "Capped overlong audio at %.1fs: %s (actual %.1fs)",

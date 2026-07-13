@@ -61,6 +61,9 @@ COUNTRY_FILTER = "NG"  # Only Nigerian-accented English
 TELEPHONY_AUGMENT_PROBABILITY = float(os.getenv("SABI_TELEPHONY_AUGMENT_PROB", "0.65"))
 MAX_TRAIN_SAMPLES = int(os.getenv("SABI_FINETUNE_MAX_TRAIN_SAMPLES", "0"))
 MAX_EVAL_SAMPLES = int(os.getenv("SABI_FINETUNE_MAX_EVAL_SAMPLES", "0"))
+LOG_BATCH_MEMORY = os.getenv("SABI_FINETUNE_LOG_BATCH_MEMORY", "0").lower() in {
+    "1", "true", "yes", "on"
+}
 EXPORT_FINAL_MODEL = os.getenv("SABI_FINETUNE_EXPORT_FINAL", "0").lower() in {
     "1", "true", "yes", "on"
 }
@@ -90,6 +93,7 @@ class LazyAudioCollator:
     processor: Any
     decoder_start_token_id: int
     input_dtype: torch.dtype = torch.float32
+    batch_count: int = 0
 
     @staticmethod
     def _telephony_augment(audio_array, sr: int):
@@ -129,7 +133,25 @@ class LazyAudioCollator:
         labels_list = []
 
         for feature in features:
-            audio_array, sr = sf.read(feature["audio_path"])
+            audio_info = sf.info(feature["audio_path"])
+            # Never trust corpus duration metadata enough to read an unbounded
+            # WAV. AfriSpeech contains multi-minute source recordings alongside
+            # short utterances; bounding at the decoder prevents a malformed or
+            # mismatched row from exhausting host RAM before Whisper truncates.
+            max_frames = max(1, int(audio_info.samplerate * MAX_INPUT_LENGTH))
+            audio_array, sr = sf.read(
+                feature["audio_path"],
+                frames=max_frames,
+                dtype="float32",
+                always_2d=False,
+            )
+            if audio_info.duration > MAX_INPUT_LENGTH + 0.25:
+                logger.warning(
+                    "Capped overlong audio at %.1fs: %s (actual %.1fs)",
+                    MAX_INPUT_LENGTH,
+                    feature["audio_path"],
+                    audio_info.duration,
+                )
             if random.random() < TELEPHONY_AUGMENT_PROBABILITY:
                 audio_array = self._telephony_augment(audio_array, sr)
                 sr = 16000
@@ -166,6 +188,17 @@ class LazyAudioCollator:
             labels = labels[:, 1:]
 
         batch["labels"] = labels
+        self.batch_count += 1
+        if LOG_BATCH_MEMORY:
+            import resource
+            max_rss_gib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+            logger.info(
+                "Collated batch %d (%d clips); process peak RSS %.2f GiB; files=%s",
+                self.batch_count,
+                len(features),
+                max_rss_gib,
+                ",".join(Path(item["audio_path"]).name for item in features),
+            )
         return batch
 
 

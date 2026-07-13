@@ -7,7 +7,9 @@ torch==2.5.1+cu121
 torchaudio==2.5.1+cu121
 
 # HuggingFace ecosystem
-transformers>=4.45.0
+# The 5.x Trainer currently balloons host RAM while collecting Whisper
+# gradient-accumulation batches; keep this pipeline on the supported 4.x API.
+transformers>=4.45.0,<5.0.0
 datasets>=3.0.0
 accelerate>=1.0.0
 evaluate>=0.4.0

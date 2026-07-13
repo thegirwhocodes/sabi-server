@@ -19,6 +19,7 @@ import sys
 import time
 import logging
 import subprocess
+import random
 from dataclasses import dataclass
 from typing import Any, Dict, List
 from pathlib import Path
@@ -26,21 +27,26 @@ from pathlib import Path
 import torch
 
 # ─── Configuration ───────────────────────────────────────────────
-MODEL_NAME = "openai/whisper-large-v3"
+MODEL_NAME = os.getenv("SABI_FINETUNE_MODEL", "openai/whisper-small")
 DATASET_REPO = "intronhealth/afrispeech-200"
 DATA_DIR = "/opt/sabi/whisper-finetune/data/afrispeech-200"
 
-OUTPUT_DIR = "/opt/sabi/whisper-finetune/output/whisper-nigerian-english"
-MERGED_DIR = "/opt/sabi/whisper-finetune/output/whisper-nigerian-english-merged"
-CT2_OUTPUT_DIR = "/opt/sabi/whisper-finetune/output/whisper-nigerian-english-ct2"
-FINAL_MODEL_DIR = "/opt/sabi/sabi-server/models/whisper-nigerian-english-ct2"
+RUN_NAME = os.getenv(
+    "SABI_FINETUNE_RUN_NAME",
+    f"{MODEL_NAME.rsplit('/', 1)[-1]}-ng-english-telephony-v1",
+)
+OUTPUT_ROOT = "/opt/sabi/whisper-finetune/output"
+OUTPUT_DIR = f"{OUTPUT_ROOT}/{RUN_NAME}/lora"
+MERGED_DIR = f"{OUTPUT_ROOT}/{RUN_NAME}/merged"
+CT2_OUTPUT_DIR = f"{OUTPUT_ROOT}/{RUN_NAME}/ct2"
+FINAL_MODEL_DIR = f"/opt/sabi/sabi-server/models/{RUN_NAME}-ct2"
 
 # Training hyperparameters — optimized for RTX 4000 (20GB VRAM)
-PER_DEVICE_BATCH_SIZE = 4
-GRADIENT_ACCUMULATION_STEPS = 4  # Effective batch size = 16
-LEARNING_RATE = 1e-4  # Higher LR for LoRA (standard: 1e-4 to 3e-4)
+PER_DEVICE_BATCH_SIZE = int(os.getenv("SABI_FINETUNE_BATCH_SIZE", "2"))
+GRADIENT_ACCUMULATION_STEPS = int(os.getenv("SABI_FINETUNE_GRAD_ACCUM", "8"))
+LEARNING_RATE = float(os.getenv("SABI_FINETUNE_LEARNING_RATE", "1e-4"))
 WARMUP_RATIO = 0.05
-NUM_TRAIN_EPOCHS = 3
+NUM_TRAIN_EPOCHS = float(os.getenv("SABI_FINETUNE_EPOCHS", "1"))
 EVAL_STEPS = 500
 SAVE_STEPS = 500
 LOGGING_STEPS = 25
@@ -52,6 +58,12 @@ LORA_ALPHA = 64      # Scaling factor (typically 2x rank)
 LORA_DROPOUT = 0.05  # Regularization
 
 COUNTRY_FILTER = "NG"  # Only Nigerian-accented English
+TELEPHONY_AUGMENT_PROBABILITY = float(os.getenv("SABI_TELEPHONY_AUGMENT_PROB", "0.65"))
+MAX_TRAIN_SAMPLES = int(os.getenv("SABI_FINETUNE_MAX_TRAIN_SAMPLES", "0"))
+MAX_EVAL_SAMPLES = int(os.getenv("SABI_FINETUNE_MAX_EVAL_SAMPLES", "0"))
+EXPORT_FINAL_MODEL = os.getenv("SABI_FINETUNE_EXPORT_FINAL", "0").lower() in {
+    "1", "true", "yes", "on"
+}
 
 # ─── Logging Setup ───────────────────────────────────────────────
 log_dir = Path("/opt/sabi/whisper-finetune/logs")
@@ -78,6 +90,36 @@ class LazyAudioCollator:
     processor: Any
     decoder_start_token_id: int
 
+    @staticmethod
+    def _telephony_augment(audio_array, sr: int):
+        """Approximate Sabi's 8 kHz phone channel without changing the label."""
+        import numpy as np
+        import librosa
+
+        audio = np.asarray(audio_array, dtype=np.float32)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        if sr != 16000:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
+
+        narrowband = librosa.resample(audio, orig_sr=16000, target_sr=8000)
+        # G.711-style companding plus quantization, then return to Whisper's 16 kHz input.
+        mu = 255.0
+        peak = max(float(np.max(np.abs(narrowband))), 1e-6)
+        normalized = np.clip(narrowband / peak, -1.0, 1.0)
+        compressed = np.sign(normalized) * np.log1p(mu * np.abs(normalized)) / np.log1p(mu)
+        quantized = np.round((compressed + 1.0) * 127.5) / 127.5 - 1.0
+        expanded = np.sign(quantized) * np.expm1(np.abs(quantized) * np.log1p(mu)) / mu
+
+        # Mild varying SNR teaches robustness without burying every training example.
+        signal_rms = max(float(np.sqrt(np.mean(expanded ** 2))), 1e-5)
+        snr_db = random.uniform(10.0, 28.0)
+        noise_rms = signal_rms / (10 ** (snr_db / 20.0))
+        noisy = expanded + np.random.normal(0.0, noise_rms, expanded.shape).astype(np.float32)
+        gain = random.uniform(0.65, 1.15)
+        noisy = np.clip(noisy * gain, -1.0, 1.0)
+        return librosa.resample(noisy, orig_sr=8000, target_sr=16000).astype(np.float32)
+
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         import soundfile as sf
         import librosa
@@ -87,7 +129,10 @@ class LazyAudioCollator:
 
         for feature in features:
             audio_array, sr = sf.read(feature["audio_path"])
-            if sr != 16000:
+            if random.random() < TELEPHONY_AUGMENT_PROBABILITY:
+                audio_array = self._telephony_augment(audio_array, sr)
+                sr = 16000
+            elif sr != 16000:
                 audio_array = librosa.resample(
                     audio_array, orig_sr=sr, target_sr=16000
                 )
@@ -123,7 +168,7 @@ def main():
     start_time = time.time()
 
     logger.info("=" * 70)
-    logger.info("  Whisper large-v3 Fine-tuning on AfriSpeech-200")
+    logger.info("  Whisper Fine-tuning on AfriSpeech-200")
     logger.info("  Nigerian-accented English — LoRA Fine-tuning")
     logger.info("=" * 70)
     logger.info(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
@@ -135,6 +180,8 @@ def main():
     logger.info(f"Effective batch size: {PER_DEVICE_BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
     logger.info(f"Learning rate: {LEARNING_RATE}")
     logger.info(f"Epochs: {NUM_TRAIN_EPOCHS}")
+    logger.info(f"Telephony augmentation probability: {TELEPHONY_AUGMENT_PROBABILITY:.0%}")
+    logger.info(f"Run: {RUN_NAME}")
     logger.info("")
 
     # ─── Imports ───
@@ -264,6 +311,10 @@ def main():
     dataset = DatasetDict()
     for split, rows in all_data.items():
         if rows:
+            limit = MAX_TRAIN_SAMPLES if split == "train" else MAX_EVAL_SAMPLES
+            if limit and len(rows) > limit:
+                random.Random(20260713 + len(split)).shuffle(rows)
+                rows = rows[:limit]
             dataset[split] = Dataset.from_dict({
                 "audio_path": [r["audio"] for r in rows],
                 "transcript": [r["transcript"] for r in rows],
@@ -274,7 +325,7 @@ def main():
     logger.info(f"  Train: {len(dataset[train_split])}, Eval: {len(dataset[eval_split])}")
 
     # ─── Load Model with LoRA ───
-    logger.info("Loading Whisper large-v3...")
+    logger.info(f"Loading {MODEL_NAME}...")
     model = WhisperForConditionalGeneration.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float16,
@@ -433,12 +484,15 @@ def main():
         sys.exit(1)
 
     # ─── Deploy ───
-    logger.info(f"Copying to {FINAL_MODEL_DIR}...")
-    os.makedirs(FINAL_MODEL_DIR, exist_ok=True)
-    subprocess.run(
-        ["cp", "-r", f"{CT2_OUTPUT_DIR}/.", FINAL_MODEL_DIR],
-        check=True,
-    )
+    if EXPORT_FINAL_MODEL:
+        logger.info(f"Exporting candidate to {FINAL_MODEL_DIR}...")
+        os.makedirs(FINAL_MODEL_DIR, exist_ok=True)
+        subprocess.run(
+            ["cp", "-r", f"{CT2_OUTPUT_DIR}/.", FINAL_MODEL_DIR],
+            check=True,
+        )
+    else:
+        logger.info("Candidate export disabled; production remains unchanged pending gold-set evaluation.")
 
     total_time = time.time() - start_time
     logger.info("")
@@ -449,7 +503,7 @@ def main():
     logger.info(f"  LoRA model: {OUTPUT_DIR}")
     logger.info(f"  Merged model: {MERGED_DIR}")
     logger.info(f"  CTranslate2: {CT2_OUTPUT_DIR}")
-    logger.info(f"  Deployed to: {FINAL_MODEL_DIR}")
+    logger.info(f"  Production export: {FINAL_MODEL_DIR if EXPORT_FINAL_MODEL else 'disabled'}")
     logger.info("=" * 70)
 
 

@@ -16,13 +16,15 @@
 # Monitor: tail -f /opt/sabi/whisper-finetune/logs/training.log
 # ─────────────────────────────────────────────────────────────────
 
-set -e
+set -euo pipefail
 
 WORKDIR="/opt/sabi/whisper-finetune"
 VENV_DIR="$WORKDIR/venv"
 SABI_DIR="/opt/sabi/sabi-server"
 LOG_DIR="$WORKDIR/logs"
 LOG_FILE="$LOG_DIR/training.log"
+MODEL_NAME="${SABI_FINETUNE_MODEL:-openai/whisper-small}"
+RUN_NAME="${SABI_FINETUNE_RUN_NAME:-${MODEL_NAME##*/}-ng-english-telephony-v1}"
 
 echo "============================================================"
 echo "  Whisper Fine-tuning Pipeline"
@@ -53,8 +55,8 @@ echo "  Dependencies installed."
 python3 -c "import torch; print(f'  PyTorch {torch.__version__}, CUDA available: {torch.cuda.is_available()}')"
 python3 -c "import torch; assert torch.cuda.is_available(), 'CUDA NOT AVAILABLE — cannot fine-tune!'"
 
-# ─── Step 3: Stop GPU Docker Containers ───
-echo "[3/7] Stopping GPU Docker containers to free VRAM..."
+# ─── Step 3: Preserve production by default ───
+echo "[3/7] Checking GPU services..."
 cd "$SABI_DIR"
 
 # Record which containers were running so we can restart them later
@@ -71,11 +73,11 @@ fi
 
 echo "  Currently running GPU containers: $RUNNING_CONTAINERS"
 
-if [ -n "$RUNNING_CONTAINERS" ]; then
+if [ "${SABI_FINETUNE_STOP_SERVICES:-0}" = "1" ] && [ -n "$RUNNING_CONTAINERS" ]; then
     docker compose stop $RUNNING_CONTAINERS
     echo "  Stopped: $RUNNING_CONTAINERS"
 else
-    echo "  No GPU containers running."
+    echo "  Leaving production services running. Set SABI_FINETUNE_STOP_SERVICES=1 only for an approved maintenance window."
 fi
 
 # Verify VRAM is free
@@ -108,7 +110,7 @@ fi
 
 # ─── Step 5: Verify Model Output ───
 echo "[5/7] Verifying model output..."
-CT2_DIR="/opt/sabi/sabi-server/models/whisper-nigerian-english-ct2"
+CT2_DIR="$WORKDIR/output/$RUN_NAME/ct2"
 
 if [ -f "$CT2_DIR/model.bin" ]; then
     echo "  CTranslate2 model found at $CT2_DIR"
@@ -122,66 +124,17 @@ else
     exit 1
 fi
 
-# ─── Step 6: Update stt.py to use fine-tuned model ───
-echo "[6/7] Updating stt.py to use fine-tuned model..."
+# ─── Step 6: Never auto-promote an unevaluated model ───
+echo "[6/7] Keeping production STT unchanged pending gold-set evaluation..."
 # The stt.py inside Docker needs to reference /models/whisper-nigerian-english-ct2
 # We mount the model directory as a Docker volume
 
-# Backup original stt.py
-cp "$SABI_DIR/stt.py" "$SABI_DIR/stt.py.backup"
-
-# Update the model path in stt.py
-python3 -c "
-import re
-with open('$SABI_DIR/stt.py', 'r') as f:
-    content = f.read()
-
-# Update default model_size to use our fine-tuned model path
-content = content.replace(
-    'model_size: str = \"large-v3\"',
-    'model_size: str = \"/models/whisper-nigerian-english-ct2\"'
-)
-
-with open('$SABI_DIR/stt.py', 'w') as f:
-    f.write(content)
-
-print('  stt.py updated to use fine-tuned model.')
-"
-
-# ─── Step 7: Update docker-compose and restart ───
-echo "[7/7] Updating Docker and restarting services..."
-
-# Add model volume mount to docker-compose.yml if not already present
+# ─── Step 7: Restart only if this run was explicitly allowed to stop services ───
+echo "[7/7] Finalizing candidate..."
 cd "$SABI_DIR"
-if ! grep -q "whisper-nigerian-english" docker-compose.yml; then
-    python3 -c "
-import yaml
-import sys
-
-with open('docker-compose.yml', 'r') as f:
-    compose = yaml.safe_load(f)
-
-# Add volume mount for the fine-tuned model
-sabi_service = compose.get('services', {}).get('sabi', {})
-volumes = sabi_service.get('volumes', [])
-
-model_volume = './models/whisper-nigerian-english-ct2:/models/whisper-nigerian-english-ct2:ro'
-if model_volume not in volumes:
-    volumes.append(model_volume)
-    sabi_service['volumes'] = volumes
-    compose['services']['sabi'] = sabi_service
-
-    with open('docker-compose.yml', 'w') as f:
-        yaml.dump(compose, f, default_flow_style=False, sort_keys=False)
-    print('  docker-compose.yml updated with model volume mount.')
-else:
-    print('  docker-compose.yml already has model volume mount.')
-" 2>/dev/null || echo "  Note: PyYAML not available on host. Add volume mount manually."
+if [ "${SABI_FINETUNE_STOP_SERVICES:-0}" = "1" ] && [ -n "$RUNNING_CONTAINERS" ]; then
+    docker compose up -d $RUNNING_CONTAINERS
 fi
-
-# Restart all previously-running containers
-echo "  Restarting containers: $RUNNING_CONTAINERS"
-docker compose up -d $RUNNING_CONTAINERS
 
 echo ""
 echo "============================================================"
@@ -189,7 +142,7 @@ echo "  FINE-TUNING PIPELINE COMPLETE!"
 echo "  $(date)"
 echo "============================================================"
 echo ""
-echo "  Model: $CT2_DIR"
+echo "  Candidate model: $CT2_DIR"
 echo "  Logs:  $LOG_FILE"
 echo ""
 echo "  Verify with:"

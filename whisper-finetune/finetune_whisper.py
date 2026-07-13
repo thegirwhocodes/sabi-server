@@ -434,6 +434,7 @@ def main():
         warmup_ratio=WARMUP_RATIO,
         num_train_epochs=NUM_TRAIN_EPOCHS,
         gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         fp16=True,
         eval_strategy="steps",
         eval_steps=EVAL_STEPS,

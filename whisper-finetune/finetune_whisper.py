@@ -89,6 +89,7 @@ class LazyAudioCollator:
     """
     processor: Any
     decoder_start_token_id: int
+    input_dtype: torch.dtype = torch.float32
 
     @staticmethod
     def _telephony_augment(audio_array, sr: int):
@@ -148,6 +149,10 @@ class LazyAudioCollator:
         batch = self.processor.feature_extractor.pad(
             input_features_list, return_tensors="pt"
         )
+        # Seq2SeqTrainer's generation path is not always autocast by recent
+        # Transformers releases. Match Whisper's weight dtype explicitly so
+        # final WER evaluation cannot mix FP32 features with FP16 convolutions.
+        batch["input_features"] = batch["input_features"].to(self.input_dtype)
 
         labels_batch = self.processor.tokenizer.pad(
             labels_list, return_tensors="pt"
@@ -211,7 +216,11 @@ def main():
     accent_dirs = list(list_repo_tree(
         DATASET_REPO, path_in_repo="transcripts", repo_type="dataset"
     ))
-    accents = [getattr(d, "path", str(d)).split("/")[-1] for d in accent_dirs]
+    accents = [
+        getattr(d, "path", str(d)).split("/")[-1]
+        for d in accent_dirs
+        if not getattr(d, "path", str(d)).endswith(".csv")
+    ]
     logger.info(f"Found {len(accents)} accent groups")
 
     all_data = {"train": [], "dev": [], "test": []}
@@ -372,6 +381,7 @@ def main():
     data_collator = LazyAudioCollator(
         processor=processor,
         decoder_start_token_id=model.config.decoder_start_token_id,
+        input_dtype=next(model.parameters()).dtype,
     )
 
     logger.info("Configuring training...")
@@ -458,6 +468,11 @@ def main():
     os.makedirs(MERGED_DIR, exist_ok=True)
     merged_model.save_pretrained(MERGED_DIR)
     processor.save_pretrained(MERGED_DIR)
+    # WhisperProcessor.save_pretrained can omit the feature extractor metadata
+    # after Trainer has reused the processor components. Save both explicitly;
+    # CTranslate2 requires preprocessor_config.json for local model conversion.
+    processor.feature_extractor.save_pretrained(MERGED_DIR)
+    processor.tokenizer.save_pretrained(MERGED_DIR)
 
     del merged_model
     del base_model
@@ -469,18 +484,20 @@ def main():
     try:
         result = subprocess.run(
             [
-                "ct2-whisper-converter",
+                "ct2-transformers-converter",
                 "--model", MERGED_DIR,
                 "--output_dir", CT2_OUTPUT_DIR,
                 "--quantization", "float16",
+                "--copy_files", "tokenizer.json", "preprocessor_config.json",
             ],
             capture_output=True,
             text=True,
             check=True,
         )
         logger.info("CTranslate2 conversion successful!")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"CTranslate2 conversion failed: {e.stderr}")
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        detail = getattr(e, "stderr", None) or str(e)
+        logger.error(f"CTranslate2 conversion failed: {detail}")
         sys.exit(1)
 
     # ─── Deploy ───

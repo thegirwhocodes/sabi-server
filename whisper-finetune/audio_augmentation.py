@@ -9,8 +9,10 @@ placed under ``data/noise/<category>/`` and are mixed on the fly.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
@@ -21,6 +23,7 @@ import numpy as np
 LOGGER = logging.getLogger("whisper-finetune.augmentation")
 NOISE_CATEGORIES = ("market", "generator", "chatter", "television", "baby", "connection")
 SUPPORTED_AUDIO_SUFFIXES = {".wav", ".flac", ".ogg", ".mp3", ".m4a"}
+NOISE_LICENSE_LEDGER = "noise_licenses.jsonl"
 
 
 def discover_noise_files(root: str | Path | None) -> dict[str, list[str]]:
@@ -40,6 +43,108 @@ def discover_noise_files(root: str | Path | None) -> dict[str, list[str]]:
 
 def missing_noise_categories(noise_files: dict[str, list[str]]) -> list[str]:
     return [category for category in NOISE_CATEGORIES if not noise_files.get(category)]
+
+
+def licensed_noise_files(
+    root: str | Path | None,
+    discovered: dict[str, list[str]],
+    *,
+    require_complete: bool = False,
+    allow_noncommercial: bool = False,
+) -> tuple[dict[str, list[str]], dict[str, object]]:
+    """Allow only noise files with explicit, auditable license provenance.
+
+    ``noise_licenses.jsonl`` lives at the noise root. Each row must contain
+    ``path`` (relative to the root), ``source_url``, ``license``, and the
+    boolean ``commercial_use_allowed``. Unlisted files are ignored in
+    exploratory runs and block complete runs.
+    """
+    approved = {category: [] for category in NOISE_CATEGORIES}
+    provenance: dict[str, object] = {
+        "ledger": None,
+        "licenses": {},
+        "approved_files": 0,
+        "ignored_unlicensed_files": sum(len(paths) for paths in discovered.values()),
+        "contains_noncommercial_noise": False,
+    }
+    if not root:
+        if require_complete:
+            raise RuntimeError("licensed noise root is required for a complete training run")
+        return approved, provenance
+
+    base = Path(root).resolve()
+    ledger = base / NOISE_LICENSE_LEDGER
+    provenance["ledger"] = str(ledger)
+    if not ledger.is_file():
+        if require_complete:
+            raise RuntimeError(f"required noise license ledger is missing: {ledger}")
+        return approved, provenance
+
+    discovered_paths = {
+        Path(path).resolve(): category
+        for category, paths in discovered.items()
+        for path in paths
+    }
+    seen: set[Path] = set()
+    licenses: Counter[str] = Counter()
+    contains_noncommercial = False
+    for line_number, raw_line in enumerate(ledger.read_text().splitlines(), start=1):
+        if not raw_line.strip():
+            continue
+        try:
+            row = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{ledger}:{line_number}: invalid JSON: {exc}") from exc
+        relative_path = str(row.get("path") or "").strip()
+        source_url = str(row.get("source_url") or "").strip()
+        license_name = str(row.get("license") or "").strip()
+        commercial_allowed = row.get("commercial_use_allowed")
+        if not relative_path or not source_url or not license_name or not isinstance(commercial_allowed, bool):
+            raise ValueError(
+                f"{ledger}:{line_number}: path, source_url, license, and boolean "
+                "commercial_use_allowed are required"
+            )
+        path = (base / relative_path).resolve()
+        if base not in path.parents:
+            raise ValueError(f"{ledger}:{line_number}: path escapes noise root: {relative_path}")
+        if path in seen:
+            raise ValueError(f"{ledger}:{line_number}: duplicate noise path: {relative_path}")
+        seen.add(path)
+        category = discovered_paths.get(path)
+        if category is None:
+            if require_complete:
+                raise ValueError(f"{ledger}:{line_number}: file is missing or unsupported: {relative_path}")
+            continue
+        declared_category = str(row.get("category") or category).strip()
+        if declared_category != category:
+            raise ValueError(
+                f"{ledger}:{line_number}: category {declared_category!r} does not match folder {category!r}"
+            )
+        if not commercial_allowed and not allow_noncommercial:
+            continue
+        if not commercial_allowed:
+            contains_noncommercial = True
+        approved[category].append(str(path))
+        licenses[license_name] += 1
+
+    unlisted = sorted(str(path) for path in discovered_paths if path not in seen)
+    if require_complete and unlisted:
+        preview = ", ".join(unlisted[:5])
+        raise RuntimeError(f"noise files missing from {ledger}: {preview}")
+    if require_complete:
+        missing = missing_noise_categories(approved)
+        if missing:
+            raise RuntimeError(
+                "required licensed noise categories have no approved files: " + ", ".join(missing)
+            )
+
+    provenance.update({
+        "licenses": dict(sorted(licenses.items())),
+        "approved_files": sum(len(paths) for paths in approved.values()),
+        "ignored_unlicensed_files": len(unlisted),
+        "contains_noncommercial_noise": contains_noncommercial,
+    })
+    return approved, provenance
 
 
 def _mono_float32(audio: np.ndarray) -> np.ndarray:

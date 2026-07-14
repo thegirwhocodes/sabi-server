@@ -15,7 +15,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "whisper-finetune"))
 
-from audio_augmentation import g711_roundtrip, missing_noise_categories
+from audio_augmentation import g711_roundtrip, licensed_noise_files, missing_noise_categories
 from prepare_external_manifests import common_voice_rows, sabi_corrected_rows
 from training_data import load_external_manifest, mix_training_rows, validate_source_mix, write_jsonl
 
@@ -59,6 +59,47 @@ def main() -> int:
         root = Path(temp_dir)
         clip = root / "clip.wav"
         _wav(clip)
+
+        noise_root = root / "noise"
+        noise_paths = {}
+        ledger_rows = []
+        for category in ("market", "generator", "chatter", "television", "baby", "connection"):
+            noise_path = noise_root / category / f"{category}.wav"
+            _wav(noise_path)
+            noise_paths[category] = [str(noise_path)]
+            ledger_rows.append({
+                "path": f"{category}/{category}.wav",
+                "category": category,
+                "source_url": f"https://example.test/{category}",
+                "license": "CC0-1.0",
+                "commercial_use_allowed": True,
+            })
+        write_jsonl(noise_root / "noise_licenses.jsonl", ledger_rows)
+        approved_noise, noise_provenance = licensed_noise_files(
+            noise_root,
+            noise_paths,
+            require_complete=True,
+        )
+        ok &= check(
+            "every_real_noise_file_requires_commercial_license_provenance",
+            all(approved_noise.values())
+            and noise_provenance["approved_files"] == 6
+            and noise_provenance["ignored_unlicensed_files"] == 0,
+            noise_provenance,
+        )
+        (noise_root / "noise_licenses.jsonl").unlink()
+        unlicensed_noise, _ = licensed_noise_files(noise_root, noise_paths)
+        ok &= check(
+            "unlicensed_noise_is_never_mixed",
+            not any(unlicensed_noise.values()),
+            unlicensed_noise,
+        )
+        try:
+            licensed_noise_files(noise_root, noise_paths, require_complete=True)
+            missing_ledger_blocked = False
+        except RuntimeError:
+            missing_ledger_blocked = True
+        ok &= check("complete_run_blocks_missing_noise_license_ledger", missing_ledger_blocked)
 
         manifest = root / "sabi.jsonl"
         write_jsonl(

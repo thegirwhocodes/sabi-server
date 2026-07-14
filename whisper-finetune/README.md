@@ -9,6 +9,10 @@ This pipeline trains a candidate only. It never promotes a model automatically.
 - Human-corrected Sabi call turns with explicit model-training consent. Ordinary recording consent is not sufficient.
 - LibriSpeech general English (`CC-BY-4.0`) held to a 10–20% target so Nigerian adaptation does not erase broader English.
 - Licensed real noise under `data/noise/{market,generator,chatter,television,baby,connection}`.
+  Every file must also appear in `data/noise/noise_licenses.jsonl` with `path`,
+  `category`, `source_url`, `license`, and boolean `commercial_use_allowed`.
+  Unlisted files are never mixed; complete runs fail if any file or category
+  lacks commercial-use provenance.
 
 The seven private gold clips remain evaluation-only. `prepare_external_manifests.py` and `training_data.py` exclude their resolved audio paths.
 

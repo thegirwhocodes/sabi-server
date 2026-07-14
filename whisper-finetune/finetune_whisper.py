@@ -29,7 +29,7 @@ import torch
 
 from audio_augmentation import (
     discover_noise_files,
-    missing_noise_categories,
+    licensed_noise_files,
     telephony_augment,
 )
 from training_data import (
@@ -431,17 +431,21 @@ def main():
         allow_noncommercial=ALLOW_NONCOMMERCIAL_DATA,
         require_sources=required_sources,
     )
-    noise_files = discover_noise_files(NOISE_ROOT)
-    missing_noise = missing_noise_categories(noise_files)
-    if REQUIRE_COMPLETE_DATA_MIX and missing_noise:
-        raise RuntimeError(
-            "required licensed noise categories missing under "
-            f"{NOISE_ROOT}: {', '.join(missing_noise)}"
-        )
+    discovered_noise = discover_noise_files(NOISE_ROOT)
+    noise_files, noise_provenance = licensed_noise_files(
+        NOISE_ROOT,
+        discovered_noise,
+        require_complete=REQUIRE_COMPLETE_DATA_MIX,
+        allow_noncommercial=ALLOW_NONCOMMERCIAL_DATA,
+    )
     provenance["noise_root"] = NOISE_ROOT
     provenance["noise_files"] = {
         category: len(paths) for category, paths in sorted(noise_files.items())
     }
+    provenance["noise_provenance"] = noise_provenance
+    if noise_provenance["contains_noncommercial_noise"]:
+        provenance["contains_noncommercial_data"] = True
+        provenance["commercial_deployment_eligible"] = False
     provenance["gold_manifest_excluded"] = GOLD_MANIFEST or None
     provenance["source_target_ratios"] = source_ratios
     provenance_path = Path(OUTPUT_ROOT) / RUN_NAME / "training_provenance.json"

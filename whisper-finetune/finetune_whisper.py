@@ -20,11 +20,25 @@ import time
 import logging
 import subprocess
 import random
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, List
 from pathlib import Path
 
 import torch
+
+from audio_augmentation import (
+    discover_noise_files,
+    missing_noise_categories,
+    telephony_augment,
+)
+from training_data import (
+    is_short_response,
+    load_external_manifest,
+    load_gold_ids,
+    mix_training_rows,
+    validate_source_mix,
+)
 
 # ─── Configuration ───────────────────────────────────────────────
 MODEL_NAME = os.getenv("SABI_FINETUNE_MODEL", "openai/whisper-small")
@@ -59,6 +73,22 @@ LORA_DROPOUT = 0.05  # Regularization
 
 COUNTRY_FILTER = "NG"  # Only Nigerian-accented English
 TELEPHONY_AUGMENT_PROBABILITY = float(os.getenv("SABI_TELEPHONY_AUGMENT_PROB", "0.65"))
+NOISE_ROOT = os.getenv("SABI_FINETUNE_NOISE_ROOT", f"{DATA_DIR}/noise")
+COMMON_VOICE_MANIFEST = os.getenv("SABI_FINETUNE_COMMON_VOICE_MANIFEST", "")
+SABI_CORRECTED_MANIFEST = os.getenv("SABI_FINETUNE_SABI_MANIFEST", "")
+RETENTION_MANIFEST = os.getenv("SABI_FINETUNE_RETENTION_MANIFEST", "")
+GOLD_MANIFEST = os.getenv("SABI_FINETUNE_GOLD_MANIFEST", "")
+COMMON_VOICE_RATIO = float(os.getenv("SABI_FINETUNE_COMMON_VOICE_RATIO", "0.10"))
+SABI_CORRECTED_RATIO = float(os.getenv("SABI_FINETUNE_SABI_RATIO", "0.20"))
+GENERAL_RETENTION_RATIO = float(os.getenv("SABI_FINETUNE_RETENTION_RATIO", "0.15"))
+EXTERNAL_REPEAT_CAP = int(os.getenv("SABI_FINETUNE_EXTERNAL_REPEAT_CAP", "12"))
+EXTERNAL_EVAL_LIMIT = int(os.getenv("SABI_FINETUNE_EXTERNAL_EVAL_LIMIT", "1000"))
+REQUIRE_COMPLETE_DATA_MIX = os.getenv("SABI_FINETUNE_REQUIRE_ALL_SOURCES", "0").lower() in {
+    "1", "true", "yes", "on"
+}
+ALLOW_NONCOMMERCIAL_DATA = os.getenv("SABI_FINETUNE_ALLOW_NONCOMMERCIAL", "0").lower() in {
+    "1", "true", "yes", "on"
+}
 MAX_TRAIN_SAMPLES = int(os.getenv("SABI_FINETUNE_MAX_TRAIN_SAMPLES", "0"))
 MAX_EVAL_SAMPLES = int(os.getenv("SABI_FINETUNE_MAX_EVAL_SAMPLES", "0"))
 LOG_BATCH_MEMORY = os.getenv("SABI_FINETUNE_LOG_BATCH_MEMORY", "0").lower() in {
@@ -93,37 +123,8 @@ class LazyAudioCollator:
     processor: Any
     decoder_start_token_id: int
     input_dtype: torch.dtype = torch.float32
+    noise_files: dict[str, list[str]] | None = None
     batch_count: int = 0
-
-    @staticmethod
-    def _telephony_augment(audio_array, sr: int):
-        """Approximate Sabi's 8 kHz phone channel without changing the label."""
-        import numpy as np
-        import librosa
-
-        audio = np.asarray(audio_array, dtype=np.float32)
-        if audio.ndim > 1:
-            audio = audio.mean(axis=1)
-        if sr != 16000:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
-
-        narrowband = librosa.resample(audio, orig_sr=16000, target_sr=8000)
-        # G.711-style companding plus quantization, then return to Whisper's 16 kHz input.
-        mu = 255.0
-        peak = max(float(np.max(np.abs(narrowband))), 1e-6)
-        normalized = np.clip(narrowband / peak, -1.0, 1.0)
-        compressed = np.sign(normalized) * np.log1p(mu * np.abs(normalized)) / np.log1p(mu)
-        quantized = np.round((compressed + 1.0) * 127.5) / 127.5 - 1.0
-        expanded = np.sign(quantized) * np.expm1(np.abs(quantized) * np.log1p(mu)) / mu
-
-        # Mild varying SNR teaches robustness without burying every training example.
-        signal_rms = max(float(np.sqrt(np.mean(expanded ** 2))), 1e-5)
-        snr_db = random.uniform(10.0, 28.0)
-        noise_rms = signal_rms / (10 ** (snr_db / 20.0))
-        noisy = expanded + np.random.normal(0.0, noise_rms, expanded.shape).astype(np.float32)
-        gain = random.uniform(0.65, 1.15)
-        noisy = np.clip(noisy * gain, -1.0, 1.0)
-        return librosa.resample(noisy, orig_sr=8000, target_sr=16000).astype(np.float32)
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         import soundfile as sf
@@ -158,8 +159,23 @@ class LazyAudioCollator:
                     feature["audio_path"],
                     audio_info.duration,
                 )
-            if random.random() < TELEPHONY_AUGMENT_PROBABILITY:
-                audio_array = self._telephony_augment(audio_array, sr)
+            source = str(feature.get("source") or "afrispeech_ng")
+            short_response = bool(feature.get("is_short_response"))
+            source_probability = {
+                "sabi_corrected": 0.30,  # already traversed the real phone channel
+                "nigerian_common_voice": 0.80,
+                "general_english_retention": 0.55,
+                "afrispeech_ng": TELEPHONY_AUGMENT_PROBABILITY,
+            }.get(source, TELEPHONY_AUGMENT_PROBABILITY)
+            if short_response:
+                source_probability = max(source_probability, 0.85)
+            if random.random() < source_probability:
+                audio_array = telephony_augment(
+                    audio_array,
+                    sr,
+                    noise_files=self.noise_files,
+                    short_response=short_response,
+                )
                 sr = 16000
             elif sr != 16000:
                 audio_array = librosa.resample(
@@ -225,6 +241,12 @@ def main():
     logger.info(f"Learning rate: {LEARNING_RATE}")
     logger.info(f"Epochs: {NUM_TRAIN_EPOCHS}")
     logger.info(f"Telephony augmentation probability: {TELEPHONY_AUGMENT_PROBABILITY:.0%}")
+    logger.info(
+        "Source targets: Common Voice %.0f%%, corrected Sabi %.0f%%, general retention %.0f%%",
+        COMMON_VOICE_RATIO * 100,
+        SABI_CORRECTED_RATIO * 100,
+        GENERAL_RETENTION_RATIO * 100,
+    )
     logger.info(f"Run: {RUN_NAME}")
     logger.info("")
 
@@ -343,16 +365,93 @@ def main():
 
                     found_audio += 1
                     all_data[split].append({
+                        "id": f"afrispeech-{accent}-{split}-{audio_basename}",
                         "audio": audio_full,
                         "transcript": row["transcript"],
+                        "source": "afrispeech_ng",
+                        "license": "CC-BY-NC-SA-4.0",
+                        "duration": duration,
+                        "is_short_response": is_short_response(row["transcript"], duration),
                     })
 
     logger.info(f"Dataset complete: {found_audio} found, {skipped_audio} skipped")
     for split, rows in all_data.items():
-        logger.info(f"  {split}: {len(rows)} samples")
+        logger.info(f"  AfriSpeech {split}: {len(rows)} samples")
 
     if not all_data["train"]:
         raise RuntimeError("No training samples found!")
+
+    # ─── Add commercial-safe accent diversity, private corrected calls, and
+    #     a 10–20% general-English retention set. The gold call clips are
+    #     explicitly excluded so evaluation can never leak into training.
+    manifest_specs = {
+        "nigerian_common_voice": COMMON_VOICE_MANIFEST,
+        "sabi_corrected": SABI_CORRECTED_MANIFEST,
+        "general_english_retention": RETENTION_MANIFEST,
+    }
+    gold_ids = load_gold_ids(GOLD_MANIFEST)
+    external_train: dict[str, list[dict[str, Any]]] = {}
+    for source, manifest_path in manifest_specs.items():
+        if not manifest_path:
+            external_train[source] = []
+            continue
+        external_train[source] = load_external_manifest(
+            manifest_path,
+            expected_source=source,
+            split="train",
+            gold_ids=gold_ids,
+        )
+        if source != "sabi_corrected":
+            for split in ("dev", "test"):
+                extra_eval = load_external_manifest(
+                    manifest_path,
+                    expected_source=source,
+                    split=split,
+                    gold_ids=gold_ids,
+                )
+                if EXTERNAL_EVAL_LIMIT:
+                    extra_eval = extra_eval[:EXTERNAL_EVAL_LIMIT]
+                all_data[split].extend(extra_eval)
+
+    source_ratios = {
+        "nigerian_common_voice": COMMON_VOICE_RATIO,
+        "sabi_corrected": SABI_CORRECTED_RATIO,
+        "general_english_retention": GENERAL_RETENTION_RATIO,
+    }
+    all_data["train"] = mix_training_rows(
+        all_data["train"],
+        external_train,
+        source_ratios=source_ratios,
+        repeat_cap=EXTERNAL_REPEAT_CAP,
+    )
+
+    required_sources = tuple(manifest_specs) if REQUIRE_COMPLETE_DATA_MIX else ()
+    provenance = validate_source_mix(
+        all_data["train"],
+        allow_noncommercial=ALLOW_NONCOMMERCIAL_DATA,
+        require_sources=required_sources,
+    )
+    noise_files = discover_noise_files(NOISE_ROOT)
+    missing_noise = missing_noise_categories(noise_files)
+    if REQUIRE_COMPLETE_DATA_MIX and missing_noise:
+        raise RuntimeError(
+            "required licensed noise categories missing under "
+            f"{NOISE_ROOT}: {', '.join(missing_noise)}"
+        )
+    provenance["noise_root"] = NOISE_ROOT
+    provenance["noise_files"] = {
+        category: len(paths) for category, paths in sorted(noise_files.items())
+    }
+    provenance["gold_manifest_excluded"] = GOLD_MANIFEST or None
+    provenance["source_target_ratios"] = source_ratios
+    provenance_path = Path(OUTPUT_ROOT) / RUN_NAME / "training_provenance.json"
+    provenance_path.parent.mkdir(parents=True, exist_ok=True)
+    provenance_path.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n")
+    logger.info("Training provenance: %s", json.dumps(provenance, sort_keys=True))
+    if EXPORT_FINAL_MODEL and not provenance["commercial_deployment_eligible"]:
+        raise RuntimeError(
+            "candidate includes noncommercial training data and cannot be exported for paid production"
+        )
 
     # Build DatasetDict (just file paths — audio loaded on-the-fly)
     logger.info("Building DatasetDict (lazy audio loading)...")
@@ -366,6 +465,9 @@ def main():
             dataset[split] = Dataset.from_dict({
                 "audio_path": [r["audio"] for r in rows],
                 "transcript": [r["transcript"] for r in rows],
+                "source": [r.get("source", "unknown") for r in rows],
+                "license": [r.get("license", "unknown") for r in rows],
+                "is_short_response": [bool(r.get("is_short_response")) for r in rows],
             })
 
     train_split = "train"
@@ -423,6 +525,7 @@ def main():
         processor=processor,
         decoder_start_token_id=model.config.decoder_start_token_id,
         input_dtype=next(model.parameters()).dtype,
+        noise_files=noise_files,
     )
 
     logger.info("Configuring training...")

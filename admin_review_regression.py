@@ -133,6 +133,13 @@ def main() -> int:
         and "Lesson text after cleanup" in html,
     )
     ok &= check("renders_exact_tts_text", "Sent to TTS" in html and "assistant.tts_text" in html)
+    ok &= check(
+        "supports_consent_separated_human_stt_corrections",
+        "Human-correct this clip" in html
+        and "consent_for_model_training" in html
+        and "/stt-correction" in html
+        and "QA only" in html,
+    )
     ok &= check("renders_turn_audio", "turn.audio" not in html and "audio_endpoint" in html)
     ok &= check(
         "renders_turn_timings",

@@ -7,3 +7,10 @@ faster-whisper==1.1.0
 pydantic>=2.0.0
 python-dotenv==1.0.1
 sentry-sdk[fastapi]==2.64.0
+
+# Server-side speech enhancement. CPU wheels keep DeepFilterNet from competing
+# with faster-whisper for production GPU memory.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+torchaudio==2.5.1+cpu
+deepfilternet==0.5.6

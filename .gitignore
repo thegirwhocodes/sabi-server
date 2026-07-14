@@ -18,6 +18,9 @@ whisper-finetune/*.pt
 whisper-finetune/checkpoints/
 whisper-finetune/gold_manifest*.json
 whisper-finetune/gold_results*.json
+whisper-finetune/manifests/
+whisper-finetune/data/
+whisper-finetune/output/
 afro-tts/finetune/
 afro-tts/reference_audio/
 # Secrets

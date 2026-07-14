@@ -17,6 +17,7 @@ from call_admin import (
     merge_call_hangup_event,
     quality_flags,
     set_call_review_status,
+    set_call_turn_stt_correction,
     write_call_learning_summary,
     write_call_review_record,
 )
@@ -176,6 +177,34 @@ def main() -> int:
             and turn.get("bump_down", {}).get("detected") is True
             and loaded.get("learning_progression", {}).get("bump_down_turns") == [0],
             turn,
+        )
+        corrected = set_call_turn_stt_correction(
+            call_uuid,
+            0,
+            "fifteen naira",
+            reviewer="Naomi",
+            consent_for_model_training=False,
+            directory=root,
+        )
+        correction = ((corrected or {}).get("turns") or [{}])[0].get("user", {}).get("stt_correction", {})
+        ok &= check(
+            "stt_correction_keeps_training_consent_separate",
+            correction.get("transcript") == "fifteen naira"
+            and correction.get("review_status") == "approved"
+            and correction.get("reviewed_by") == "Naomi"
+            and correction.get("consent_for_model_training") is False,
+            correction,
+        )
+        ok &= check(
+            "stt_correction_requires_reviewer",
+            set_call_turn_stt_correction(
+                call_uuid,
+                0,
+                "fifteen",
+                reviewer="",
+                consent_for_model_training=True,
+                directory=root,
+            ) is None,
         )
 
         write_call_review_record(

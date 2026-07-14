@@ -1,16 +1,15 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────
-# Whisper large-v3 Fine-tuning on AfriSpeech-200
-# Nigerian-accented English — Full Pipeline
+# Whisper candidate fine-tuning on mixed Nigerian/telephone English
 #
 # This script:
 #   1. Sets up Python virtual environment
 #   2. Installs all dependencies
-#   3. Stops GPU-using Docker containers (frees VRAM)
-#   4. Runs fine-tuning (~6-10 hours)
+#   3. Leaves production running unless an approved maintenance flag is set
+#   4. Runs fine-tuning
 #   5. Converts model to CTranslate2 (faster-whisper format)
-#   6. Copies model to sabi-server
-#   7. Restarts Docker containers with fine-tuned model
+#   6. Keeps the candidate isolated for held-out evaluation
+#   7. Restarts only services explicitly stopped for the run
 #
 # Usage: bash run_training.sh
 # Monitor: tail -f /opt/sabi/whisper-finetune/logs/training.log

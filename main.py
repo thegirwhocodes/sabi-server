@@ -38,6 +38,7 @@ from call_admin import (
     list_call_records,
     load_call_record,
     set_call_review_status,
+    set_call_turn_stt_correction,
 )
 from feedback_admin import (
     feedback_audio_path,
@@ -756,6 +757,30 @@ async def admin_stt_compare(call_uuid: str, turn_index: int):
         "match": match,
         "intron_key_present": bool(get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY")),
     })
+
+
+@app.post("/admin/calls/{call_uuid}/turns/{turn_index}/stt-correction")
+async def admin_set_stt_correction(
+    call_uuid: str,
+    turn_index: int,
+    transcript: str = Form(...),
+    reviewer: str = Form(...),
+    consent_for_model_training: bool = Form(False),
+):
+    """Save a human transcript and a separate, explicit training-consent flag."""
+    record = set_call_turn_stt_correction(
+        call_uuid,
+        turn_index,
+        transcript,
+        reviewer=reviewer,
+        consent_for_model_training=consent_for_model_training,
+    )
+    if not record:
+        return JSONResponse(
+            {"error": "turn_not_found_or_invalid_correction"},
+            status_code=404,
+        )
+    return JSONResponse(record)
 
 
 @app.get("/admin/calls/{call_uuid}/audio/{kind}")

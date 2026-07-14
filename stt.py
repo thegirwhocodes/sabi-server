@@ -20,6 +20,8 @@ import wave
 
 import httpx
 
+from audio_cleaner import AudioCleaner
+
 logger = logging.getLogger("sabi.stt")
 
 INTRON_SYNC_URL = os.getenv(
@@ -176,6 +178,7 @@ class SpeechToText:
         ).strip().lower() or self._provider
         self._model_size = os.getenv("SABI_LOCAL_WHISPER_MODEL_SIZE", model_size).strip() or model_size
         self._device = os.getenv("SABI_LOCAL_WHISPER_DEVICE", device).strip() or device
+        self._audio_cleaner = AudioCleaner.from_env()
 
         if self._groq_key and self._provider != "local":
             self._use_groq = True
@@ -251,6 +254,13 @@ class SpeechToText:
             return True
 
     def transcribe(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
+        """Clean a phone clip once, then use the configured STT/fallback stack."""
+        with self._audio_cleaner.prepare(audio_path) as (prepared_path, cleaning):
+            result = self._transcribe_prepared(prepared_path, mode=mode, context=context)
+            result["audio_cleaning"] = cleaning
+            return result
+
+    def _transcribe_prepared(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """
         Transcribe audio file to text.
 

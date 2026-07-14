@@ -383,6 +383,10 @@ def render_admin_review_page() -> str:
     .compare-note.good { background: #eef7ee; border-color: #cfe6cf; color: #226b2b; }
     .compare-note.warn { background: #faf0da; border-color: #ecd3a2; color: #9b5b00; }
     .compare-note.soft { color: var(--muted); }
+    .stt-correction-box { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--gold-wash); display: grid; gap: 8px; }
+    .stt-correction-box input[type="text"] { width: 100%; min-width: 0; }
+    .stt-consent { display: flex; align-items: flex-start; gap: 7px; font-size: 11.5px; color: var(--muted); }
+    .stt-consent input { min-width: 0; min-height: 0; margin-top: 3px; }
     /* Per-call learning scoreboard + teacher note + mastery map. */
     .scorecard { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--card); display: grid; gap: 8px; }
     .scorecard-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -1256,6 +1260,32 @@ def render_admin_review_page() -> str:
         else if (target) target.innerHTML = `<div class="small">Could not compare: ${escapeHtml(err.message)}</div>`;
       } finally {
         if (buttonEl) buttonEl.disabled = false;
+      }
+    }
+    async function saveSttCorrection(callUuid, turnIndex, buttonEl) {
+      const box = buttonEl && buttonEl.closest("[data-correction-box]");
+      const status = box && box.querySelector("[data-correction-status]");
+      const transcript = box && box.querySelector("[data-correction-text]");
+      const reviewer = box && box.querySelector("[data-correction-reviewer]");
+      const consent = box && box.querySelector("[data-correction-consent]");
+      if (!transcript || !transcript.value.trim() || !reviewer || !reviewer.value.trim()) {
+        if (status) status.textContent = "Add the corrected words and reviewer name.";
+        return;
+      }
+      buttonEl.disabled = true;
+      if (status) status.textContent = "Saving human correction...";
+      try {
+        await postForm(`/admin/calls/${encodeURIComponent(callUuid)}/turns/${turnIndex}/stt-correction`, {
+          transcript: transcript.value.trim(),
+          reviewer: reviewer.value.trim(),
+          consent_for_model_training: consent && consent.checked ? "true" : "false",
+        });
+        toast(consent && consent.checked ? "Correction saved for the consented training set." : "Correction saved; excluded from model training.");
+        openCall(callUuid);
+      } catch (err) {
+        if (status) status.textContent = err.code === 401 ? "This needs the full admin key." : `Could not save: ${err.message}`;
+      } finally {
+        buttonEl.disabled = false;
       }
     }
     function sttCompareHtml(data) {
@@ -3259,6 +3289,9 @@ def render_admin_review_page() -> str:
       drawerBody.querySelectorAll("[data-stt-compare]").forEach(btn => {
         btn.addEventListener("click", () => compareStt(callUuid, Number(btn.dataset.sttCompare), btn));
       });
+      drawerBody.querySelectorAll("[data-save-stt-correction]").forEach(btn => {
+        btn.addEventListener("click", () => saveSttCorrection(callUuid, Number(btn.dataset.saveSttCorrection), btn));
+      });
     }
     function feedbackBlock(feedback) {
       if (!feedback) {
@@ -3312,6 +3345,7 @@ def render_admin_review_page() -> str:
         ? ""
         : ` Confidence ${user.stt_confidence}.`;
       const timing = timingsLine(turn.timings);
+      const correction = user.stt_correction || {};
       return `<div class="timeline-turn">
         <div class="timeline-turn-head">
           <span><strong>Turn ${escapeHtml(turn.turn_index)}</strong>${provider ? ` &middot; heard by ${escapeHtml(provider)}` : ""}</span>
@@ -3329,6 +3363,14 @@ def render_admin_review_page() -> str:
             <div class="timeline-note">This is what Sabi transcribed from the clip above.${escapeHtml(confidence)}</div>
             ${lessonText && lessonText !== childText ? `<div class="timeline-note">Lesson text after cleanup: ${escapeHtml(lessonText)}</div>` : ""}
             ${user.has_audio ? `<button class="stt-compare-btn" data-stt-compare="${escapeHtml(turn.turn_index)}">Compare Groq vs Intron on this clip</button><div id="stt-compare-${escapeHtml(turn.turn_index)}"></div>` : ""}
+            ${user.has_audio ? `<div class="stt-correction-box" data-correction-box="${escapeHtml(turn.turn_index)}">
+              <div class="mini-label">Human-correct this clip</div>
+              <input type="text" data-correction-text value="${escapeHtml(correction.transcript || "")}" placeholder="Type exactly what the caller said">
+              <input type="text" data-correction-reviewer value="${escapeHtml(correction.reviewed_by || "")}" placeholder="Reviewer name">
+              <label class="stt-consent"><input type="checkbox" data-correction-consent ${correction.consent_for_model_training ? "checked" : ""}> Explicit consent permits this recording to train a model. Leave unchecked for ordinary QA correction.</label>
+              <button class="stt-compare-btn" data-save-stt-correction="${escapeHtml(turn.turn_index)}">Save correction</button>
+              <div class="small" data-correction-status>${correction.transcript ? `Approved correction: ${escapeHtml(correction.transcript)}${correction.consent_for_model_training ? " · training allowed" : " · QA only"}` : "Gold-test clips remain excluded even when training consent exists."}</div>
+            </div>` : ""}
           </div>
           <div class="timeline-side">
             <div class="timeline-role">

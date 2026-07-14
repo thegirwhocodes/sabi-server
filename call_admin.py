@@ -167,6 +167,47 @@ def set_call_review_status(
     return load_call_record(path, include_artifacts=False)
 
 
+def set_call_turn_stt_correction(
+    call_uuid: str,
+    turn_index: int,
+    transcript: str,
+    *,
+    reviewer: str,
+    consent_for_model_training: bool = False,
+    directory: Path | None = None,
+) -> dict[str, Any] | None:
+    """Attach a human STT correction without silently authorizing training.
+
+    ``consent_for_model_training`` is deliberately separate from ordinary call
+    recording consent. The fine-tuning exporter accepts only corrections with
+    this explicit flag and excludes the private held-out gold manifest.
+    """
+    path = call_sidecar_path(call_uuid, directory)
+    cleaned = " ".join(str(transcript or "").split())
+    reviewer_name = " ".join(str(reviewer or "").split())[:120]
+    if not path or not path.exists() or int(turn_index) < 0 or not cleaned or not reviewer_name:
+        return None
+    record = _load_json(path) or {}
+    turns = list(record.get("turns") or [])
+    target = next(
+        (turn for turn in turns if int(turn.get("turn_index", -1)) == int(turn_index)),
+        None,
+    )
+    if not target or not isinstance(target.get("user"), dict):
+        return None
+    target["user"]["stt_correction"] = {
+        "transcript": cleaned,
+        "review_status": "approved",
+        "reviewed_by": reviewer_name,
+        "reviewed_at": int(time.time()),
+        "consent_for_model_training": bool(consent_for_model_training),
+    }
+    record["turns"] = turns
+    record["updated_at"] = int(time.time())
+    path.write_text(json.dumps(record, ensure_ascii=True, indent=2, sort_keys=True, default=str))
+    return load_call_record(path, include_artifacts=False)
+
+
 def write_call_learning_summary(
     call_uuid: str,
     scorecard: dict[str, Any] | None,

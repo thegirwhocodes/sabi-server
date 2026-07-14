@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -73,6 +74,7 @@ def main() -> int:
                 "source_url": f"https://example.test/{category}",
                 "license": "CC0-1.0",
                 "commercial_use_allowed": True,
+                "sha256": hashlib.sha256(noise_path.read_bytes()).hexdigest(),
             })
         write_jsonl(noise_root / "noise_licenses.jsonl", ledger_rows)
         approved_noise, noise_provenance = licensed_noise_files(

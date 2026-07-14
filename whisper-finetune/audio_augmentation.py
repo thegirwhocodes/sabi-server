@@ -9,6 +9,7 @@ placed under ``data/noise/<category>/`` and are mixed on the fly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
@@ -55,8 +56,8 @@ def licensed_noise_files(
     """Allow only noise files with explicit, auditable license provenance.
 
     ``noise_licenses.jsonl`` lives at the noise root. Each row must contain
-    ``path`` (relative to the root), ``source_url``, ``license``, and the
-    boolean ``commercial_use_allowed``. Unlisted files are ignored in
+    ``path`` (relative to the root), ``source_url``, ``license``, ``sha256``,
+    and the boolean ``commercial_use_allowed``. Unlisted files are ignored in
     exploratory runs and block complete runs.
     """
     approved = {category: [] for category in NOISE_CATEGORIES}
@@ -98,11 +99,18 @@ def licensed_noise_files(
         relative_path = str(row.get("path") or "").strip()
         source_url = str(row.get("source_url") or "").strip()
         license_name = str(row.get("license") or "").strip()
+        expected_sha256 = str(row.get("sha256") or "").strip().lower()
         commercial_allowed = row.get("commercial_use_allowed")
-        if not relative_path or not source_url or not license_name or not isinstance(commercial_allowed, bool):
+        if (
+            not relative_path
+            or not source_url
+            or not license_name
+            or len(expected_sha256) != 64
+            or not isinstance(commercial_allowed, bool)
+        ):
             raise ValueError(
-                f"{ledger}:{line_number}: path, source_url, license, and boolean "
-                "commercial_use_allowed are required"
+                f"{ledger}:{line_number}: path, source_url, license, 64-character sha256, "
+                "and boolean commercial_use_allowed are required"
             )
         path = (base / relative_path).resolve()
         if base not in path.parents:
@@ -120,6 +128,12 @@ def licensed_noise_files(
             raise ValueError(
                 f"{ledger}:{line_number}: category {declared_category!r} does not match folder {category!r}"
             )
+        digest = hashlib.sha256()
+        with path.open("rb") as audio_file:
+            for chunk in iter(lambda: audio_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            raise ValueError(f"{ledger}:{line_number}: SHA-256 mismatch for {relative_path}")
         if not commercial_allowed and not allow_noncommercial:
             continue
         if not commercial_allowed:

@@ -10,9 +10,15 @@ This pipeline trains a candidate only. It never promotes a model automatically.
 - LibriSpeech general English (`CC-BY-4.0`) held to a 10–20% target so Nigerian adaptation does not erase broader English.
 - Licensed real noise under `data/noise/{market,generator,chatter,television,baby,connection}`.
   Every file must also appear in `data/noise/noise_licenses.jsonl` with `path`,
-  `category`, `source_url`, `license`, and boolean `commercial_use_allowed`.
+  `category`, `source_url`, `license`, `sha256`, and boolean
+  `commercial_use_allowed`.
   Unlisted files are never mixed; complete runs fail if any file or category
   lacks commercial-use provenance.
+
+The checked-in `noise_licenses.freesound-cc0.jsonl` records the six CC0 files
+currently installed on the training server, including their source pages,
+download URLs, authors, and SHA-256 checksums. Copy it to
+`data/noise/noise_licenses.jsonl` after verifying the downloaded checksums.
 
 The seven private gold clips remain evaluation-only. `prepare_external_manifests.py` and `training_data.py` exclude their resolved audio paths.
 

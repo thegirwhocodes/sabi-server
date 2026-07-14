@@ -16,12 +16,14 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 from faster_whisper import WhisperModel
 from jiwer import wer
+import httpx
 
 for candidate in (Path(__file__).resolve().parents[1], Path(__file__).resolve().parents[1] / "sabi-server"):
     if (candidate / "audio_cleaner.py").is_file():
@@ -77,8 +79,14 @@ def main() -> int:
     variants = args.audio_variant or ["raw"]
     report = {"manifest": str(args.manifest), "cases": len(cases), "models": {}}
     for label, model_path in args.model:
-        compute_type = "float16" if args.device == "cuda" else "int8"
-        model = WhisperModel(model_path, device=args.device, compute_type=compute_type)
+        groq_model = model_path.removeprefix("groq:") if model_path.startswith("groq:") else ""
+        if groq_model:
+            if not os.getenv("GROQ_API_KEY"):
+                raise RuntimeError("GROQ_API_KEY is required for groq: model entries")
+            model = None
+        else:
+            compute_type = "float16" if args.device == "cuda" else "int8"
+            model = WhisperModel(model_path, device=args.device, compute_type=compute_type)
         for variant in variants:
             cleaner = AudioCleaner(enabled=variant == "deepfilternet")
             rows = []
@@ -90,10 +98,29 @@ def main() -> int:
                 if not audio_path.is_file():
                     raise FileNotFoundError(audio_path)
                 with cleaner.prepare(str(audio_path)) as (prepared_path, cleaning):
-                    segments, info = model.transcribe(
-                        prepared_path, language="en", beam_size=5, vad_filter=False
-                    )
-                    heard = " ".join(segment.text.strip() for segment in segments).strip()
+                    if groq_model:
+                        with open(prepared_path, "rb") as audio_handle:
+                            response = httpx.post(
+                                "https://api.groq.com/openai/v1/audio/transcriptions",
+                                headers={"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"},
+                                files={"file": (Path(prepared_path).name, audio_handle, "audio/wav")},
+                                data={
+                                    "model": groq_model,
+                                    "language": "en",
+                                    "response_format": "verbose_json",
+                                },
+                                timeout=30,
+                            )
+                        response.raise_for_status()
+                        payload = response.json()
+                        heard = str(payload.get("text") or "").strip()
+                        language_probability = payload.get("language_probability")
+                    else:
+                        segments, info = model.transcribe(
+                            prepared_path, language="en", beam_size=5, vad_filter=False
+                        )
+                        heard = " ".join(segment.text.strip() for segment in segments).strip()
+                        language_probability = info.language_probability
                 truth_norm = normalize(case["truth"])
                 heard_norm = normalize(heard)
                 references.append(truth_norm)
@@ -104,7 +131,7 @@ def main() -> int:
                         "truth": case["truth"],
                         "heard": heard,
                         "exact": heard_norm == truth_norm,
-                        "language_probability": info.language_probability,
+                        "language_probability": language_probability,
                         "audio_cleaning": cleaning,
                     }
                 )
@@ -120,7 +147,8 @@ def main() -> int:
                 "wer": wer(references, hypotheses),
                 "results": rows,
             }
-        del model
+        if model is not None:
+            del model
         gc.collect()
 
     rendered = json.dumps(report, indent=2, ensure_ascii=False)

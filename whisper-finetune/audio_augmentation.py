@@ -74,15 +74,22 @@ def _phone_bandpass(audio_8k: np.ndarray) -> np.ndarray:
 
 def g711_roundtrip(audio_8k: np.ndarray, law: str = "alaw") -> np.ndarray:
     """Round-trip float PCM through the actual G.711 A-law or mu-law codec."""
-    import g711
+    import audioop
 
-    pcm = np.ascontiguousarray(np.clip(audio_8k, -1.0, 1.0), dtype=np.float32)
+    pcm = np.asarray(
+        np.clip(np.asarray(audio_8k, dtype=np.float32), -1.0, 1.0) * 32767.0,
+        dtype="<i2",
+    )
     normalized_law = str(law or "alaw").strip().lower()
     if normalized_law in {"alaw", "a-law", "pcma"}:
-        return np.asarray(g711.decode_alaw(g711.encode_alaw(pcm)), dtype=np.float32)
-    if normalized_law in {"ulaw", "mu-law", "mulaw", "pcmu"}:
-        return np.asarray(g711.decode_ulaw(g711.encode_ulaw(pcm)), dtype=np.float32)
-    raise ValueError(f"unsupported G.711 law: {law}")
+        encoded = audioop.lin2alaw(pcm.tobytes(), 2)
+        decoded = audioop.alaw2lin(encoded, 2)
+    elif normalized_law in {"ulaw", "mu-law", "mulaw", "pcmu"}:
+        encoded = audioop.lin2ulaw(pcm.tobytes(), 2)
+        decoded = audioop.ulaw2lin(encoded, 2)
+    else:
+        raise ValueError(f"unsupported G.711 law: {law}")
+    return np.frombuffer(decoded, dtype="<i2").astype(np.float32) / 32768.0
 
 
 @lru_cache(maxsize=48)

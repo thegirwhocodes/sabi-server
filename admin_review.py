@@ -756,7 +756,12 @@ def render_admin_review_page() -> str:
     .indicator-label { font-family: var(--serif); font-size: 16.5px; font-weight: 600; line-height: 1.15; color: var(--ink); }
     .indicator-meta { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
     .indicator-meter { height: 7px; border: 1px solid var(--line); border-radius: 99px; background: #f5eedf; overflow: hidden; position: relative; z-index: 1; }
-    .indicator-meter span { display: block; height: 100%; background: linear-gradient(90deg, var(--green), var(--gold)); border-radius: inherit; }
+    .indicator-meter span { display: block; height: 100%; background: #cbb892; border-radius: inherit; transition: background 200ms ease; }
+    .indicator-meter span.good { background: var(--green); }
+    .indicator-meter span.gold { background: var(--gold); }
+    .indicator-meter span.warn { background: #c77d11; }
+    .indicator-meter span.bad { background: var(--bad); }
+    .indicator-meter span.soft { background: #cbb892; }
     .indicator-metric { font-size: 12px; color: var(--ink-soft); line-height: 1.35; position: relative; z-index: 1; }
     .indicator-detail { border: 1px solid var(--line); border-radius: 13px; background: var(--card); padding: 16px; display: grid; gap: 12px; }
     .indicator-detail-head { display: grid; gap: 5px; }
@@ -1905,7 +1910,7 @@ def render_admin_review_page() -> str:
           </span>
         </div>
         ${pill(statusText(indicator.status), indicatorKind(indicator.status))}
-        <div class="indicator-meter" aria-hidden="true"><span style="width:${progress}%"></span></div>
+        <div class="indicator-meter" aria-hidden="true"><span class="${indicatorKind(indicator.status)}" style="width:${progress}%"></span></div>
         <div class="indicator-metric">${escapeHtml(indicator.metric || "Evidence ready")}</div>
       </button>`;
     }

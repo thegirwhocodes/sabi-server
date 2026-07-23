@@ -886,7 +886,7 @@ def render_admin_review_page() -> str:
       </nav>
       <div class="side-foot">
         <div class="health"><span class="health-dot" id="health-dot"></span><span id="health-text">Checking systems...</span></div>
-        <div>Board console &middot; read-only PIN</div>
+        <div>Board console · read-only PIN</div>
       </div>
     </aside>
     <div class="content">
@@ -1194,7 +1194,7 @@ def render_admin_review_page() -> str:
       if (t.llm_seconds) parts.push(`Thought in ${Number(t.llm_seconds).toFixed(1)}s`);
       if (t.tts_seconds) parts.push(`Spoke in ${Number(t.tts_seconds).toFixed(1)}s`);
       if (t.turn_total_seconds) parts.push(`Total ${Number(t.turn_total_seconds).toFixed(1)}s`);
-      return parts.join(" &middot; ");
+      return parts.join(" · ");
     }
 
     /* ---------------- toast ---------------- */
@@ -1295,8 +1295,8 @@ def render_admin_review_page() -> str:
         ? (data.match ? "Both systems heard the same thing." : "The two systems disagreed — worth a listen.")
         : "Intron key is not set yet, so the Intron lane fell back to Groq/Whisper. Set INTRON_API_KEY to run a real comparison.";
       return `<div class="compare-grid">
-        <div class="compare-col"><div class="mini-label">Production (${escapeHtml(providerLabel(b.provider) || "baseline")})</div><div class="compare-text">${escapeHtml(b.text || "(nothing heard)")}</div><div class="small">Confidence ${escapeHtml(b.confidence ?? "?")} &middot; ${escapeHtml(b.latency_ms ?? "?")}ms</div></div>
-        <div class="compare-col"><div class="mini-label">Intron lane (${escapeHtml(providerLabel(i.provider) || "test")})</div><div class="compare-text">${escapeHtml(i.text || "(nothing heard)")}</div><div class="small">Confidence ${escapeHtml(i.confidence ?? "?")} &middot; ${escapeHtml(i.latency_ms ?? "?")}ms</div></div>
+        <div class="compare-col"><div class="mini-label">Production (${escapeHtml(providerLabel(b.provider) || "baseline")})</div><div class="compare-text">${escapeHtml(b.text || "(nothing heard)")}</div><div class="small">Confidence ${escapeHtml(b.confidence ?? "?")} · ${escapeHtml(b.latency_ms ?? "?")}ms</div></div>
+        <div class="compare-col"><div class="mini-label">Intron lane (${escapeHtml(providerLabel(i.provider) || "test")})</div><div class="compare-text">${escapeHtml(i.text || "(nothing heard)")}</div><div class="small">Confidence ${escapeHtml(i.confidence ?? "?")} · ${escapeHtml(i.latency_ms ?? "?")}ms</div></div>
         <div class="compare-note ${data.intron_key_present ? (data.match ? "good" : "warn") : "soft"}">${escapeHtml(note)}</div>
       </div>`;
     }
@@ -1672,7 +1672,7 @@ def render_admin_review_page() -> str:
             ${reviewCalls.length ? reviewCalls.map(call => `<div class="review-card" data-call="${escapeHtml(call.call_uuid)}">
               <div>${callerCell(call)}<div class="conversation-summary">${escapeHtml(callFlagLabel((call.quality_flags || [])[0] || call.end_reason || "Review"))}</div></div>
               <div class="conversation-meta"><span class="mini-label">Length</span>${fmtSeconds(call.duration_seconds)}</div>
-              <div class="conversation-meta"><span class="mini-label">Evidence</span>${escapeHtml(call.turn_count || 0)} clips &middot; ${escapeHtml(call.user_turns || 0)} child turns</div>
+              <div class="conversation-meta"><span class="mini-label">Evidence</span>${escapeHtml(call.turn_count || 0)} clips · ${escapeHtml(call.user_turns || 0)} child turns</div>
               <div>${pill(callActionLabel(call), (call.quality_flags || []).length ? "warn" : "soft")}</div>
             </div>`).join("") : `<div class="empty">Nothing waiting for review. Every recent call looks healthy.</div>`}
           </div>
@@ -1686,7 +1686,7 @@ def render_admin_review_page() -> str:
             ${attentionLearners.length ? attentionLearners.map(learner => `<div class="review-card" data-learner="${escapeHtml(learner.id)}">
               <div><div class="user-name">${escapeHtml(learnerName(learner))}</div><div class="user-phone">${escapeHtml(displayPhone(learner))}</div></div>
               <div class="conversation-meta"><span class="mini-label">Calls</span>${escapeHtml((learner.calling || {}).recent_call_count || 0)}</div>
-              <div class="conversation-meta"><span class="mini-label">Learning</span>${escapeHtml(learner.total_correct || 0)} correct &middot; ${escapeHtml(learner.total_wrong || 0)} needs help</div>
+              <div class="conversation-meta"><span class="mini-label">Learning</span>${escapeHtml(learner.total_correct || 0)} correct · ${escapeHtml(learner.total_wrong || 0)} needs help</div>
               <div>${pill(learnerActionLabel(learner), "warn")}</div>
             </div>`).join("") : `<div class="empty">No learners need attention right now.</div>`}
           </div>
@@ -1758,7 +1758,7 @@ def render_admin_review_page() -> str:
         <div class="section">
           <div class="section-title-row">
             <h3>Cohort snapshot</h3>
-            <span class="section-caption">Metrics come from the launch-gate report &middot; refreshed with the console</span>
+            <span class="section-caption">Metrics come from the launch-gate report · refreshed with the console</span>
           </div>
           <div class="prepilot-metrics">
             ${chip("Cohort", `${children}<span class="small">of ${target}</span>`, cohortKind)}
@@ -2135,8 +2135,8 @@ def render_admin_review_page() -> str:
       const numeracy = position.numeracy || {};
       const literacy = position.literacy || {};
       return `<div class="position-cell">
-        <div class="position-line"><span class="position-tag">Num</span><span>M${escapeHtml(current.current_module ?? "?")} &middot; ${escapeHtml(preview(numeracy.title || current.active_skill || "not placed yet", 34))}</span></div>
-        <div class="position-line"><span class="position-tag">Lit</span><span>M${escapeHtml(lit.current_module ?? "?")} &middot; ${escapeHtml(preview(literacy.title || lit.active_skill || "not placed yet", 34))}</span></div>
+        <div class="position-line"><span class="position-tag">Num</span><span>M${escapeHtml(current.current_module ?? "?")} · ${escapeHtml(preview(numeracy.title || current.active_skill || "not placed yet", 34))}</span></div>
+        <div class="position-line"><span class="position-tag">Lit</span><span>M${escapeHtml(lit.current_module ?? "?")} · ${escapeHtml(preview(literacy.title || lit.active_skill || "not placed yet", 34))}</span></div>
       </div>`;
     }
     function renderLearnersTable() {
@@ -2170,7 +2170,7 @@ def render_admin_review_page() -> str:
         <td>${pill(current.course || "numeracy", "gold")}</td>
         <td>${positionCell(item)}</td>
         <td class="progress-cell">${progressSparkline(current)}</td>
-        <td>${escapeHtml(calling.recent_call_count || 0)} calls<div class="small">${fmtSeconds(calling.recent_call_seconds)} &middot; ${escapeHtml(item.total_sessions || 0)} sessions</div></td>
+        <td>${escapeHtml(calling.recent_call_count || 0)} calls<div class="small">${fmtSeconds(calling.recent_call_seconds)} · ${escapeHtml(item.total_sessions || 0)} sessions</div></td>
         <td>${escapeHtml(item.total_correct || 0)} correct<div class="small">${escapeHtml(item.total_wrong || 0)} needs help</div></td>
         <td>${status}</td>
         <td class="chevron">&rsaquo;</td>
@@ -2286,7 +2286,7 @@ def render_admin_review_page() -> str:
       const tags = (item.tags || []).map(tag => pill(tag.startsWith("no_audio") ? `No audio: ${callFlagLabel(tag.split(":")[1] || "")}` : tag.replaceAll("_", " "), tag.startsWith("no_audio") ? "warn" : "gold")).join(" ");
       return `<div class="feedback-card ${hasAudio ? "gold" : ""}">
         <div class="section-title-row">
-          <div class="user-cell"><span class="user-name">${escapeHtml(item.phone_number || "Phone not captured yet")}</span><span class="user-phone">${escapeHtml(fmtTimestamp(item.created_at))} &middot; ${fmtSeconds(item.duration_seconds)}</span></div>
+          <div class="user-cell"><span class="user-name">${escapeHtml(item.phone_number || "Phone not captured yet")}</span><span class="user-phone">${escapeHtml(fmtTimestamp(item.created_at))} · ${fmtSeconds(item.duration_seconds)}</span></div>
           <div class="flag-wrap">${tags}</div>
         </div>
         ${hasAudio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(item.audio_endpoint))}"></audio>` : `<div class="small">No audio was captured for this note.</div>`}
@@ -3104,8 +3104,8 @@ def render_admin_review_page() -> str:
           ${kv("Current numeracy lesson", numeracy.title || "not placed yet")}
           ${kv("Current literacy lesson", literacy.title || "not placed yet")}
           ${kv("Active skill", current.active_skill || "")}
-          ${kv("Learning evidence", `${student.total_correct || 0} correct &middot; ${student.total_wrong || 0} needs help`, true)}
-          ${kv("Recent practice", `${calling.recent_call_count || 0} calls &middot; ${fmtSeconds(calling.recent_call_seconds)}`, true)}
+          ${kv("Learning evidence", `${student.total_correct || 0} correct · ${student.total_wrong || 0} needs help`, true)}
+          ${kv("Recent practice", `${calling.recent_call_count || 0} calls · ${fmtSeconds(calling.recent_call_seconds)}`, true)}
           ${kv("Sessions saved", student.total_sessions || 0)}
           ${kv("Recent struggles", `${current.wrong_streak ?? 0} in a row`)}
           ${kv("Correct streak", `${current.correct_streak ?? 0} in a row`)}
@@ -3119,7 +3119,7 @@ def render_admin_review_page() -> str:
       <div class="section">
         <div class="section-title-row">
           <h3>Recent Conversations</h3>
-          <span class="section-caption">Newest first &middot; open any row for the full call review</span>
+          <span class="section-caption">Newest first · open any row for the full call review</span>
         </div>
         <div class="mini-table">${(student.recent_sessions || []).map(sessionRow).join("") || `<div class="empty">No sessions saved yet for this learner.</div>`}</div>
       </div>`;
@@ -3165,7 +3165,7 @@ def render_admin_review_page() -> str:
     }
     function accuracyPill(summary) {
       if (!summary || summary.questions_total == null || Number(summary.questions_total) <= 0) return "";
-      const pct = summary.accuracy == null ? "" : ` &middot; ${Math.round(Number(summary.accuracy) * 100)}%`;
+      const pct = summary.accuracy == null ? "" : ` · ${Math.round(Number(summary.accuracy) * 100)}%`;
       return pill(`${summary.questions_correct}/${summary.questions_total}${pct}`, MASTERY_PILL_KIND[summary.mastery_signal] || "soft");
     }
     function callScorecardHtml(call) {
@@ -3181,7 +3181,7 @@ def render_admin_review_page() -> str:
       const tarl = (s.tarl_level_before != null || s.tarl_level_after != null)
         ? `<div class="conversation-meta"><span class="mini-label">TaRL level</span>${escapeHtml(s.tarl_level_before ?? "?")} &rarr; ${escapeHtml(s.tarl_level_after ?? "?")}</div>` : "";
       return `<div class="section">
-        <div class="section-title-row"><h3>This Call: Learning Scoreboard</h3><span class="section-caption">${escapeHtml(s.course || "")}${s.lesson_title ? " &middot; " + escapeHtml(s.lesson_title) : ""}</span></div>
+        <div class="section-title-row"><h3>This Call: Learning Scoreboard</h3><span class="section-caption">${escapeHtml(s.course || "")}${s.lesson_title ? " · " + escapeHtml(s.lesson_title) : ""}</span></div>
         <div class="scorecard">
           <div class="scorecard-head">
             ${total ? `<span class="scorecard-big">${escapeHtml(s.questions_correct)} <span class="small">of</span> ${escapeHtml(total)}</span><span class="small">questions correct</span>` : `<span class="small">No graded questions on this call.</span>`}
@@ -3231,7 +3231,7 @@ def render_admin_review_page() -> str:
       const statusPill = reviewStatusPill(call);
       drawerSubtitle.innerHTML = `${pill(callDisplayPhone(call), "ink")} ${pill(callFlagLabel(call.end_reason || "unknown"), flags.length ? "warn" : "good")} ${providerPills(call)}${statusPill ? " " + statusPill : ""} <span class="small">${escapeHtml(call.call_uuid || "")}</span>`;
       drawerBody.innerHTML = `
-      ${flags.length ? `<div class="callout"><strong>Why this call is flagged:</strong> ${flags.map(f => escapeHtml(callFlagLabel(f))).join(" &middot; ")}</div>` : ""}
+      ${flags.length ? `<div class="callout"><strong>Why this call is flagged:</strong> ${flags.map(f => escapeHtml(callFlagLabel(f))).join(" · ")}</div>` : ""}
       ${reviewControlsHtml(call)}
       ${callScorecardHtml(call)}
       ${teacherNoteHtml(call.teacher_note)}
@@ -3272,7 +3272,7 @@ def render_admin_review_page() -> str:
         const active = current === value ? ` active ${kind}`.trimEnd() : "";
         return `<button class="review-btn${active}" data-review-status="${value}">${escapeHtml(label)}</button>`;
       }).join("");
-      const reviewedAt = call.reviewed_at ? ` &middot; last set ${escapeHtml(fmtTimestamp(call.reviewed_at))}` : "";
+      const reviewedAt = call.reviewed_at ? ` · last set ${escapeHtml(fmtTimestamp(call.reviewed_at))}` : "";
       return `<div class="section">
         <div class="section-title-row">
           <h3>Board Triage</h3>
@@ -3301,7 +3301,7 @@ def render_admin_review_page() -> str:
       return `<div class="section">
         <div class="section-title-row"><h3>Feedback Note</h3><div class="flag-wrap">${tags}</div></div>
         <div class="feedback-card gold">
-          <div class="small">${escapeHtml(fmtTimestamp(feedback.created_at))} &middot; ${fmtSeconds(feedback.duration_seconds)} &middot; ${escapeHtml(feedback.participant_type || "tester")}</div>
+          <div class="small">${escapeHtml(fmtTimestamp(feedback.created_at))} · ${fmtSeconds(feedback.duration_seconds)} · ${escapeHtml(feedback.participant_type || "tester")}</div>
           ${feedback.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(feedback.audio_endpoint))}"></audio>` : `<div class="small">No audio captured for this note.</div>`}
           ${feedback.redacted_transcript ? `<div class="quote">${escapeHtml(feedback.redacted_transcript)}</div>` : ""}
         </div>
@@ -3348,7 +3348,7 @@ def render_admin_review_page() -> str:
       const correction = user.stt_correction || {};
       return `<div class="timeline-turn">
         <div class="timeline-turn-head">
-          <span><strong>Turn ${escapeHtml(turn.turn_index)}</strong>${provider ? ` &middot; heard by ${escapeHtml(provider)}` : ""}</span>
+          <span><strong>Turn ${escapeHtml(turn.turn_index)}</strong>${provider ? ` · heard by ${escapeHtml(provider)}` : ""}</span>
           <span class="flag-wrap">${flags}</span>
           ${timing ? `<span class="timings">${timing}</span>` : ""}
         </div>
@@ -3403,19 +3403,19 @@ def render_admin_review_page() -> str:
               ${user.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(user.audio_endpoint))}"></audio>` : `<div class="small">No child clip.</div>`}
               <div class="quote">Transcribed: ${escapeHtml(user.stt_transcript || "")}</div>
               <div class="quote">Lesson text: ${escapeHtml(user.normalized_transcript || "")}</div>
-              <div class="small">Confidence ${escapeHtml(user.stt_confidence ?? "")} &middot; ${fmtSeconds(user.audio_seconds)}${user.stt_provider ? ` &middot; heard by ${escapeHtml(providerLabel(user.stt_provider))}` : ""}</div>
+              <div class="small">Confidence ${escapeHtml(user.stt_confidence ?? "")} · ${fmtSeconds(user.audio_seconds)}${user.stt_provider ? ` · heard by ${escapeHtml(providerLabel(user.stt_provider))}` : ""}</div>
             </div>
             <div class="section">
               <h3>Sabi</h3>
               ${assistant.has_audio ? `<audio controls preload="none" src="${escapeHtml(audioUrl(assistant.audio_endpoint))}"></audio>` : `<div class="small">No Sabi clip.</div>`}
               <div class="quote">Sabi said: ${escapeHtml(assistant.text || "")}</div>
               <div class="quote">Sent to TTS: ${escapeHtml(assistant.tts_text || "")}</div>
-              <div class="small">TTS changed ${assistant.tts_text_changed ? "yes" : "no"} &middot; ${fmtSeconds(assistant.audio_seconds)}</div>
+              <div class="small">TTS changed ${assistant.tts_text_changed ? "yes" : "no"} · ${fmtSeconds(assistant.audio_seconds)}</div>
             </div>
           </div>
           <div class="detail-grid">
-            ${kv("Before this turn", `Module ${before.current_module ?? "?"} &middot; support ${before.scaffold_depth ?? 0}`, true)}
-            ${kv("After this turn", `Module ${after.current_module ?? "?"} &middot; support ${after.scaffold_depth ?? 0}`, true)}
+            ${kv("Before this turn", `Module ${before.current_module ?? "?"} · support ${before.scaffold_depth ?? 0}`, true)}
+            ${kv("After this turn", `Module ${after.current_module ?? "?"} · support ${after.scaffold_depth ?? 0}`, true)}
             ${kv("Bump-down reasons", bumpReasons || "none")}
             ${kv("Teacher move", (bump.to || {}).teacher_move || (after.scaffold_ladder || {}).teacher_move || "")}
             ${kv("Timings", timingsLine(turn.timings) || "not recorded", true)}
@@ -3430,7 +3430,7 @@ def render_admin_review_page() -> str:
       return modules.map((module, index) => `<details class="module" ${index === 0 ? "open" : ""}>
         <summary><span>Module ${escapeHtml(module.module)}: ${escapeHtml(module.module_name || "")}</span>${pill(`${(module.lessons || []).length} lessons`, "soft")}</summary>
         <div class="module-body">
-          <div class="small">Skill: ${escapeHtml(module.active_skill || "")} &middot; starts week ${escapeHtml(module.start_week || "?")}</div>
+          <div class="small">Skill: ${escapeHtml(module.active_skill || "")} · starts week ${escapeHtml(module.start_week || "?")}</div>
           <div class="quote">${escapeHtml(module.principle || "")}</div>
           ${(module.lessons || []).slice(0, 12).map(lesson => lessonRow(lesson, kind)).join("")}
           ${(module.lessons || []).length > 12 ? `<div class="small">+ ${(module.lessons || []).length - 12} more lessons in this module.</div>` : ""}

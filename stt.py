@@ -148,6 +148,27 @@ def _is_short_literacy_word(text: str) -> bool:
     return normalized in LITERACY_WORDS or (normalized.isalpha() and 1 <= len(normalized) <= 5)
 
 
+def _expects_name(context: str) -> bool:
+    """True when the tutor just asked the child for their name, so Gemini can be
+    told to expect a (often Nigerian) name rather than a generic phrase."""
+    normalized = _plain_text(context)
+    if not normalized:
+        return False
+    return any(
+        cue in normalized
+        for cue in (
+            "your name",
+            "what is your name",
+            "whats your name",
+            "tell me your name",
+            "who is this",
+            "who am i speaking",
+            "what should i call you",
+            "what can i call you",
+        )
+    )
+
+
 class SpeechToText:
     def __init__(
         self,
@@ -170,6 +191,13 @@ class SpeechToText:
         from secret_loader import get_secret
         self._groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
         self._intron_key = get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY", "")
+        # Gemini multimodal audio STT. In the Jul 2026 gold-clip bake-off,
+        # gemini-3.5-flash with a closed-vocab shape hint recovered warbled
+        # Nigerian names AND numbers ("thirty", "fifteen", "My name is Gideon")
+        # that every Whisper variant turned to garbage. Enabled by setting
+        # SABI_STT_PROVIDER=gemini_first; falls back to Groq/local on any error.
+        self._gemini_key = get_secret("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
+        self._gemini_model = os.getenv("SABI_GEMINI_STT_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
         env_provider = os.getenv("SABI_STT_PROVIDER", "auto")
         self._provider = (provider or env_provider).strip().lower() or "auto"
         env_literacy_provider = os.getenv("SABI_LITERACY_STT_PROVIDER", self._provider)
@@ -288,6 +316,15 @@ class SpeechToText:
                 "no_speech": True,
                 "vad_gated": True,
             }
+        if provider in {"gemini", "gemini_first"}:
+            if self._gemini_key:
+                try:
+                    return self._transcribe_gemini(audio_path, mode=mode, context=context)
+                except Exception as e:
+                    primary_error = e
+                    logger.warning("Gemini STT failed (%s), falling back to Groq/Whisper", e)
+            else:
+                logger.warning("Gemini STT requested but GEMINI_API_KEY is not configured; using Groq/Whisper")
         if provider in {"intron", "intron_first"}:
             if self._intron_key:
                 try:
@@ -328,6 +365,93 @@ class SpeechToText:
                 "Use that context only to resolve unclear short phone audio; keep the child's words literal."
             )
         return prompt
+
+    def _gemini_shape_hint(self, context: str) -> str:
+        """Closed-vocab hint derived from the LESSON state (never the answer).
+
+        This is the mode that won the Jul 2026 gold-clip bake-off: telling
+        Gemini the expected SHAPE of the answer (number / single word / name)
+        sharply improves recovery of warbled Nigerian child speech, while a
+        bare "transcribe this" prompt does not.
+        """
+        if _expects_number(context):
+            return (
+                "The child is answering a maths question with a NUMBER. "
+                "Reply with ONLY the number they said (as digits or a number word) and nothing else."
+            )
+        if _expects_literacy_word_answer(context):
+            return (
+                "The child is reading or sounding out a single English word. "
+                "Reply with ONLY that one word and nothing else."
+            )
+        if _expects_name(context):
+            return (
+                "The child is saying their name, often a Nigerian name such as Gideon, "
+                "Oluremi, or Chukwuemeka. Reply with ONLY the name and nothing else."
+            )
+        return "Transcribe exactly what the child said. Reply with only the transcript and nothing else."
+
+    def _transcribe_gemini(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
+        """Transcribe via Gemini multimodal audio (gemini-3.5-flash by default).
+
+        Sends the clip inline with a closed-vocab shape hint. Raises on any
+        failure so the caller falls back to Groq/local — Gemini is never a
+        single point of failure on a live call.
+        """
+        import base64
+
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+        ext = Path(audio_path).suffix.lower()
+        mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
+        preamble = (
+            "This audio is a Nigerian child speaking English on a noisy, low-quality "
+            "8kHz telephone call, answering a tutor's question. Background noise is likely. "
+        )
+        prompt = preamble + self._gemini_shape_hint(context)
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self._gemini_model}:generateContent?key={self._gemini_key}"
+        )
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"inlineData": {"mimeType": mime, "data": base64.b64encode(audio_bytes).decode()}},
+                        {"text": prompt},
+                    ],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": int(os.getenv("SABI_GEMINI_STT_MAX_TOKENS", "256")),
+            },
+        }
+        response = httpx.post(
+            url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=float(os.getenv("SABI_GEMINI_STT_TIMEOUT", "12")),
+        )
+        response.raise_for_status()
+        data = response.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise RuntimeError(f"Gemini returned no candidates: {str(data)[:200]}")
+        parts = candidates[0].get("content", {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts).strip()
+        if not text:
+            raise RuntimeError("Gemini returned empty transcript")
+        return {
+            "text": text,
+            "confidence": 0.9,
+            "language": "en",
+            "duration_seconds": 0.0,
+            "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+            "provider": "gemini",
+            "gemini_model": self._gemini_model,
+        }
 
     def _transcribe_intron(self, audio_path: str, mode: str = "general") -> dict:
         """Transcribe via Intron Sahara ASR. Keep optional until real-call A/B testing."""

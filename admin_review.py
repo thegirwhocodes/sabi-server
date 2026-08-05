@@ -193,6 +193,29 @@ def render_admin_review_page() -> str:
     .top-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
     .workspace { padding: 22px 26px 34px; display: grid; gap: 18px; }
 
+    /* ---------- Protected direct call dialog ---------- */
+    .call-dialog {
+      width: min(500px, calc(100vw - 32px));
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      padding: 0;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+    }
+    .call-dialog::backdrop { background: rgba(27, 22, 16, .58); backdrop-filter: blur(2px); }
+    .call-dialog-form { display: grid; gap: 16px; padding: 22px; }
+    .call-dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+    .call-dialog-head h2 { font-family: var(--serif); font-size: 25px; font-weight: 600; }
+    .call-dialog-close { min-width: 38px; padding: 5px 10px; font-size: 21px; line-height: 1; }
+    .call-field { display: grid; gap: 7px; font-size: 12px; color: var(--muted); }
+    .call-field input { width: 100%; min-width: 0; font-size: 16px; color: var(--ink); }
+    .call-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
+    .call-status { min-height: 21px; font-size: 12.5px; color: var(--muted); }
+    .call-status.pending { color: var(--gold-deep); }
+    .call-status.success { color: var(--green); }
+    .call-status.error { color: var(--bad); }
+
     .metrics { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 12px; }
     .metric {
       background: var(--card);
@@ -902,6 +925,7 @@ def render_admin_review_page() -> str:
         </div>
         <div class="top-actions">
           <input id="search" placeholder="Search learners or phone numbers" autocomplete="off">
+          <button id="call-number">Call a phone number</button>
           <button id="export">Download CSV</button>
           <button id="refresh" class="primary">Refresh</button>
         </div>
@@ -933,6 +957,27 @@ def render_admin_review_page() -> str:
     </div>
     <div id="drawer-body" class="drawer-body"></div>
   </aside>
+  <dialog class="call-dialog" id="call-dialog" aria-labelledby="call-dialog-title">
+    <form class="call-dialog-form" id="call-dialog-form">
+      <div class="call-dialog-head">
+        <div>
+          <h2 id="call-dialog-title">Call a phone number</h2>
+          <div class="subtitle" style="margin-top:5px">Sabi will call immediately using the production phone lesson line.</div>
+        </div>
+        <button class="call-dialog-close" id="call-dialog-close" type="button" aria-label="Close">&times;</button>
+      </div>
+      <label class="call-field" for="call-phone">
+        Phone number
+        <input id="call-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0803 123 4567 or +1 860 123 4567" required>
+      </label>
+      <div class="small">Nigerian local numbers and international numbers with a country code are accepted.</div>
+      <div class="call-status" id="call-status" role="status" aria-live="polite"></div>
+      <div class="call-dialog-actions">
+        <button id="call-cancel" type="button">Cancel</button>
+        <button id="call-submit" class="primary" type="submit">Call now</button>
+      </div>
+    </form>
+  </dialog>
   <script>
     const params = new URLSearchParams(window.location.search);
     const accessKey = params.get("key") || params.get("api_key") || params.get("pin") || localStorage.getItem("sabi_admin_key") || "";
@@ -1239,6 +1284,58 @@ def render_admin_review_page() -> str:
       }
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       return res.json();
+    }
+    function phoneInputLooksValid(value) {
+      const raw = String(value || "").trim();
+      if (!raw || !/^[+\\d\\s().-]+$/.test(raw)) return false;
+      const digits = raw.replace(/\\D/g, "");
+      return digits.length >= 8 && digits.length <= 15;
+    }
+    function setCallStatus(message, kind) {
+      const status = document.getElementById("call-status");
+      status.className = `call-status ${kind || ""}`.trim();
+      status.textContent = message || "";
+    }
+    function openCallDialog() {
+      const dialog = document.getElementById("call-dialog");
+      const phone = document.getElementById("call-phone");
+      setCallStatus("", "");
+      if (!dialog.open) dialog.showModal();
+      window.setTimeout(() => phone.focus(), 0);
+    }
+    function closeCallDialog() {
+      const dialog = document.getElementById("call-dialog");
+      if (dialog.open) dialog.close();
+    }
+    async function submitDirectCall(event) {
+      event.preventDefault();
+      const phone = document.getElementById("call-phone");
+      const submit = document.getElementById("call-submit");
+      const value = phone.value.trim();
+      if (!phoneInputLooksValid(value)) {
+        setCallStatus("Enter a valid phone number with 8-15 digits. Include the country code for non-Nigerian numbers.", "error");
+        phone.focus();
+        return;
+      }
+      submit.disabled = true;
+      phone.disabled = true;
+      setCallStatus("Asking Sabi to place the call...", "pending");
+      try {
+        const result = await postForm("/admin/asterisk/direct-call", { phone: value, attempt: "1", delay_seconds: "0" });
+        if (result.status !== "direct_call_initiated") throw new Error(result.reason || "call_not_started");
+        phone.value = result.phone || value;
+        setCallStatus(`Sabi is calling ${result.phone || value} now.`, "success");
+        toast(`Sabi is calling ${result.phone || value}.`);
+      } catch (err) {
+        if (err.code === 401) {
+          setCallStatus("Placing calls needs full admin access. This read-only PIN cannot start phone calls.", "error");
+        } else {
+          setCallStatus(`Sabi could not start the call: ${err.message}`, "error");
+        }
+      } finally {
+        submit.disabled = false;
+        phone.disabled = false;
+      }
     }
     async function setReviewStatus(callUuid, status) {
       try {
@@ -3488,6 +3585,10 @@ def render_admin_review_page() -> str:
     document.getElementById("nav-curriculum").addEventListener("click", () => setView("curriculum"));
     document.getElementById("nav-evidence").addEventListener("click", () => setView("evidence"));
     document.getElementById("refresh").addEventListener("click", loadData);
+    document.getElementById("call-number").addEventListener("click", openCallDialog);
+    document.getElementById("call-dialog-close").addEventListener("click", closeCallDialog);
+    document.getElementById("call-cancel").addEventListener("click", closeCallDialog);
+    document.getElementById("call-dialog-form").addEventListener("submit", submitDirectCall);
     document.getElementById("export").addEventListener("click", exportCsv);
     document.getElementById("prev-page").addEventListener("click", () => { state.page = Math.max(0, state.page - 1); render(); });
     document.getElementById("next-page").addEventListener("click", () => { state.page += 1; render(); });

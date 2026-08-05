@@ -509,6 +509,25 @@ def normalize_phone(phone: str) -> str:
     return re.sub(r"[^\d+]", "", normalized)
 
 
+def normalize_direct_call_phone(phone: str) -> str:
+    """Return a dial-safe E.164 number for an operator-requested call.
+
+    ``normalize_phone`` intentionally stays permissive because it also handles
+    imperfect caller IDs used for learner continuity. An admin-triggered
+    outbound call is a billable external action, so it gets a stricter gate:
+    only ordinary phone punctuation is accepted and the normalized result must
+    contain 8-15 digits (the E.164 maximum).
+    """
+    raw = str(phone or "").strip()
+    if not raw or not re.fullmatch(r"[+\d\s().-]+", raw):
+        return ""
+    normalized = normalize_phone(raw)
+    digits = re.sub(r"\D", "", normalized)
+    if not normalized.startswith("+") or not 8 <= len(digits) <= 15:
+        return ""
+    return normalized
+
+
 def _flash_callback_aliases() -> dict[str, str]:
     aliases: dict[str, str] = {}
     for raw_pair in re.split(r"[,\n;]+", SABI_FLASH_CALLBACK_PHONE_ALIASES):
@@ -1028,10 +1047,10 @@ async def direct_sabi_call(
     Protected direct test hook for calling a known phone number into the Sabi
     AudioSocket lesson flow without waiting for the AT inbound/flash leg.
     """
-    normalized_phone = normalize_phone(phone)
-    if not normalized_phone or normalized_phone == "+":
-        logger.warning("Direct Sabi call rejected: missing phone number")
-        return JSONResponse({"status": "rejected", "reason": "missing_phone"}, status_code=400)
+    normalized_phone = normalize_direct_call_phone(phone)
+    if not normalized_phone:
+        logger.warning("Direct Sabi call rejected: invalid phone number")
+        return JSONResponse({"status": "rejected", "reason": "invalid_phone"}, status_code=400)
 
     safe_attempt = max(1, attempt)
     safe_delay = max(0, delay_seconds)

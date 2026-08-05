@@ -35,6 +35,13 @@ def main() -> int:
     ok &= check("renders_feedback_tab", "nav-feedback" in html and "Voice Notes" in html and "/admin/feedback" in html)
     ok &= check("renders_premium_brand", "Cormorant" in html and "Lexend" in html and "brand-spark" in html and "#cba868" in html)
     ok &= check("shows_live_health_indicator", "health-dot" in html and "/health" in html)
+    ok &= check(
+        "renders_protected_direct_call_control",
+        'id="call-number"' in html
+        and "Call a phone number" in html
+        and 'id="call-dialog"' in html
+        and 'type="tel"' in html,
+    )
 
     # Data wiring
     ok &= check("fetches_learner_roster", "/admin/learners?limit=100" in html)
@@ -46,6 +53,25 @@ def main() -> int:
     ok &= check("opens_feedback_for_call", "/admin/feedback/${encodeURIComponent(id)}" in html)
     ok &= check("accepts_simple_key_param", 'params.get("key")' in html and '"X-Admin-Pin"' in html)
     ok &= check("propagates_key_to_audio_tags", "${authParamName}=${encodeURIComponent(accessKey)}" in html)
+    ok &= check(
+        "direct_call_posts_without_exposing_secrets",
+        'postForm("/admin/asterisk/direct-call"' in html
+        and "SABI_API_KEY" not in html
+        and "AMI_SECRET" not in html,
+    )
+    ok &= check(
+        "direct_call_shows_pending_success_and_error_states",
+        "Asking Sabi to place the call..." in html
+        and "Sabi is calling ${result.phone || value} now." in html
+        and "Sabi could not start the call" in html
+        and "full admin access" in html,
+    )
+    ok &= check(
+        "direct_call_validates_number_before_posting",
+        "phoneInputLooksValid" in html
+        and "digits.length >= 8" in html
+        and "digits.length <= 15" in html,
+    )
 
     # Identity rules — no unnamed learners, no raw "no phone"
     ok &= check("explains_missing_phone", "Phone not captured yet" in html and "identity_label" in html and '"no phone"' not in html)

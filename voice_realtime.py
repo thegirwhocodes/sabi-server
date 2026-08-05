@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import struct
 import subprocess
 import time
@@ -128,12 +129,17 @@ KEYPAD_NUMERIC_FALLBACK_TEXT = os.getenv(
     "SABI_KEYPAD_NUMERIC_FALLBACK_TEXT",
     "The phone is still noisy. For this number answer, you can press the digits on your keypad, then press hash.",
 )
+KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT = os.getenv(
+    "SABI_KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT",
+    "If I ever mishear a number, you can type it on your keypad and press hash.",
+).strip()
 NUMERIC_AMBIGUITY_CONFIRMATION_TEXT = os.getenv(
     "SABI_NUMERIC_AMBIGUITY_CONFIRMATION_TEXT",
     "I may not have heard the full amount. Say the naira amount again slowly for me.",
 )
 KEYPAD_NUMERIC_TIMEOUT_SECONDS = int(os.getenv("SABI_KEYPAD_NUMERIC_TIMEOUT_SECONDS", "8"))
 KEYPAD_NUMERIC_MAX_DIGITS = int(os.getenv("SABI_KEYPAD_NUMERIC_MAX_DIGITS", "4"))
+KEYPAD_NUMERIC_INTERDIGIT_SECONDS = float(os.getenv("SABI_KEYPAD_NUMERIC_INTERDIGIT_SECONDS", "1.2"))
 KEYPAD_NUMERIC_TERMINATORS = _keypad_terminators_from_env()
 FAST_GREETING_TEXT = os.getenv(
     "SABI_FAST_GREETING_TEXT",
@@ -410,6 +416,42 @@ def _retry_text_for_unclear_audio(retry_streak: int) -> str:
     return UNCLEAR_AUDIO_RETRY_TEXT
 
 
+REPEAT_REQUEST_PATTERNS = (
+    re.compile(r"\b(?:i\s+)?(?:did(?:n['’]?t|\s+not)|could(?:n['’]?t|\s+not)|can(?:not|'t))\s+hear\b", re.I),
+    re.compile(r"\b(?:please\s+)?repeat(?:\s+(?:it|that|the\s+question|yourself))?\b", re.I),
+    re.compile(r"\b(?:can|could|will|would)\s+you\s+(?:please\s+)?(?:repeat|say\s+(?:it|that)\s+again)\b", re.I),
+    re.compile(r"\b(?:say|ask)\s+(?:it|that|the\s+question)\s+again\b", re.I),
+    re.compile(r"\bwhat\s+(?:did\s+you\s+say|was\s+the\s+question)\b", re.I),
+    re.compile(r"\bcome\s+again\b", re.I),
+    re.compile(r"^\s*(?:pardon|sorry,?\s+what)\s*[?.!]*\s*$", re.I),
+)
+
+
+def _looks_like_repeat_request(text: str) -> bool:
+    """Recognize a listening/control request before lesson grading runs."""
+    normalized = " ".join(str(text or "").split())
+    return bool(normalized) and any(pattern.search(normalized) for pattern in REPEAT_REQUEST_PATTERNS)
+
+
+def _last_question_for_repeat(messages: list[dict[str, str]]) -> str:
+    """Return the most recent tutor question without inventing a new scaffold."""
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        content = " ".join(str(message.get("content") or "").split())
+        if not content:
+            continue
+        questions = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", content)
+            if sentence.strip().endswith("?")
+        ]
+        if questions:
+            return questions[-1].strip()
+        return content
+    return "Please say your answer again."
+
+
 def _is_literacy_state(state: dict | None) -> bool:
     state = state or {}
     literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
@@ -443,12 +485,40 @@ def _stt_mode_for_turn(state: dict | None, messages: list[dict[str, str]]) -> st
     return _stt_mode_for_state(state)
 
 
-def _recent_assistant_stt_context(messages: list[dict[str, str]]) -> str:
-    return " ".join(
-        message.get("content", "")
-        for message in messages[-4:]
-        if message.get("role") == "assistant"
+def _recent_assistant_stt_context(
+    messages: list[dict[str, str]],
+    state: dict | None = None,
+) -> str:
+    """Give STT the current lesson metadata and exact tutor question.
+
+    This deliberately describes the expected response *type* but never inserts
+    the correct answer, which would make a generative audio model hallucinate.
+    """
+    state = state or {}
+    literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
+    numeric_context = has_numeric_lesson_context(messages)
+    course = "numeracy" if numeric_context else str(state.get("course") or "numeracy")
+    if _is_literacy_state(state) and not numeric_context:
+        course = "literacy"
+    metadata = [
+        f"course={course}",
+        f"module={literacy.get('current_module') if course == 'literacy' else state.get('current_module')}",
+        f"lesson={literacy.get('current_lesson') if course == 'literacy' else state.get('current_lesson')}",
+        f"skill={literacy.get('active_skill') if course == 'literacy' else state.get('active_skill')}",
+        f"phase={literacy.get('phase') if course == 'literacy' else state.get('phase')}",
+    ]
+    # Only the latest tutor turn defines the response expected *now*. Including
+    # an earlier name/number question can select the wrong Gemini tag on the
+    # next lesson turn.
+    recent_tutor = next(
+        (
+            str(message.get("content") or "")
+            for message in reversed(messages)
+            if message.get("role") == "assistant"
+        ),
+        "",
     )
+    return f"Lesson metadata: {'; '.join(metadata)}. Exact recent tutor prompt: {recent_tutor}"
 
 
 def _speech_threshold_for_state(state: dict | None) -> int:
@@ -998,12 +1068,12 @@ class RealtimeCall:
 
     async def wait_for_keypad_digits(
         self,
-        timeout_seconds: int,
+        timeout_seconds: float,
         *,
         max_digits: int = KEYPAD_NUMERIC_MAX_DIGITS,
         terminators: set[str] | None = None,
     ) -> str | None:
-        """Collect DTMF digits for noisy numeric-answer fallback."""
+        """Collect DTMF digits, auto-submitting shortly after the last digit."""
         if timeout_seconds <= 0 or max_digits <= 0:
             return None
         deadline = time.monotonic() + timeout_seconds
@@ -1013,18 +1083,69 @@ class RealtimeCall:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
+            if digits and KEYPAD_NUMERIC_INTERDIGIT_SECONDS > 0:
+                remaining = min(remaining, KEYPAD_NUMERIC_INTERDIGIT_SECONDS)
             try:
                 digit = await asyncio.wait_for(self.dtmf_queue.get(), timeout=remaining)
             except asyncio.TimeoutError:
                 break
             digit = str(digit or "").strip()
             if digit in terminators:
+                if digit == FEEDBACK_HOTKEY_DIGIT and not digits:
+                    self.feedback_hotkey_pressed = True
                 break
             if digit.isdigit():
                 digits.append(digit)
                 if len(digits) >= max_digits:
                     break
         return "".join(digits) if digits else None
+
+    async def wait_for_numeric_or_utterance(
+        self,
+        *,
+        end_silence_frames: int,
+        speech_threshold: int,
+    ) -> tuple[bytes | None, str | None]:
+        """Accept either speech or keypad digits for the current numeric question.
+
+        Both listeners run together. Pressing digits plus hash wins immediately;
+        a single digit also auto-submits after the short inter-digit window.
+        """
+        speech_task = asyncio.create_task(
+            self.wait_for_utterance(
+                end_silence_frames=end_silence_frames,
+                speech_threshold=speech_threshold,
+            )
+        )
+        keypad_task = asyncio.create_task(
+            self.wait_for_keypad_digits(
+                MAX_CALL_SECONDS,
+                max_digits=KEYPAD_NUMERIC_MAX_DIGITS,
+                terminators=KEYPAD_NUMERIC_TERMINATORS,
+            )
+        )
+        try:
+            done, _pending = await asyncio.wait(
+                {speech_task, keypad_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if keypad_task in done:
+                digits = keypad_task.result()
+                if digits or self.feedback_hotkey_pressed:
+                    speech_task.cancel()
+                    await asyncio.gather(speech_task, return_exceptions=True)
+                    return None, digits
+                return await speech_task, None
+
+            utterance = speech_task.result()
+            keypad_task.cancel()
+            await asyncio.gather(keypad_task, return_exceptions=True)
+            return utterance, None
+        finally:
+            for task in (speech_task, keypad_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(speech_task, keypad_task, return_exceptions=True)
 
     async def prompt_for_keypad_numeric_answer(
         self,
@@ -1567,6 +1688,7 @@ class RealtimeCall:
         reader_task = asyncio.create_task(self.read_loop())
         messages: list[dict[str, str]] = []
         retry_streak = 0
+        keypad_option_announced = False
         student_id: Optional[str] = None
         effective_state: dict | None = None
         starting_learning_state: dict | None = None
@@ -1632,14 +1754,23 @@ class RealtimeCall:
 
                 numeric_stt_context = has_numeric_lesson_context(messages)
                 stt_mode = _stt_mode_for_turn(effective_state, messages)
-                stt_context = _recent_assistant_stt_context(messages)
+                stt_context = _recent_assistant_stt_context(messages, effective_state)
                 speech_threshold = _speech_threshold_for_state(effective_state)
                 end_silence_frames = _end_silence_frames_for_state(effective_state)
                 utterance_from_barge = interrupted is not None
-                utterance = interrupted if interrupted else await self.wait_for_utterance(
-                    end_silence_frames=end_silence_frames,
-                    speech_threshold=speech_threshold,
-                )
+                keypad_text: str | None = None
+                if interrupted is not None:
+                    utterance = interrupted
+                elif numeric_stt_context and KEYPAD_NUMERIC_FALLBACK_ENABLED:
+                    utterance, keypad_text = await self.wait_for_numeric_or_utterance(
+                        end_silence_frames=end_silence_frames,
+                        speech_threshold=speech_threshold,
+                    )
+                else:
+                    utterance = await self.wait_for_utterance(
+                        end_silence_frames=end_silence_frames,
+                        speech_threshold=speech_threshold,
+                    )
                 interrupted = None
                 if self.feedback_hotkey_pressed:
                     self.feedback_hotkey_pressed = False
@@ -1653,7 +1784,7 @@ class RealtimeCall:
                         self.set_end_reason("feedback_then_stopped")
                         break
                     continue
-                if not utterance:
+                if not utterance and not keypad_text:
                     if self.hungup:
                         self.set_end_reason("channel_closed_waiting_for_speech")
                     else:
@@ -1661,14 +1792,26 @@ class RealtimeCall:
                     break
 
                 turn_start = time.monotonic()
-                user_audio_path = call_turn_audio_path(self.call_uuid, turn, "user", SHARED_AUDIO_DIR)
-                transcript = await self.transcribe_pcm(
-                    utterance,
-                    turn,
-                    user_audio_path,
-                    mode=stt_mode,
-                    context=stt_context,
-                )
+                user_audio_path = None
+                if keypad_text:
+                    transcript = {
+                        "text": keypad_text,
+                        "confidence": 1.0,
+                        "language": "dtmf",
+                        "duration_seconds": 0.0,
+                        "stt_latency_seconds": 0.0,
+                        "provider": "dtmf",
+                        "keypad_answer": keypad_text,
+                    }
+                else:
+                    user_audio_path = call_turn_audio_path(self.call_uuid, turn, "user", SHARED_AUDIO_DIR)
+                    transcript = await self.transcribe_pcm(
+                        utterance,
+                        turn,
+                        user_audio_path,
+                        mode=stt_mode,
+                        context=stt_context,
+                    )
                 text = transcript.get("text", "").strip()
                 raw_stt_text = text
                 confidence = float(transcript.get("confidence", 0))
@@ -1677,6 +1820,8 @@ class RealtimeCall:
                     turn_flags.append("literacy_stt")
                 elif numeric_stt_context:
                     turn_flags.append("numeric_stt")
+                if keypad_text:
+                    turn_flags.extend(["keypad_numeric_answer", "dtmf_answer"])
                 if utterance_from_barge:
                     turn_flags.append("barge_in")
                 learning_state_before_turn = dict(effective_state or {})
@@ -1705,6 +1850,33 @@ class RealtimeCall:
                     await self.request_callback_retry(text)
                     self.set_end_reason("carrier_or_voicemail_audio")
                     break
+                if _looks_like_repeat_request(text):
+                    repeat_response = f"Of course. {_last_question_for_repeat(messages)}"
+                    repeat_pcm = await self.synthesize_pcm(repeat_response, "rt_repeat_question")
+                    self.persist_turn_review(
+                        turn=turn,
+                        user_audio_path=user_audio_path,
+                        transcript=transcript,
+                        raw_text=raw_stt_text,
+                        normalized_text=text,
+                        learning_state_before=learning_state_before_turn,
+                        learning_state_after=learning_state_before_turn,
+                        assistant_text=repeat_response,
+                        assistant_pcm=repeat_pcm,
+                        flags=[*turn_flags, "control_request", "repeat_question", "not_graded"],
+                        timings={
+                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                        },
+                    )
+                    logger.info("Realtime turn %s: repeating question without grading text=%r", turn, text)
+                    retry_streak = 0
+                    interrupted = await self.play_pcm_with_barge(
+                        repeat_pcm,
+                        speech_threshold=speech_threshold,
+                        end_silence_frames=end_silence_frames,
+                    )
+                    continue
                 if normalized_text in FILLER_WORDS:
                     logger.info("Realtime turn %s: ignoring filler '%s'", turn, text)
                     self.persist_turn_review(
@@ -1988,6 +2160,14 @@ class RealtimeCall:
                     )
                 logger.info("Realtime turn %s llm=%.2fs response=%s", turn, time.monotonic() - llm_start, response)
                 llm_latency = time.monotonic() - llm_start
+                if (
+                    KEYPAD_NUMERIC_FALLBACK_ENABLED
+                    and not keypad_option_announced
+                    and KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT
+                    and has_numeric_lesson_context([*messages, {"role": "assistant", "content": response}])
+                ):
+                    response = f"{response} {KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT}"
+                    keypad_option_announced = True
                 messages.append({"role": "assistant", "content": response})
 
                 tts_start = time.monotonic()

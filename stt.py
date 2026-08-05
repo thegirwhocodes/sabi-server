@@ -87,6 +87,20 @@ WORD_ANSWER_CUES = (
     "think of a word",
     "ends with",
 )
+SOUND_ANSWER_CUES = (
+    "what sound",
+    "which sound",
+    "sound comes first",
+    "sound do you hear",
+    "beginning sound",
+    "ending sound",
+    "at the beginning of",
+    "at the start of",
+    "say the sound",
+    "say ddd",
+    "say mmm",
+    "say sss",
+)
 SUSPECT_LITERACY_FEEDBACK = {"correct", "right", "wrong", "thank you", "thanks"}
 LITERACY_WORDS = {
     "cat", "mat", "hat", "rat", "sat", "fat", "pat", "bat",
@@ -137,6 +151,16 @@ def _plain_text(text: str) -> str:
 def _expects_literacy_word_answer(context: str) -> bool:
     normalized = _plain_text(context)
     return any(cue in normalized for cue in WORD_ANSWER_CUES)
+
+
+def _expects_literacy_sound_answer(context: str) -> bool:
+    normalized = _plain_text(context)
+    return any(cue in normalized for cue in SOUND_ANSWER_CUES)
+
+
+def _expects_naira_answer(context: str) -> bool:
+    normalized = _plain_text(context)
+    return any(token in normalized.split() for token in ("naira", "kobo", "money", "price", "change"))
 
 
 def _is_suspect_literacy_feedback(text: str, context: str) -> bool:
@@ -195,11 +219,17 @@ class SpeechToText:
         # gemini-3.5-flash-lite with a lesson-context hint recovered warbled
         # Nigerian names AND numbers ("thirty", "fifteen", "My name is Gideon")
         # that every Whisper variant turned to garbage. Enabled by setting
-        # SABI_STT_PROVIDER=gemini_first; falls back to Groq/local on any error.
+        # SABI_STT_PROVIDER=gemini or gemini_first. Both are strict: failures
+        # become an unclear-audio retry. Only gemini_fallback changes models.
         self._gemini_key = get_secret("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
         self._gemini_model = (
             os.getenv("SABI_GEMINI_STT_MODEL", "gemini-3.5-flash-lite").strip()
             or "gemini-3.5-flash-lite"
+        )
+        # Reuse one connection across turns so every short child answer does
+        # not pay a fresh DNS/TCP/TLS setup cost.
+        self._gemini_http = httpx.Client(
+            limits=httpx.Limits(max_keepalive_connections=4, max_connections=8),
         )
         env_provider = os.getenv("SABI_STT_PROVIDER", "auto")
         self._provider = (provider or env_provider).strip().lower() or "auto"
@@ -225,10 +255,18 @@ class SpeechToText:
             )
         if self._provider in WHISPER_CLI_PROVIDERS or self._literacy_provider in WHISPER_CLI_PROVIDERS:
             logger.info("STT: Homebrew/openai-whisper CLI configured for local harness probes")
+        configured_providers = {self._provider, self._literacy_provider}
+        providers_without_eager_local_fallback = {
+            "gemini",
+            "gemini_first",
+            "gemini_fallback",
+            "intron",
+            "intron_first",
+            *WHISPER_CLI_PROVIDERS,
+        }
         if (
             not self._use_groq
-            and not (self._intron_key and self._provider in {"intron", "intron_first"})
-            and self._provider not in WHISPER_CLI_PROVIDERS
+            and configured_providers.isdisjoint(providers_without_eager_local_fallback)
         ):
             self._load_local_model(model_size, device)
 
@@ -319,14 +357,38 @@ class SpeechToText:
                 "no_speech": True,
                 "vad_gated": True,
             }
-        if provider in {"gemini", "gemini_first"}:
+        if provider in {"gemini", "gemini_first", "gemini_fallback"}:
             if self._gemini_key:
                 try:
                     return self._transcribe_gemini(audio_path, mode=mode, context=context)
                 except Exception as e:
                     primary_error = e
+                    if provider != "gemini_fallback":
+                        logger.warning("Strict Gemini STT failed (%s); returning an unclear turn for retry", e)
+                        return {
+                            "text": "",
+                            "confidence": 0.0,
+                            "language": "en",
+                            "duration_seconds": 0.0,
+                            "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+                            "provider": "gemini",
+                            "gemini_model": self._gemini_model,
+                            "provider_error": f"{e.__class__.__name__}: {_safe_error_text(e)}",
+                        }
                     logger.warning("Gemini STT failed (%s), falling back to Groq/Whisper", e)
             else:
+                if provider != "gemini_fallback":
+                    logger.error("Strict Gemini STT requested but GEMINI_API_KEY is not configured")
+                    return {
+                        "text": "",
+                        "confidence": 0.0,
+                        "language": "en",
+                        "duration_seconds": 0.0,
+                        "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+                        "provider": "gemini",
+                        "gemini_model": self._gemini_model,
+                        "provider_error": "GEMINI_API_KEY is not configured",
+                    }
                 logger.warning("Gemini STT requested but GEMINI_API_KEY is not configured; using Groq/Whisper")
         if provider in {"intron", "intron_first"}:
             if self._intron_key:
@@ -389,28 +451,79 @@ class SpeechToText:
         sharply improves recovery of warbled Nigerian child speech, while a
         bare "transcribe this" prompt does not.
         """
+        control_rule = (
+            "A control request always overrides the expected answer type: if the child says they "
+            "did not hear, asks Sabi to repeat the question, asks for help, or asks to switch subjects, "
+            "transcribe that request literally and in full. Never turn a control request into a guessed answer. "
+        )
         if _expects_number(context):
             return (
-                "The child is answering a maths question with a NUMBER. "
-                "Reply with ONLY the number they said (as digits or a number word) and nothing else."
+                f"{control_rule}Otherwise, the child is answering a maths question with a NUMBER. "
+                "For an actual answer, reply with only the number they said (as digits or a number word)."
+            )
+        if _expects_literacy_sound_answer(context):
+            return (
+                f"{control_rule}Otherwise, the child is answering with one short speech sound or letter "
+                "sound, such as d, ddd, b, or bbb. Preserve that sound literally; never convert it into "
+                "a number word or a tutor-feedback word."
             )
         if _expects_literacy_word_answer(context):
             return (
-                "The child is reading or sounding out a single English word. "
-                "Reply with ONLY that one word and nothing else."
+                f"{control_rule}Otherwise, the child is reading or sounding out a single English word. "
+                "For an actual answer, reply with only that one word."
             )
         if _expects_name(context):
             return (
-                "The child is saying their name, often a Nigerian name such as Gideon, "
-                "Oluremi, or Chukwuemeka. Reply with ONLY the name and nothing else."
+                f"{control_rule}Otherwise, the child is saying their name, often a Nigerian name such "
+                "as Gideon, Oluremi, or Chukwuemeka. For an actual answer, reply with only the name."
             )
-        return "Transcribe exactly what the child said. Reply with only the transcript and nothing else."
+        return f"{control_rule}Transcribe exactly what the child said. Reply with only the transcript."
 
-    def _gemini_prompt(self, context: str) -> str:
+    def _gemini_tagged_prompt(self, context: str, mode: str = "general") -> str:
+        """Choose a compact lesson tag without ever supplying the answer.
+
+        This reproduces the prompt pattern that correctly recovered `d` and
+        `2 naira` from the Aug 5 phone clips. The exact tutor question is used
+        locally to select the tag, but is not sent to Gemini, avoiding answer
+        leakage and prompt-induced hallucination.
+        """
+        global_prompt = os.getenv(
+            "SABI_GEMINI_STT_GLOBAL_PROMPT",
+            "A Nigerian child on a noisy 8kHz phone call",
+        ).strip()
+        normalized = _plain_text(context)
+        if _expects_name(context):
+            turn_tag = "is saying their name. Reply with their response."
+        elif _expects_number(context) and _expects_naira_answer(context):
+            turn_tag = "is responding to a numeracy question in naira. Reply with their response."
+        elif _expects_number(context):
+            turn_tag = "is responding to a numeracy question. Reply with their response."
+        elif _expects_literacy_sound_answer(context) or "phonemic" in normalized or "phonics" in normalized:
+            if "ending" in normalized or "at the end" in normalized:
+                sound_type = "one spoken ending letter sound"
+            elif any(cue in normalized for cue in ("beginning", "at the start", "comes first", "sound starts")):
+                sound_type = "one spoken beginning letter sound"
+            else:
+                sound_type = "one short spoken English sound"
+            turn_tag = (
+                f"is responding with {sound_type} to a literacy phonemics question. "
+                "Reply with the sound they say."
+            )
+        elif _expects_literacy_word_answer(context) or "rhyme" in normalized:
+            turn_tag = "is responding to a literacy word question. Reply with their response."
+        elif str(mode or "").lower() == "literacy":
+            turn_tag = "is responding to a literacy question. Reply with their response."
+        else:
+            turn_tag = "is responding during a lesson. Reply with their response."
+        return f"{global_prompt} {turn_tag}".strip()
+
+    def _gemini_prompt(self, context: str, mode: str = "general") -> str:
         """Build the audio prompt without ever including the expected answer.
 
-        ``shape`` is the production-safe default: it combines the successful
-        Nigerian noisy-phone framing with a lesson-state answer type. The
+        ``tagged`` is the production-safe default: it sends only a compact
+        response category selected from lesson state, never the answer. The
+        more verbose ``shape`` mode combines the noisy-phone framing with an
+        answer type and exact question context. The
         ``lesson_exact`` canary reproduces the exact AI Studio wording that
         first recovered the full Oluremi/Gideon calls. It is intentionally
         configurable because the generative audio model is prompt-sensitive.
@@ -421,23 +534,35 @@ class SpeechToText:
             "introducing themselves and walking through a numeracy lesson. "
             "Reply with their responses",
         ).strip()
-        prompt_mode = os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "shape").strip().lower()
+        recent_context = _clean_prompt_context(context, limit=800)
+        prompt_mode = os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "tagged").strip().lower()
         if prompt_mode == "lesson_exact":
             return lesson_prompt
+        if prompt_mode == "tagged":
+            return self._gemini_tagged_prompt(context, mode=mode)
         if prompt_mode == "lesson_plus_shape":
-            return f"{lesson_prompt}. {self._gemini_shape_hint(context)}"
+            context_line = f" Current lesson and exact tutor-question context: {recent_context}." if recent_context else ""
+            return f"{lesson_prompt}.{context_line} {self._gemini_shape_hint(context)}"
+        lesson_kind = "literacy" if str(mode or "").lower() == "literacy" else "numeracy or general"
         preamble = (
             "This audio is a Nigerian child speaking English on a noisy, low-quality "
-            "8kHz telephone call, answering a tutor's question. Background noise is likely. "
+            f"8kHz telephone call during a {lesson_kind} lesson. This is one turn from a longer "
+            "conversation, and background noise is likely. "
         )
+        if recent_context:
+            preamble += (
+                f"Current lesson and exact tutor-question context: {recent_context}. "
+                "The supplied audio contains the child's response, not the tutor's question. "
+            )
         return preamble + self._gemini_shape_hint(context)
 
     def _transcribe_gemini(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """Transcribe via Gemini multimodal audio (3.5 Flash-Lite by default).
 
-        Sends the clip inline with a closed-vocab shape hint. Raises on any
-        failure so the caller falls back to Groq/local — Gemini is never a
-        single point of failure on a live call.
+        Sends the clip inline with a lesson-response tag. Raises on failure;
+        strict Gemini providers turn that failure into an unclear-audio retry,
+        while the explicitly configured gemini_fallback provider may change
+        to Groq/local.
         """
         import base64
 
@@ -445,7 +570,7 @@ class SpeechToText:
             audio_bytes = f.read()
         ext = Path(audio_path).suffix.lower()
         mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
-        prompt = self._gemini_prompt(context)
+        prompt = self._gemini_prompt(context, mode=mode)
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{self._gemini_model}:generateContent"
@@ -462,10 +587,14 @@ class SpeechToText:
             ],
             "generationConfig": {
                 "maxOutputTokens": int(os.getenv("SABI_GEMINI_STT_MAX_TOKENS", "64")),
+                "thinkingConfig": {
+                    "thinkingLevel": os.getenv("SABI_GEMINI_STT_THINKING_LEVEL", "minimal").strip().lower()
+                    or "minimal",
+                },
             },
         }
         started = time.monotonic()
-        response = httpx.post(
+        response = self._gemini_http.post(
             url,
             json=payload,
             headers={
@@ -492,7 +621,7 @@ class SpeechToText:
             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
             "provider": "gemini",
             "gemini_model": self._gemini_model,
-            "gemini_prompt_mode": os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "shape").strip().lower(),
+            "gemini_prompt_mode": os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "tagged").strip().lower(),
             "provider_latency_seconds": round(provider_latency_seconds, 3),
             "usage_metadata": data.get("usageMetadata") or {},
         }

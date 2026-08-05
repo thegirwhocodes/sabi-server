@@ -11,9 +11,12 @@ import os
 import tempfile
 import wave
 
-os.environ.setdefault("GROQ_API_KEY", "test-groq-key")
-os.environ.setdefault("SABI_STT_PROVIDER", "gemini_first")
-os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")
+os.environ["GROQ_API_KEY"] = "test-groq-key"
+os.environ["SABI_STT_PROVIDER"] = "gemini_first"
+os.environ["GEMINI_API_KEY"] = "test-gemini-key"
+# The synthetic fixture is silence. Disable the independent VAD pre-gate so
+# this regression deterministically exercises provider routing on every host.
+os.environ["SABI_STT_VAD_GATE"] = "0"
 
 import httpx
 
@@ -52,8 +55,20 @@ check("non-name not detected", not _expects_name("How many mangoes are left?"))
 # ---- closed-vocab shape hints (the mode that won the bake-off) ----
 check("number hint", "NUMBER" in shape_hint(None, "How many are left? Count them."))
 check("literacy-word hint", "one word" in shape_hint(None, "Can you say a word that rhymes with hat?").lower())
+check(
+    "literacy-sound hint",
+    "speech sound or letter sound" in shape_hint(None, "What sound comes first at the start of dog?").lower(),
+)
 check("name hint", "name" in shape_hint(None, "What is your name?").lower())
-check("general hint", shape_hint(None, "Tell me about your day").startswith("Transcribe exactly"))
+check("general hint", "Transcribe exactly" in shape_hint(None, "Tell me about your day"))
+check(
+    "numeric hint preserves repeat requests",
+    "Never turn a control request into a guessed answer" in shape_hint(None, "How many are left?"),
+)
+check(
+    "numeric hint names switch-subject requests",
+    "asks to switch subjects" in shape_hint(None, "How many mangoes are left?"),
+)
 
 # ---- payload construction + response parsing ----
 captured = {}
@@ -89,6 +104,11 @@ orig_post = httpx.post
 httpx.post = fake_post
 try:
     sst = SpeechToText()
+    # A mounted production secret may take precedence over the test process
+    # environment inside Docker. Pin the fake key after construction so this
+    # offline regression never depends on host secret-loading order.
+    sst._gemini_key = "test-gemini-key"
+    sst._gemini_http = type("FakeGeminiClient", (), {"post": staticmethod(fake_post)})()
     check("gemini key loaded", bool(sst._gemini_key))
     check("default model is 3.5-flash-lite", sst._gemini_model == "gemini-3.5-flash-lite")
     wav = _tiny_wav()
@@ -102,23 +122,73 @@ try:
     check("default timeout capped", captured["timeout"] == 3.5)
     parts = captured["payload"]["contents"][0]["parts"]
     check("audio part sent inline", "inlineData" in parts[0])
-    check("number hint in prompt", "NUMBER" in parts[1]["text"])
+    check("number tag in prompt", "responding to a numeracy question" in parts[1]["text"])
+    check(
+        "minimal thinking is explicit for latency",
+        captured["payload"]["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "minimal",
+    )
     check("provider latency recorded", result["provider_latency_seconds"] >= 0)
     os.remove(wav)
 
     os.environ["SABI_GEMINI_STT_PROMPT_MODE"] = "lesson_exact"
-    exact_prompt = sst._gemini_prompt("What is your name?")
+    exact_prompt = sst._gemini_prompt("What is your name?", mode="general")
     check("exact AI Studio prompt configurable", exact_prompt.endswith("Reply with their responses"))
     os.environ.pop("SABI_GEMINI_STT_PROMPT_MODE", None)
 
-    # ---- graceful fallback: no key -> gemini skipped, Groq serves instead ----
+    literacy_prompt = sst._gemini_prompt(
+        "Lesson metadata: course=literacy; skill=phonemic_awareness_beginning. "
+        "Exact recent tutor prompt: What sound starts dog?",
+        mode="literacy",
+    )
+    check("global noisy-phone prompt is on the literacy turn", "noisy 8kHz phone call" in literacy_prompt)
+    check("phonemics tag is explicit", "literacy phonemics question" in literacy_prompt)
+    check("beginning-sound response type is explicit", "one spoken beginning letter sound" in literacy_prompt)
+    check("compact tag does not leak exact tutor question", "dog" not in literacy_prompt.lower())
+    check("compact tag contains no example answer", " d, " not in literacy_prompt.lower())
+
+    naira_prompt = sst._gemini_prompt(
+        "Lesson metadata: course=numeracy; skill=subtraction. "
+        "Exact recent tutor prompt: You have five naira and spend three. How much is left?",
+        mode="general",
+    )
+    check("naira tag is explicit", "numeracy question in naira" in naira_prompt)
+    check("global noisy-phone prompt is on the naira turn", "noisy 8kHz phone call" in naira_prompt)
+    check("naira tag does not leak operands", "five" not in naira_prompt and "three" not in naira_prompt)
+
+    name_prompt = sst._gemini_prompt("What is your name?", mode="general")
+    check("global noisy-phone prompt is on the name turn", "noisy 8kHz phone call" in name_prompt)
+    check("name turn receives only a response-type tag", "saying their name" in name_prompt)
+
+    # ---- strict Gemini-first: missing key becomes an unclear turn, not another provider ----
     sst._gemini_key = ""
     wav2 = _tiny_wav()
     out = sst._transcribe_prepared(wav2, mode="general", context="How many are left?")
-    check("no-key falls back cleanly", isinstance(out, dict) and out.get("text") == "thirty")
-    check("no-key fallback used groq, not gemini", out.get("provider") == "groq")
+    check("no-key returns cleanly", isinstance(out, dict) and out.get("text") == "")
+    check("no-key remains Gemini, not Groq", out.get("provider") == "gemini")
     os.remove(wav2)
+
+    # ---- strict Gemini: a model timeout becomes an unclear/retry turn, never another provider ----
+    strict = SpeechToText(provider="gemini_first", literacy_provider="gemini_first")
+    strict._gemini_http = type(
+        "TimeoutGeminiClient",
+        (),
+        {"post": staticmethod(lambda *args, **kwargs: (_ for _ in ()).throw(httpx.ReadTimeout("slow")))},
+    )()
+    strict_wav = _tiny_wav()
+    strict_out = strict._transcribe_prepared(strict_wav, mode="general", context="How many are left?")
+    check("strict Gemini-first timeout does not invoke Groq", strict_out.get("provider") == "gemini")
+    check("strict Gemini timeout asks realtime loop to retry", strict_out.get("text") == "")
+    os.remove(strict_wav)
 finally:
     httpx.post = orig_post
+
+# ---- strict Gemini initializes without Groq or local faster-whisper ----
+saved_groq = os.environ.pop("GROQ_API_KEY", None)
+try:
+    no_fallback = SpeechToText(provider="gemini", literacy_provider="gemini")
+    check("strict Gemini does not eagerly load local Whisper", not hasattr(no_fallback, "_model"))
+finally:
+    if saved_groq is not None:
+        os.environ["GROQ_API_KEY"] = saved_groq
 
 print(f"\nPASS: {passed}/{passed} Gemini STT config checks")

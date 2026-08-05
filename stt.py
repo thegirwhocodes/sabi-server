@@ -191,13 +191,16 @@ class SpeechToText:
         from secret_loader import get_secret
         self._groq_key = get_secret("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
         self._intron_key = get_secret("INTRON_API_KEY") or os.getenv("INTRON_API_KEY", "")
-        # Gemini multimodal audio STT. In the Jul 2026 gold-clip bake-off,
-        # gemini-3.5-flash with a closed-vocab shape hint recovered warbled
+        # Gemini multimodal audio STT. In the Aug 2026 gold-clip bake-off,
+        # gemini-3.5-flash-lite with a lesson-context hint recovered warbled
         # Nigerian names AND numbers ("thirty", "fifteen", "My name is Gideon")
         # that every Whisper variant turned to garbage. Enabled by setting
         # SABI_STT_PROVIDER=gemini_first; falls back to Groq/local on any error.
         self._gemini_key = get_secret("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY", "")
-        self._gemini_model = os.getenv("SABI_GEMINI_STT_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
+        self._gemini_model = (
+            os.getenv("SABI_GEMINI_STT_MODEL", "gemini-3.5-flash-lite").strip()
+            or "gemini-3.5-flash-lite"
+        )
         env_provider = os.getenv("SABI_STT_PROVIDER", "auto")
         self._provider = (provider or env_provider).strip().lower() or "auto"
         env_literacy_provider = os.getenv("SABI_LITERACY_STT_PROVIDER", self._provider)
@@ -339,9 +342,21 @@ class SpeechToText:
         if provider in WHISPER_CLI_PROVIDERS:
             return self._transcribe_whisper_cli(audio_path, mode=mode, context=context)
         if self._use_groq:
-            return self._transcribe_groq(audio_path, mode=mode, context=context)
+            fallback = self._transcribe_groq(audio_path, mode=mode, context=context)
+            if primary_error is not None:
+                fallback["fallback_from"] = provider
+                fallback["fallback_reason"] = (
+                    f"{primary_error.__class__.__name__}: {_safe_error_text(primary_error)}"
+                )
+            return fallback
         try:
-            return self._transcribe_local(audio_path, mode=mode, context=context)
+            fallback = self._transcribe_local(audio_path, mode=mode, context=context)
+            if primary_error is not None:
+                fallback["fallback_from"] = provider
+                fallback["fallback_reason"] = (
+                    f"{primary_error.__class__.__name__}: {_safe_error_text(primary_error)}"
+                )
+            return fallback
         except Exception as fallback_error:
             if primary_error is not None:
                 raise RuntimeError(
@@ -391,8 +406,34 @@ class SpeechToText:
             )
         return "Transcribe exactly what the child said. Reply with only the transcript and nothing else."
 
+    def _gemini_prompt(self, context: str) -> str:
+        """Build the audio prompt without ever including the expected answer.
+
+        ``shape`` is the production-safe default: it combines the successful
+        Nigerian noisy-phone framing with a lesson-state answer type. The
+        ``lesson_exact`` canary reproduces the exact AI Studio wording that
+        first recovered the full Oluremi/Gideon calls. It is intentionally
+        configurable because the generative audio model is prompt-sensitive.
+        """
+        lesson_prompt = os.getenv(
+            "SABI_GEMINI_STT_LESSON_PROMPT",
+            "A Nigerian child on a noisy 8kHz phone call is saying their name, "
+            "introducing themselves and walking through a numeracy lesson. "
+            "Reply with their responses",
+        ).strip()
+        prompt_mode = os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "shape").strip().lower()
+        if prompt_mode == "lesson_exact":
+            return lesson_prompt
+        if prompt_mode == "lesson_plus_shape":
+            return f"{lesson_prompt}. {self._gemini_shape_hint(context)}"
+        preamble = (
+            "This audio is a Nigerian child speaking English on a noisy, low-quality "
+            "8kHz telephone call, answering a tutor's question. Background noise is likely. "
+        )
+        return preamble + self._gemini_shape_hint(context)
+
     def _transcribe_gemini(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
-        """Transcribe via Gemini multimodal audio (gemini-3.5-flash by default).
+        """Transcribe via Gemini multimodal audio (3.5 Flash-Lite by default).
 
         Sends the clip inline with a closed-vocab shape hint. Raises on any
         failure so the caller falls back to Groq/local — Gemini is never a
@@ -404,14 +445,10 @@ class SpeechToText:
             audio_bytes = f.read()
         ext = Path(audio_path).suffix.lower()
         mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
-        preamble = (
-            "This audio is a Nigerian child speaking English on a noisy, low-quality "
-            "8kHz telephone call, answering a tutor's question. Background noise is likely. "
-        )
-        prompt = preamble + self._gemini_shape_hint(context)
+        prompt = self._gemini_prompt(context)
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self._gemini_model}:generateContent?key={self._gemini_key}"
+            f"{self._gemini_model}:generateContent"
         )
         payload = {
             "contents": [
@@ -424,16 +461,20 @@ class SpeechToText:
                 }
             ],
             "generationConfig": {
-                "temperature": 0.0,
-                "maxOutputTokens": int(os.getenv("SABI_GEMINI_STT_MAX_TOKENS", "256")),
+                "maxOutputTokens": int(os.getenv("SABI_GEMINI_STT_MAX_TOKENS", "64")),
             },
         }
+        started = time.monotonic()
         response = httpx.post(
             url,
             json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=float(os.getenv("SABI_GEMINI_STT_TIMEOUT", "12")),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self._gemini_key,
+            },
+            timeout=float(os.getenv("SABI_GEMINI_STT_TIMEOUT", "3.5")),
         )
+        provider_latency_seconds = time.monotonic() - started
         response.raise_for_status()
         data = response.json()
         candidates = data.get("candidates") or []
@@ -451,6 +492,9 @@ class SpeechToText:
             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
             "provider": "gemini",
             "gemini_model": self._gemini_model,
+            "gemini_prompt_mode": os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "shape").strip().lower(),
+            "provider_latency_seconds": round(provider_latency_seconds, 3),
+            "usage_metadata": data.get("usageMetadata") or {},
         }
 
     def _transcribe_intron(self, audio_path: str, mode: str = "general") -> dict:

@@ -61,6 +61,8 @@ captured = {}
 
 def fake_post(url, json=None, headers=None, timeout=None, **kwargs):
     captured["url"] = url
+    captured["headers"] = headers or {}
+    captured["timeout"] = timeout
     if json is not None:
         captured["payload"] = json
 
@@ -88,17 +90,26 @@ httpx.post = fake_post
 try:
     sst = SpeechToText()
     check("gemini key loaded", bool(sst._gemini_key))
-    check("default model is 3.5-flash", sst._gemini_model == "gemini-3.5-flash")
+    check("default model is 3.5-flash-lite", sst._gemini_model == "gemini-3.5-flash-lite")
     wav = _tiny_wav()
     result = sst._transcribe_gemini(wav, mode="general", context="How many are left?")
     check("gemini result text parsed", result["text"] == "thirty")
     check("gemini provider tagged", result["provider"] == "gemini")
-    check("gemini model tagged", result["gemini_model"] == "gemini-3.5-flash")
-    check("model in request url", "gemini-3.5-flash:generateContent" in captured["url"])
+    check("gemini model tagged", result["gemini_model"] == "gemini-3.5-flash-lite")
+    check("model in request url", "gemini-3.5-flash-lite:generateContent" in captured["url"])
+    check("API key absent from URL", "test-gemini-key" not in captured["url"])
+    check("API key sent in header", captured["headers"].get("x-goog-api-key") == "test-gemini-key")
+    check("default timeout capped", captured["timeout"] == 3.5)
     parts = captured["payload"]["contents"][0]["parts"]
     check("audio part sent inline", "inlineData" in parts[0])
     check("number hint in prompt", "NUMBER" in parts[1]["text"])
+    check("provider latency recorded", result["provider_latency_seconds"] >= 0)
     os.remove(wav)
+
+    os.environ["SABI_GEMINI_STT_PROMPT_MODE"] = "lesson_exact"
+    exact_prompt = sst._gemini_prompt("What is your name?")
+    check("exact AI Studio prompt configurable", exact_prompt.endswith("Reply with their responses"))
+    os.environ.pop("SABI_GEMINI_STT_PROMPT_MODE", None)
 
     # ---- graceful fallback: no key -> gemini skipped, Groq serves instead ----
     sst._gemini_key = ""

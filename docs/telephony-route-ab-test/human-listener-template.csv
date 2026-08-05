@@ -1,0 +1,2 @@
+listener_id,blind_sample_id,transcript_exactly_as_heard,audibility_0_to_3,initial_clipped,final_clipped,dropout,distortion,competing_speech,low_level,unintelligible_portion,listener_notes,locked_at_utc
+L1,BLIND_ID,,0_or_1_or_2_or_3,no,no,no,no,no,no,,EXAMPLE_ROW_DELETE_BEFORE_USE,YYYY-MM-DDThh:mm:ssZ

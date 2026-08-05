@@ -1,0 +1,2 @@
+blind_sample_id,restricted_route_code,participant_id,call_id,test_date_utc,phrase_id,repeat_block,native_audio_restricted_path,decoded_audio_restricted_path,route_provider_call_id,restricted_notes
+BLIND_ID,A,T001,CALL_ID,YYYY-MM-DD,A01,1,RESTRICTED_PATH,RESTRICTED_PATH,PROVIDER_CALL_ID,EXAMPLE_ROW_DELETE_BEFORE_USE

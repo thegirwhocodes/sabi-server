@@ -1,0 +1,13 @@
+participant_id,phrase_set,round_1_route_order,round_2_route_order,round_3_route_order,webrtc_available,notes
+T001,A,ABC,BCA,CAB,,
+T002,B,ACB,CBA,BAC,,
+T003,A,BAC,ACB,CBA,,
+T004,B,BCA,CAB,ABC,,
+T005,A,CAB,ABC,BCA,,
+T006,B,CBA,BAC,ACB,,
+T007,A,ABC,BCA,CAB,,
+T008,B,ACB,CBA,BAC,,
+T009,A,BAC,ACB,CBA,,
+T010,B,BCA,CAB,ABC,,
+T011,A,CAB,ABC,BCA,,
+T012,B,CBA,BAC,ACB,,

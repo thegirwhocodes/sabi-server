@@ -1,0 +1,4 @@
+route_code,n_participants,n_valid_samples,call_completion_pct,missing_audio_pct,normalized_exact_match_pct,semantic_match_pct,critical_name_pct,critical_number_naira_pct,short_literacy_pct,human_exact_match_pct,mean_human_audibility,initial_clip_pct,final_clip_pct,word_error_rate,character_error_rate,no_speech_pct,hallucination_pct,median_segment_finalization_ms,p95_segment_finalization_ms,median_stt_latency_ms,p95_stt_latency_ms,p95_end_speech_to_transcript_ms,median_packet_loss_pct,median_jitter_ms,disconnect_pct,capture_cost_per_minute_usd,caller_cost_per_minute_usd,cost_per_valid_utterance_usd,paired_delta_vs_A_pp,paired_95ci_low_pp,paired_95ci_high_pp,decision_gate_pass,notes
+A,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Baseline
+B,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+C,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,Diagnostic reference only

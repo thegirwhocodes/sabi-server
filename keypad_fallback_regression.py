@@ -219,6 +219,28 @@ def main() -> int:
         ),
     )
     ok &= check(
+        "long_repeat_request_collapsed_to_number_is_not_graded",
+        voice_realtime._should_reprompt_short_numeric_barge(
+            **{**short_barge, "utterance_seconds": 2.42, "text": "4"}
+        ),
+    )
+    ok &= check(
+        "long_repeat_request_collapsed_to_unknown_token_is_not_graded",
+        voice_realtime._should_reprompt_short_numeric_barge(
+            **{**short_barge, "utterance_seconds": 2.42, "text": "Oun"}
+        ),
+    )
+    ok &= check(
+        "recognized_long_repeat_request_bypasses_sparse_guard",
+        not voice_realtime._should_reprompt_short_numeric_barge(
+            **{
+                **short_barge,
+                "utterance_seconds": 2.42,
+                "text": "I didn't hear your question",
+            }
+        ),
+    )
+    ok &= check(
         "keypad_number_bypasses_short_audio_guard",
         not voice_realtime._should_reprompt_short_numeric_barge(
             **{**short_barge, "keypad_text": "40"}

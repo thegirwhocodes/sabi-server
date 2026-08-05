@@ -82,6 +82,9 @@ INITIAL_GREETING_BARGE_GRACE_MS = max(
 SHORT_BARGE_REPROMPT_MAX_SECONDS = float(
     os.getenv("SABI_SHORT_BARGE_REPROMPT_MAX_SECONDS", "1.1")
 )
+LONG_BARGE_SPARSE_MIN_SECONDS = float(
+    os.getenv("SABI_LONG_BARGE_SPARSE_MIN_SECONDS", "2.0")
+)
 SHORT_BARGE_REPROMPT_TEXT = os.getenv(
     "SABI_SHORT_BARGE_REPROMPT_TEXT",
     "I heard you while I was still speaking, and I may have misheard. Please say that again now.",
@@ -457,20 +460,29 @@ def _should_reprompt_short_numeric_barge(
     text: str,
     already_reprompted: bool,
 ) -> bool:
-    """Do not grade a guessed number from a tiny mid-Sabi interruption.
+    """Do not grade a prompt-shaped transcript from a suspicious interruption.
 
     The Aug 5 live call produced `20` from a 0.92-second clip where the caller
-    actually said `Sabi`.  A single repeat is safer than changing the learner's
-    level from a prompt-shaped generative transcript.  The immediate follow-up
-    is allowed through so a naturally short number answer cannot loop forever.
+    actually said `Sabi`. A longer control request also sometimes collapsed to
+    one invented token (`4` or `Oun`). A single repeat is safer than changing
+    the learner's level from either duration/text mismatch. The immediate
+    follow-up is allowed through so a naturally short answer cannot loop.
     """
+    normalized_words = str(text or "").strip(" .,!?:;").split()
+    suspicious_duration_shape = (
+        0 < utterance_seconds <= SHORT_BARGE_REPROMPT_MAX_SECONDS
+        and _looks_like_numeric_answer(text)
+    ) or (
+        utterance_seconds >= LONG_BARGE_SPARSE_MIN_SECONDS
+        and len(normalized_words) <= 1
+    )
     return (
         not already_reprompted
         and utterance_from_barge
         and numeric_stt_context
         and not keypad_text
-        and 0 < utterance_seconds <= SHORT_BARGE_REPROMPT_MAX_SECONDS
-        and _looks_like_numeric_answer(text)
+        and bool(normalized_words)
+        and suspicious_duration_shape
     )
 
 
@@ -1981,7 +1993,7 @@ class RealtimeCall:
                         },
                     )
                     logger.info(
-                        "Realtime turn %s: short numeric barge %.2fs reprompted without grading text=%r",
+                        "Realtime turn %s: suspicious numeric-context barge %.2fs reprompted without grading text=%r",
                         turn,
                         utterance_seconds,
                         text,

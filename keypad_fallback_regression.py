@@ -193,6 +193,37 @@ def main() -> int:
         "real_number_answers_are_not_repeat_requests",
         not any(voice_realtime._looks_like_repeat_request(text) for text in ["2", "twenty", "four mangoes"]),
     )
+    short_barge = dict(
+        utterance_seconds=0.92,
+        utterance_from_barge=True,
+        numeric_stt_context=True,
+        keypad_text=None,
+        text="20",
+        already_reprompted=False,
+    )
+    ok &= check(
+        "short_numeric_barge_is_reprompted_without_grading",
+        voice_realtime._should_reprompt_short_numeric_barge(**short_barge),
+        short_barge,
+    )
+    ok &= check(
+        "short_barge_followup_cannot_loop_forever",
+        not voice_realtime._should_reprompt_short_numeric_barge(
+            **{**short_barge, "already_reprompted": True}
+        ),
+    )
+    ok &= check(
+        "normal_length_numeric_barge_can_be_graded",
+        not voice_realtime._should_reprompt_short_numeric_barge(
+            **{**short_barge, "utterance_seconds": 1.5}
+        ),
+    )
+    ok &= check(
+        "keypad_number_bypasses_short_audio_guard",
+        not voice_realtime._should_reprompt_short_numeric_barge(
+            **{**short_barge, "keypad_text": "40"}
+        ),
+    )
     ok &= check(
         "repeat_replays_latest_question_only",
         voice_realtime._last_question_for_repeat(

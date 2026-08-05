@@ -79,6 +79,13 @@ INITIAL_GREETING_BARGE_GRACE_MS = max(
     BARGE_GRACE_MS,
     int(os.getenv("SABI_INITIAL_GREETING_BARGE_GRACE_MS", "3000")),
 )
+SHORT_BARGE_REPROMPT_MAX_SECONDS = float(
+    os.getenv("SABI_SHORT_BARGE_REPROMPT_MAX_SECONDS", "1.1")
+)
+SHORT_BARGE_REPROMPT_TEXT = os.getenv(
+    "SABI_SHORT_BARGE_REPROMPT_TEXT",
+    "I heard you while I was still speaking, and I may have misheard. Please say that again now.",
+).strip()
 FILLER_WORDS = {
     "um", "umm", "uh", "uhh", "erm", "hmm", "mm", "mmm",
     "um...", "uh...", "hmm...", "mm-hmm", "mhm",
@@ -439,6 +446,32 @@ def _looks_like_repeat_request(text: str) -> bool:
     """Recognize a listening/control request before lesson grading runs."""
     normalized = " ".join(str(text or "").split())
     return bool(normalized) and any(pattern.search(normalized) for pattern in REPEAT_REQUEST_PATTERNS)
+
+
+def _should_reprompt_short_numeric_barge(
+    *,
+    utterance_seconds: float,
+    utterance_from_barge: bool,
+    numeric_stt_context: bool,
+    keypad_text: str | None,
+    text: str,
+    already_reprompted: bool,
+) -> bool:
+    """Do not grade a guessed number from a tiny mid-Sabi interruption.
+
+    The Aug 5 live call produced `20` from a 0.92-second clip where the caller
+    actually said `Sabi`.  A single repeat is safer than changing the learner's
+    level from a prompt-shaped generative transcript.  The immediate follow-up
+    is allowed through so a naturally short number answer cannot loop forever.
+    """
+    return (
+        not already_reprompted
+        and utterance_from_barge
+        and numeric_stt_context
+        and not keypad_text
+        and 0 < utterance_seconds <= SHORT_BARGE_REPROMPT_MAX_SECONDS
+        and _looks_like_numeric_answer(text)
+    )
 
 
 def _last_question_for_repeat(messages: list[dict[str, str]]) -> str:
@@ -1702,6 +1735,7 @@ class RealtimeCall:
         student_id: Optional[str] = None
         effective_state: dict | None = None
         starting_learning_state: dict | None = None
+        short_barge_reprompt_pending = False
 
         try:
             student = await self.memory.find_or_create_student(self.phone)
@@ -1802,7 +1836,15 @@ class RealtimeCall:
                         self.set_end_reason("no_utterance")
                     break
 
+                already_reprompted_short_barge = short_barge_reprompt_pending
+                short_barge_reprompt_pending = False
+
                 turn_start = time.monotonic()
+                utterance_seconds = (
+                    len(utterance) / (SAMPLE_RATE * SAMPLE_WIDTH)
+                    if utterance and not keypad_text
+                    else 0.0
+                )
                 user_audio_path = None
                 if keypad_text:
                     transcript = {
@@ -1903,6 +1945,53 @@ class RealtimeCall:
                             "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
                             "turn_total_seconds": round(time.monotonic() - turn_start, 3),
                         },
+                    )
+                    continue
+                if _should_reprompt_short_numeric_barge(
+                    utterance_seconds=utterance_seconds,
+                    utterance_from_barge=utterance_from_barge,
+                    numeric_stt_context=numeric_stt_context,
+                    keypad_text=keypad_text,
+                    text=text,
+                    already_reprompted=already_reprompted_short_barge,
+                ):
+                    reprompt_pcm = await self.synthesize_pcm(
+                        SHORT_BARGE_REPROMPT_TEXT,
+                        "rt_short_barge_reprompt",
+                    )
+                    self.persist_turn_review(
+                        turn=turn,
+                        user_audio_path=user_audio_path,
+                        transcript=transcript,
+                        raw_text=raw_stt_text,
+                        normalized_text=text,
+                        learning_state_before=learning_state_before_turn,
+                        learning_state_after=learning_state_before_turn,
+                        assistant_text=SHORT_BARGE_REPROMPT_TEXT,
+                        assistant_pcm=reprompt_pcm,
+                        flags=[
+                            *turn_flags,
+                            "short_barge_reprompt",
+                            "possible_stt_mishear",
+                            "not_graded",
+                        ],
+                        timings={
+                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                        },
+                    )
+                    logger.info(
+                        "Realtime turn %s: short numeric barge %.2fs reprompted without grading text=%r",
+                        turn,
+                        utterance_seconds,
+                        text,
+                    )
+                    short_barge_reprompt_pending = True
+                    retry_streak = 0
+                    interrupted = await self.play_pcm_with_barge(
+                        reprompt_pcm,
+                        speech_threshold=speech_threshold,
+                        end_silence_frames=end_silence_frames,
                     )
                     continue
                 if not text or _looks_like_stt_hallucination(text):

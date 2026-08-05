@@ -515,7 +515,19 @@ class SpeechToText:
             turn_tag = "is responding to a literacy question. Reply with their response."
         else:
             turn_tag = "is responding during a lesson. Reply with their response."
-        return f"{global_prompt} {turn_tag}".strip()
+        return self._append_gemini_control_context(f"{global_prompt} {turn_tag}")
+
+    @staticmethod
+    def _append_gemini_control_context(prompt: str) -> str:
+        """Keep non-answer speech available to Gemini on every lesson turn."""
+        control_context = os.getenv(
+            "SABI_GEMINI_STT_CONTROL_CONTEXT",
+            (
+                "This could also be a complaint about the quality of the call or lesson, "
+                "or the child calling your name."
+            ),
+        ).strip()
+        return f"{prompt.strip()} {control_context}".strip()
 
     def _gemini_prompt(self, context: str, mode: str = "general") -> str:
         """Build the audio prompt without ever including the expected answer.
@@ -537,12 +549,14 @@ class SpeechToText:
         recent_context = _clean_prompt_context(context, limit=800)
         prompt_mode = os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "tagged").strip().lower()
         if prompt_mode == "lesson_exact":
-            return lesson_prompt
+            return self._append_gemini_control_context(lesson_prompt)
         if prompt_mode == "tagged":
             return self._gemini_tagged_prompt(context, mode=mode)
         if prompt_mode == "lesson_plus_shape":
             context_line = f" Current lesson and exact tutor-question context: {recent_context}." if recent_context else ""
-            return f"{lesson_prompt}.{context_line} {self._gemini_shape_hint(context)}"
+            return self._append_gemini_control_context(
+                f"{lesson_prompt}.{context_line} {self._gemini_shape_hint(context)}"
+            )
         lesson_kind = "literacy" if str(mode or "").lower() == "literacy" else "numeracy or general"
         preamble = (
             "This audio is a Nigerian child speaking English on a noisy, low-quality "
@@ -554,7 +568,7 @@ class SpeechToText:
                 f"Current lesson and exact tutor-question context: {recent_context}. "
                 "The supplied audio contains the child's response, not the tutor's question. "
             )
-        return preamble + self._gemini_shape_hint(context)
+        return self._append_gemini_control_context(preamble + self._gemini_shape_hint(context))
 
     def _transcribe_gemini(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """Transcribe via Gemini multimodal audio (3.5 Flash-Lite by default).

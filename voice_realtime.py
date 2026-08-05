@@ -71,6 +71,14 @@ PRE_ROLL_FRAMES = int(os.getenv("SABI_UTTERANCE_PREROLL_FRAMES", "10"))
 COLLECT_TIMEOUT_MS = int(os.getenv("SABI_COLLECT_TIMEOUT_MS", "80"))
 SABI_INTERNAL_URL = os.getenv("SABI_INTERNAL_URL", "http://127.0.0.1:8000")
 BARGE_GRACE_MS = int(os.getenv("SABI_BARGE_GRACE_MS", "650"))
+# Outbound PSTN legs can deliver a short answer/ringback click or dial tone just
+# after Asterisk answers.  Do not let that carrier audio interrupt the opening
+# greeting and become turn 0.  Later greeting speech and all normal lesson
+# barge-in remain enabled.
+INITIAL_GREETING_BARGE_GRACE_MS = max(
+    BARGE_GRACE_MS,
+    int(os.getenv("SABI_INITIAL_GREETING_BARGE_GRACE_MS", "3000")),
+)
 FILLER_WORDS = {
     "um", "umm", "uh", "uhh", "erm", "hmm", "mm", "mmm",
     "um...", "uh...", "hmm...", "mm-hmm", "mhm",
@@ -855,6 +863,7 @@ class RealtimeCall:
         pcm: bytes,
         speech_threshold: int | None = None,
         end_silence_frames: int | None = None,
+        barge_grace_ms: int | None = None,
     ) -> Optional[bytes]:
         """Play audio while watching caller audio. Returns interrupted utterance PCM."""
         # Drop audio that accumulated while LLM/TTS was thinking. Otherwise PSTN
@@ -869,11 +878,12 @@ class RealtimeCall:
         frame_count = max(1, len(pcm) // FRAME_BYTES)
         playback_start = time.monotonic()
         threshold = speech_threshold or SPEECH_RMS_THRESHOLD
+        effective_barge_grace_ms = BARGE_GRACE_MS if barge_grace_ms is None else max(0, barge_grace_ms)
         logger.info(
             "Playback start uuid=%s duration=%.2fs barge_grace_ms=%s speech_threshold=%s",
             self.call_uuid,
             len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH),
-            BARGE_GRACE_MS,
+            effective_barge_grace_ms,
             threshold,
         )
 
@@ -894,7 +904,7 @@ class RealtimeCall:
 
             drained_frames = 0
             peak_rms = 0
-            barge_allowed = (time.monotonic() - playback_start) >= (BARGE_GRACE_MS / 1000)
+            barge_allowed = (time.monotonic() - playback_start) >= (effective_barge_grace_ms / 1000)
             while True:
                 try:
                     inbound = self.audio_queue.get_nowait()
@@ -1723,6 +1733,7 @@ class RealtimeCall:
                 greeting_pcm,
                 speech_threshold=_speech_threshold_for_state(effective_state),
                 end_silence_frames=_end_silence_frames_for_state(effective_state),
+                barge_grace_ms=INITIAL_GREETING_BARGE_GRACE_MS,
             )
             if self.hungup:
                 self.set_end_reason("channel_closed_during_greeting")

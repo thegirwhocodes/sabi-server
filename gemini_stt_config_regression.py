@@ -123,6 +123,13 @@ try:
     parts = captured["payload"]["contents"][0]["parts"]
     check("audio part sent inline", "inlineData" in parts[0])
     check("number tag in prompt", "responding to a numeracy question" in parts[1]["text"])
+    check("number tag keeps exact response instruction", "Reply with their response." in parts[1]["text"])
+    check(
+        "every prompt allows complaints or the child calling Sabi",
+        parts[1]["text"].endswith(
+            "This could also be a complaint about the quality of the call or lesson, or the child calling your name."
+        ),
+    )
     check(
         "minimal thinking is explicit for latency",
         captured["payload"]["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "minimal",
@@ -132,7 +139,8 @@ try:
 
     os.environ["SABI_GEMINI_STT_PROMPT_MODE"] = "lesson_exact"
     exact_prompt = sst._gemini_prompt("What is your name?", mode="general")
-    check("exact AI Studio prompt configurable", exact_prompt.endswith("Reply with their responses"))
+    check("exact AI Studio prompt configurable", "Reply with their responses" in exact_prompt)
+    check("exact prompt also gets control context", exact_prompt.endswith("or the child calling your name."))
     os.environ.pop("SABI_GEMINI_STT_PROMPT_MODE", None)
 
     literacy_prompt = sst._gemini_prompt(
@@ -152,12 +160,14 @@ try:
         mode="general",
     )
     check("naira tag is explicit", "numeracy question in naira" in naira_prompt)
+    check("naira tag keeps exact response instruction", "Reply with their response." in naira_prompt)
     check("global noisy-phone prompt is on the naira turn", "noisy 8kHz phone call" in naira_prompt)
     check("naira tag does not leak operands", "five" not in naira_prompt and "three" not in naira_prompt)
 
     name_prompt = sst._gemini_prompt("What is your name?", mode="general")
     check("global noisy-phone prompt is on the name turn", "noisy 8kHz phone call" in name_prompt)
     check("name turn receives only a response-type tag", "saying their name" in name_prompt)
+    check("name tag keeps exact response instruction", "Reply with their response." in name_prompt)
 
     # ---- strict Gemini-first: missing key becomes an unclear turn, not another provider ----
     sst._gemini_key = ""

@@ -86,8 +86,18 @@ def main() -> int:
         check(
             "barge_in_uses_tunable_literacy_thresholds",
             "speech_threshold" in inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge).parameters
-            and "end_silence_frames" in inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge).parameters,
+            and "end_silence_frames" in inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge).parameters
+            and "barge_grace_ms" in inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge).parameters,
             inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge),
+        ),
+        check(
+            "opening_greeting_ignores_initial_carrier_audio",
+            voice_realtime.INITIAL_GREETING_BARGE_GRACE_MS >= 2500
+            and voice_realtime.INITIAL_GREETING_BARGE_GRACE_MS > voice_realtime.BARGE_GRACE_MS,
+            {
+                "opening_ms": voice_realtime.INITIAL_GREETING_BARGE_GRACE_MS,
+                "normal_ms": voice_realtime.BARGE_GRACE_MS,
+            },
         ),
         check(
             "feedback_mode_known",

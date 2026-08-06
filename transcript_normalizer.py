@@ -82,6 +82,13 @@ EMPTY_OR_NOISE_TRANSCRIPT_RE = re.compile(
     re.I,
 )
 
+# Gemini can describe a near-silent audio upload as a media timestamp such as
+# ``00:00``. It is still valuable to send the clip to Gemini, but a timestamp
+# by itself is not learner speech and must never enter lesson grading.
+TIMESTAMP_ONLY_TRANSCRIPT_RE = re.compile(
+    r"^\s*(?:\[\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*\])?\s*$"
+)
+
 SHORT_CLOSING_HALLUCINATION_RE = re.compile(
     r"^\s*(?:bye|bye bye|goodbye|see you|see you next time|thank you|thanks|got it|end card)\s*[.!?]*\s*$",
     re.I,
@@ -163,6 +170,8 @@ def is_non_answer_transcript(text: str) -> bool:
     if not raw.strip():
         return True
     if EMPTY_OR_NOISE_TRANSCRIPT_RE.match(raw):
+        return True
+    if TIMESTAMP_ONLY_TRANSCRIPT_RE.match(raw):
         return True
     if SHORT_CLOSING_HALLUCINATION_RE.match(raw):
         return True

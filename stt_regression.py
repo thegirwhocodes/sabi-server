@@ -235,6 +235,15 @@ BUILT_IN_CASES: list[dict[str, Any]] = [
         "expected_phone_system": False,
     },
     {
+        "id": "gemini_timestamp_only_is_non_answer",
+        "transcript": "00:00",
+        "assistant_context": "What is your name?",
+        "expected_text": "00:00",
+        "expected_numbers": [],
+        "expected_non_answer": True,
+        "expected_hallucination": True,
+    },
+    {
         "id": "whisper_phrase_hallucination_a_bit_better",
         "transcript": "a bit better because...",
         "assistant_context": "What is the first sound in mango?",

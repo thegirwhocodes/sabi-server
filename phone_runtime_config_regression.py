@@ -8,7 +8,9 @@ open feedback note window below the product spec.
 
 from __future__ import annotations
 
+import asyncio
 import sys
+import struct
 import types
 import os
 import inspect
@@ -35,7 +37,58 @@ def check(name: str, ok: bool, detail: object) -> bool:
     return False
 
 
+async def natural_pause_survives_endpointing() -> tuple[bool, dict]:
+    """Prove a normal 200 ms pause does not split one spoken response."""
+    call = voice_realtime.RealtimeCall(
+        "natural-pause-regression",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    first_speech = struct.pack(
+        "<" + "h" * (voice_realtime.FRAME_BYTES // 2),
+        *([1200] * (voice_realtime.FRAME_BYTES // 2)),
+    )
+    second_speech = struct.pack(
+        "<" + "h" * (voice_realtime.FRAME_BYTES // 2),
+        *([2400] * (voice_realtime.FRAME_BYTES // 2)),
+    )
+    silence = bytes(voice_realtime.FRAME_BYTES)
+
+    # Ten 20 ms quiet frames model the brief pause in the August 6 call.
+    # A 160 ms endpoint stops before second_speech; the 360 ms endpoint keeps it.
+    queued_frames = (
+        [first_speech] * 3
+        + [silence] * 10
+        + [second_speech] * 3
+        + [silence] * voice_realtime.END_SILENCE_FRAMES
+    )
+    for frame in queued_frames:
+        call.audio_queue.put_nowait(frame)
+
+    captured = await call.collect_utterance(
+        [first_speech],
+        end_silence_frames=voice_realtime.END_SILENCE_FRAMES,
+        speech_threshold=voice_realtime.SPEECH_RMS_THRESHOLD,
+    )
+    second_phrase_kept = second_speech in captured
+    return second_phrase_kept, {
+        "end_silence_frames": voice_realtime.END_SILENCE_FRAMES,
+        "end_silence_ms": voice_realtime.END_SILENCE_FRAMES * voice_realtime.FRAME_MS,
+        "natural_pause_ms": 200,
+        "captured_seconds": round(
+            len(captured) / (voice_realtime.SAMPLE_RATE * voice_realtime.SAMPLE_WIDTH),
+            2,
+        ),
+        "second_phrase_kept": second_phrase_kept,
+    }
+
+
 def main() -> int:
+    natural_pause_ok, natural_pause_detail = asyncio.run(natural_pause_survives_endpointing())
     results = [
         check(
             "max_call_window_allows_full_lesson",
@@ -76,12 +129,18 @@ def main() -> int:
             },
         ),
         check(
-            "literacy_waits_longer_for_short_sounds",
-            voice_realtime.LITERACY_END_SILENCE_FRAMES > voice_realtime.END_SILENCE_FRAMES,
+            "all_lesson_turns_tolerate_natural_pauses",
+            voice_realtime.END_SILENCE_FRAMES >= 18
+            and voice_realtime.LITERACY_END_SILENCE_FRAMES >= voice_realtime.END_SILENCE_FRAMES,
             {
                 "literacy": voice_realtime.LITERACY_END_SILENCE_FRAMES,
                 "general": voice_realtime.END_SILENCE_FRAMES,
             },
+        ),
+        check(
+            "natural_pause_does_not_cut_off_second_phrase",
+            natural_pause_ok,
+            natural_pause_detail,
         ),
         check(
             "barge_in_uses_tunable_literacy_thresholds",

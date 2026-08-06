@@ -548,9 +548,9 @@ SABI_CALLER_ID = os.getenv(
 ).strip()
 FLASH_CALLBACK_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_DELAY_SECONDS", "4"))
 FLASH_CALLBACK_RETRY_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_RETRY_DELAY_SECONDS", "10"))
-FLASH_CALLBACK_MAX_ATTEMPTS = int(os.getenv("FLASH_CALLBACK_MAX_ATTEMPTS", "3"))
+FLASH_CALLBACK_MAX_ATTEMPTS = int(os.getenv("FLASH_CALLBACK_MAX_ATTEMPTS", "1"))
 FLASH_CALLBACK_COOLDOWN_SECONDS = int(os.getenv("FLASH_CALLBACK_COOLDOWN_SECONDS", "45"))
-FLASH_CALLBACK_RETRY_ENABLED = os.getenv("FLASH_CALLBACK_RETRY_ENABLED", "1").lower() in {"1", "true", "yes"}
+FLASH_CALLBACK_RETRY_ENABLED = os.getenv("FLASH_CALLBACK_RETRY_ENABLED", "0").lower() in {"1", "true", "yes"}
 SABI_FLASH_CALLBACK_PHONE_ALIASES = os.getenv("SABI_FLASH_CALLBACK_PHONE_ALIASES", "")
 # When true (default), EVERY inbound caller is flash-called back so the child is
 # never charged for the lesson (they ring us, we hang up, we call them back on

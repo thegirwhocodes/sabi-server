@@ -25,6 +25,7 @@ def main() -> int:
     pjsip = (ROOT / "asterisk" / "pjsip.conf").read_text()
     dialplan = (ROOT / "asterisk" / "extensions.conf").read_text()
     example_env = (ROOT / ".env.example").read_text()
+    compose = (ROOT / "docker-compose.yml").read_text()
 
     twilio = section(pjsip, "twilio")
     twilio_aor = section(pjsip, "twilio-aor")
@@ -72,6 +73,11 @@ def main() -> int:
         "example_environment_documents_twilio_switch",
         "SABI_SIP_PROVIDER=twilio" in example_env
         and "TWILIO_PHONE_NUMBER=+17153122345" in example_env,
+    )
+    ok &= check(
+        "compose_deploys_twilio_by_default_but_allows_env_rollback",
+        "SABI_SIP_PROVIDER=${SABI_SIP_PROVIDER:-twilio}" in compose
+        and "SABI_CALLER_ID=${SABI_CALLER_ID:-+17153122345}" in compose,
     )
     return 0 if ok else 1
 

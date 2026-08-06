@@ -38,6 +38,11 @@ Safety state after the incident:
 - never use a real phone to verify the firewall itself—first prove a Twilio SIP
   response reaches Asterisk, then request one explicit human test call.
 
+After the allowlist was installed, a manual Asterisk SIP `OPTIONS` probe
+received `SIP/2.0 200 OK` from Twilio. This verified the bidirectional signaling
+path without creating a PSTN call. Production remained on Africa's Talking
+pending one explicitly approved end-to-end test.
+
 The server chooses the outbound carrier with:
 
 ```dotenv

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import inspect
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -15,6 +16,8 @@ from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, ORIGINAL_SABI_SYST
 
 
 ROOT = Path(__file__).resolve().parent
+FIRST_MESSAGE_SHA256 = "ca075a8c4e3195a250e2f1f1dcbc8cd16941d8d8e7f6ec5b28d9f922a08113e3"
+SYSTEM_PROMPT_SHA256 = "1c1975575de2f500e7b090f2e13095107ab65b88914948fa7341e44a915c4ac1"
 
 
 def check(name: str, condition: bool, detail: object = "") -> bool:
@@ -33,15 +36,24 @@ def context_block(dialplan: str, name: str) -> str:
 def main() -> int:
     ok = True
     canonical = ROOT.parent / "curriculum-app" / "docs" / "elevenlabs-agent-prompt.md"
-    canonical_text = canonical.read_text(encoding="utf-8")
-    first_message = canonical_text.split(
-        '## FIRST MESSAGE (paste into "First Message" field)\n\n', 1
-    )[1].split("\n\n---", 1)[0]
-    canonical_system = canonical_text.split(
-        '## SYSTEM PROMPT (paste into "System Prompt" field — everything below this line)\n\n', 1
-    )[1].split("\n\n---", 1)[0]
-    ok &= check("first_message_matches_canonical_exactly", ORIGINAL_SABI_FIRST_MESSAGE == first_message)
-    ok &= check("system_prompt_matches_canonical_exactly", ORIGINAL_SABI_SYSTEM_PROMPT == canonical_system)
+    if canonical.exists():
+        canonical_text = canonical.read_text(encoding="utf-8")
+        first_message = canonical_text.split(
+            '## FIRST MESSAGE (paste into "First Message" field)\n\n', 1
+        )[1].split("\n\n---", 1)[0]
+        canonical_system = canonical_text.split(
+            '## SYSTEM PROMPT (paste into "System Prompt" field — everything below this line)\n\n', 1
+        )[1].split("\n\n---", 1)[0]
+        ok &= check("first_message_matches_canonical_exactly", ORIGINAL_SABI_FIRST_MESSAGE == first_message)
+        ok &= check("system_prompt_matches_canonical_exactly", ORIGINAL_SABI_SYSTEM_PROMPT == canonical_system)
+    ok &= check(
+        "first_message_matches_frozen_canonical_hash",
+        hashlib.sha256(ORIGINAL_SABI_FIRST_MESSAGE.encode()).hexdigest() == FIRST_MESSAGE_SHA256,
+    )
+    ok &= check(
+        "system_prompt_matches_frozen_canonical_hash",
+        hashlib.sha256(ORIGINAL_SABI_SYSTEM_PROMPT.encode()).hexdigest() == SYSTEM_PROMPT_SHA256,
+    )
 
     original_source = inspect.getsource(voice_realtime.RealtimeCall.run_original_sabi)
     ok &= check(

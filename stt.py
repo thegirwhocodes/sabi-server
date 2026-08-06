@@ -482,12 +482,21 @@ class SpeechToText:
         """
         provider = self._provider_for_mode(mode)
         primary_error: Exception | None = None
+        gemini_provider = provider in {"gemini", "gemini_first", "gemini_fallback"}
+        gemini_bypasses_vad = (
+            gemini_provider
+            and os.getenv("SABI_GEMINI_STT_BYPASS_VAD", "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
 
         # VAD pre-gate: skip the STT model entirely on no-speech audio so a
         # crying baby / dead air can never be transcribed into a hallucination.
         # Returns empty text, which the caller already handles as "say that
-        # again" — no invented words ever reach the tutor.
-        if not self._has_speech(audio_path):
+        # again" — no invented words ever reach the tutor. Gemini is the one
+        # deliberate exception: Naomi's live-call tests require every captured
+        # Gemini turn to reach Gemini, because this local VAD rejected real,
+        # short phone answers before the selected STT model could hear them.
+        if not gemini_bypasses_vad and not self._has_speech(audio_path):
             return {
                 "text": "",
                 "confidence": 0.0,
@@ -498,10 +507,12 @@ class SpeechToText:
                 "no_speech": True,
                 "vad_gated": True,
             }
-        if provider in {"gemini", "gemini_first", "gemini_fallback"}:
+        if gemini_provider:
             if self._gemini_key:
                 try:
-                    return self._transcribe_gemini(audio_path, mode=mode, context=context)
+                    result = self._transcribe_gemini(audio_path, mode=mode, context=context)
+                    result["vad_bypassed_for_gemini"] = gemini_bypasses_vad
+                    return result
                 except Exception as e:
                     primary_error = e
                     if provider != "gemini_fallback":

@@ -143,6 +143,33 @@ try:
     check("provider latency recorded", result["provider_latency_seconds"] >= 0)
     os.remove(wav)
 
+    # The live Gemini lane must receive every captured phone clip. A separate
+    # local VAD used to reject short real answers before Gemini saw them.
+    os.environ["SABI_STT_VAD_GATE"] = "1"
+    os.environ["SABI_GEMINI_STT_BYPASS_VAD"] = "1"
+    vad_wav = _tiny_wav()
+    vad_was_called = {"value": False}
+
+    def rejecting_vad(_path):
+        vad_was_called["value"] = True
+        return False
+
+    sst._has_speech = rejecting_vad
+    vad_result = sst._transcribe_prepared(
+        vad_wav,
+        mode="general",
+        context="What is your name?",
+    )
+    check("Gemini receives clips even when local VAD would reject them", vad_result["text"] == "thirty")
+    check("local VAD is not invoked on Gemini turns", not vad_was_called["value"])
+    check("Gemini turn records the VAD bypass", vad_result["vad_bypassed_for_gemini"] is True)
+    original_provider = sst._provider
+    sst._provider = "auto"
+    non_gemini_result = sst._transcribe_prepared(vad_wav, mode="general")
+    check("non-Gemini providers retain the local VAD gate", non_gemini_result.get("vad_gated") is True)
+    sst._provider = original_provider
+    os.remove(vad_wav)
+
     os.environ["SABI_GEMINI_STT_PROMPT_MODE"] = "lesson_exact"
     exact_prompt = sst._gemini_prompt("What is your name?", mode="general")
     check("exact AI Studio prompt configurable", "Reply with their responses" in exact_prompt)

@@ -56,7 +56,7 @@ sweets_prompt, sweets_course, sweets_label = build_gemini_curriculum_prompt(
 )
 check("sweets turn is numeracy", sweets_course == "numeracy")
 check("sweets unit is preserved", sweets_label == "sweets" and "numeracy lesson in sweets" in sweets_prompt)
-check("universal prompt includes name and introduction", "saying their name, introducing themselves" in sweets_prompt)
+check("answer prompt excludes name and introduction", "saying their name" not in sweets_prompt and "introducing themselves" not in sweets_prompt)
 check("universal prompt explicitly names Sabi", "name of the AI, Sabi" in sweets_prompt)
 check("universal prompt includes can't-hear complaint", "can't hear the agent" in sweets_prompt)
 check("universal prompt includes normal human phrase", "some other normal human phrase" in sweets_prompt)
@@ -74,6 +74,7 @@ check("literacy turn is literacy", literacy_course == "literacy")
 check("literacy topic is preserved", literacy_label == "beginning sounds")
 check("literacy prompt uses same human alternatives", "name of the AI, Sabi" in literacy_universal and "can't hear" in literacy_universal)
 check("literacy prompt never leaks example word", "dog" not in literacy_universal.lower())
+check("literacy answer prompt excludes name priming", "saying their name" not in literacy_universal and "introducing themselves" not in literacy_universal)
 
 # ---- payload construction + response parsing ----
 captured = {}
@@ -128,6 +129,7 @@ try:
     parts = captured["payload"]["contents"][0]["parts"]
     check("audio part sent inline", "inlineData" in parts[0])
     check("curriculum prompt in payload", "walking through a numeracy lesson" in parts[1]["text"])
+    check("ordinary answer payload excludes name priming", "saying their name" not in parts[1]["text"])
     check("prompt keeps exact response instruction", "Reply with their response" in parts[1]["text"])
     check(
         "every prompt allows Sabi, complaints, can't-hear, and ordinary speech",
@@ -194,10 +196,12 @@ try:
     check("naira prompt keeps exact response instruction", "Reply with their response" in naira_prompt)
     check("global noisy-phone prompt is on the naira turn", "noisy 8kHz phone call" in naira_prompt)
     check("naira tag does not leak operands", "five" not in naira_prompt and "three" not in naira_prompt)
+    check("naira answer turn excludes name priming", "saying their name" not in naira_prompt)
 
     name_prompt = sst._gemini_prompt("What is your name?", mode="general")
     check("global noisy-phone prompt is on the name turn", "noisy 8kHz phone call" in name_prompt)
     check("name turn keeps broad name context", "saying their name" in name_prompt)
+    check("name turn keeps introduction context", "introducing themselves" in name_prompt)
     check("name turn explicitly allows calling Sabi", "name of the AI, Sabi" in name_prompt)
     greeting_name_prompt = sst._gemini_prompt(
         "Lesson metadata: course=numeracy; skill=market numeracy. "

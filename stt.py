@@ -236,7 +236,7 @@ def _curriculum_course(context: str, mode: str) -> str:
 
 
 def build_gemini_curriculum_prompt(context: str, mode: str = "general") -> tuple[str, str, str]:
-    """Build Naomi's universal prompt with one non-answer curriculum label."""
+    """Build the tagged prompt, mentioning names only on actual name turns."""
     course = _curriculum_course(context, mode)
     label = _literacy_context_label(context) if course == "literacy" else _numeracy_context_label(context)
     global_prompt = os.getenv(
@@ -244,8 +244,13 @@ def build_gemini_curriculum_prompt(context: str, mode: str = "general") -> tuple
         "A Nigerian child on a noisy 8kHz phone call",
     ).strip()
     lesson = f"a {course} lesson" + (f" in {label}" if label else "")
+    activity = (
+        f"is saying their name, introducing themselves and walking through {lesson}"
+        if _expects_name(context)
+        else f"is walking through {lesson}"
+    )
     prompt = (
-        f"{global_prompt} is saying their name, introducing themselves and walking through {lesson}. "
+        f"{global_prompt} {activity}. "
         f"{GEMINI_RESPONSE_CONTEXT}"
     ).strip()
     return prompt, course, label

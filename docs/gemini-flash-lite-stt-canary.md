@@ -6,15 +6,18 @@ the Gemini route is evaluated.
 
 ## Per-turn prompt policy
 
-Every request uses Naomi's broad human-conversation prompt:
+Every answer request uses Naomi's broad human-conversation prompt without
+priming Gemini to hear a learner name:
 
-> A Nigerian child on a noisy 8kHz phone call is saying their name, introducing themselves and walking through a numeracy lesson in sweets. This could also be the child calling the name of the AI, Sabi, a complaint about the quality of the call or lesson, complaining they can't hear the agent, or some other normal human phrase. Reply with their response
+> A Nigerian child on a noisy 8kHz phone call is walking through a numeracy lesson in sweets. This could also be the child calling the name of the AI, Sabi, a complaint about the quality of the call or lesson, complaining they can't hear the agent, or some other normal human phrase. Reply with their response
 
 The course (`numeracy` or `literacy`) and the final safe topic (`sweets`,
 `naira`, `beginning sounds`, and so on) change automatically from the current
 curriculum turn. The question's operands, examples, and expected answer are
 never sent to Gemini. The exact prompt used is stored on every call-review
-turn so prompt behavior remains auditable.
+turn so prompt behavior remains auditable. Only when Sabi actually asks for
+the learner's name does the prompt add `is saying their name, introducing
+themselves and` before the lesson context.
 
 Gemini `generateContent` calls are stateless, so the shared context and turn
 tag are attached to every audio request. A single persistent HTTP client reuses

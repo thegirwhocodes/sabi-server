@@ -8,12 +8,11 @@ import re
 from curriculum_path import LESSON_TITLES, LITERACY_LESSON_TITLES
 from diagnostic_flow import LITERACY_DIAGNOSTIC_ITEMS, NUMERACY_DIAGNOSTIC_ITEMS
 from learning_state import SCAFFOLD_LADDERS
-from stt import build_gemini_curriculum_prompt
+from stt import _expects_name, build_gemini_curriculum_prompt
 
 
 REQUIRED = (
     "A Nigerian child on a noisy 8kHz phone call",
-    "saying their name, introducing themselves",
     "name of the AI, Sabi",
     "a complaint about the quality of the call or lesson",
     "complaining they can't hear the agent",
@@ -42,6 +41,8 @@ def check_prompt(name: str, source: str, course: str) -> None:
     assert actual_course == course, f"{name}: expected {course}, got {actual_course}"
     assert f"walking through a {course} lesson" in prompt, f"{name}: missing course"
     assert all(required in prompt for required in REQUIRED), f"{name}: incomplete universal prompt"
+    has_name_priming = "saying their name, introducing themselves" in prompt
+    assert has_name_priming == _expects_name(context), f"{name}: incorrect name priming"
     # The curriculum row selects only a safe category. Its full question,
     # numbers, examples, and expected answer must never be copied into Gemini.
     assert source not in prompt, f"{name}: leaked full curriculum source"

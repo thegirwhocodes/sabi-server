@@ -123,6 +123,15 @@ PATTERNS = {
     "off_topic": re.compile(r"\b(who (is|'?s) the president|tell me .{0,25}(scary|ghost|horror).{0,15}story|(scary|ghost|horror) story|what'?s the (weather|football|match) (score|result)?|sing (me )?a song|tell me (a )?joke|play (a|music)|who (will )?win the (match|election))\b", F),
 }
 
+# Sabi explicitly asks for the learner's first name. A single ordinary name is
+# therefore expected lesson data, not prohibited PII. Keep this deliberately
+# narrow: full-name phrases, multiple name words, addresses, schools, and phone
+# numbers continue through the PII boundary below.
+SAFE_FIRST_NAME_STATEMENT_RE = re.compile(
+    r"^\s*my name is\s+[^\W\d_]+(?:[-'][^\W\d_]+)*[.!]?\s*$",
+    F,
+)
+
 _ORDER = [
     "self_harm", "abuse_disclosure", "emergency", "sexual", "violence",
     "dangerous_advice", "medical_legal", "grooming_meetup", "off_platform",
@@ -159,6 +168,9 @@ def guard_input(utterance: str, student_id: Optional[str] = None) -> GuardResult
     text = (utterance or "").lower()
     cat = _classify(text)
 
+    if cat == "pii" and SAFE_FIRST_NAME_STATEMENT_RE.fullmatch(text):
+        cat = "safe"
+
     if cat in _CRISIS:
         return GuardResult("escalate", cat, 3, True, True, False, f"crisis:{cat}", CRISIS_RESPONSES[cat])
     if cat in _INAPPROPRIATE:
@@ -179,7 +191,12 @@ class OutputResult:
     reason: Optional[str] = None
 
 
-_OUT_SOLICIT_PII = re.compile(r"\b(what(?:'s| is) your (full |home )?(name|address|school|phone|number|location)|where do you (live|go to school)|send me (a )?(pic|picture|photo|selfie)|let'?s meet|meet me|add me on|my (phone )?number is|call me on)\b", F)
+_OUT_SOLICIT_PII = re.compile(
+    r"\b(what(?:'s| is) your (?:full name|home address|address|school(?: name)?|phone(?: number)?|number|location)|"
+    r"where do you (live|go to school)|send me (a )?(pic|picture|photo|selfie)|let'?s meet|meet me|"
+    r"add me on|my (phone )?number is|call me on)\b",
+    F,
+)
 _OUT_CLAIM_HUMAN = re.compile(r"\b(i('?m| am) (a )?(real )?(human|person|not an ai|your (real )?(friend|sister|brother|girlfriend|boyfriend))|i can keep (it|this) (a )?secret|i won'?t tell (anyone|your)|just between us)\b", F)
 _OUT_LEAK = re.compile(r"\b(my (system )?(prompt|instructions|rules) (are|say)|i was (told|instructed) to|sabi_core_prompt|child safety rules|here are my (rules|instructions))\b", F)
 _OUT_EXPLICIT = re.compile(r"\b(sex|porn|penis|vagina|naked|nude|kill (him|her|them|yourself)|how to make a (bomb|gun)|drink (bleach|petrol))\b", F)

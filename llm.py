@@ -278,39 +278,6 @@ class SabiLLM:
                 return str(message.get("content") or "")
         return ""
 
-    @staticmethod
-    def _is_expected_first_name_response(messages: list[dict]) -> bool:
-        """Allow the one first-name answer Sabi explicitly requested.
-
-        The global PII guard correctly blocks addresses, phone numbers, school
-        names, and full names, but its broad ``my name is`` pattern also blocks
-        Sabi's own first onboarding question. Keep this exception narrow: the
-        preceding tutor turn must ask for a name and the answer may contain at
-        most two ordinary name words.
-        """
-        chat = [m for m in messages if m.get("role") in ("user", "assistant")]
-        if len(chat) < 2 or chat[-1].get("role") != "user":
-            return False
-        previous_assistant = next(
-            (
-                str(message.get("content") or "")
-                for message in reversed(chat[:-1])
-                if message.get("role") == "assistant"
-            ),
-            "",
-        )
-        if not re.search(r"\b(?:what(?:'s| is) your name|tell me your name)\b", previous_assistant, re.I):
-            return False
-        answer = str(chat[-1].get("content") or "").strip()
-        match = re.fullmatch(
-            r"(?:my name is|i am|i'm)?\s*([A-Za-z][A-Za-z' -]{0,39})[.!]?",
-            answer,
-            re.I,
-        )
-        if not match:
-            return False
-        return 1 <= len(match.group(1).strip().split()) <= 2
-
     def _record_safeguarding_incident(
         self,
         guard,
@@ -514,12 +481,7 @@ class SabiLLM:
         chat_messages = [m for m in messages if m.get("role") in ("user", "assistant")]
         latest_user = self._latest_user_text(chat_messages)
         input_guard = guard_input(latest_user) if latest_user else None
-        expected_first_name = bool(
-            input_guard
-            and input_guard.category == "pii"
-            and self._is_expected_first_name_response(chat_messages)
-        )
-        if input_guard and input_guard.short_circuit and not expected_first_name:
+        if input_guard and input_guard.short_circuit:
             if input_guard.flag_for_safeguarding:
                 self._record_safeguarding_incident(
                     input_guard,

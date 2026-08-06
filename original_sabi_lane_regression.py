@@ -13,6 +13,7 @@ from pathlib import Path
 os.environ.setdefault("SABI_SHARED_AUDIO_DIR", tempfile.mkdtemp(prefix="sabi-original-regression-"))
 
 import voice_realtime
+from guardrails import guard_input, guard_output
 from llm import SabiLLM
 from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, ORIGINAL_SABI_SYSTEM_PROMPT
 
@@ -35,7 +36,7 @@ def context_block(dialplan: str, name: str) -> str:
     return dialplan[start : next_context if next_context >= 0 else len(dialplan)]
 
 
-async def first_name_guard_check() -> tuple[bool, str]:
+async def first_name_guard_check() -> tuple[bool, str, str]:
     tutor = SabiLLM.__new__(SabiLLM)
 
     async def fake_generate(system_prompt, messages):
@@ -49,7 +50,14 @@ async def first_name_guard_check() -> tuple[bool, str]:
             {"role": "user", "content": "My name is Amarachi."},
         ],
     )
-    return response == "Lovely to meet you, Amarachi!", response
+    correction = await tutor.generate_with_system_prompt(
+        system_prompt=ORIGINAL_SABI_SYSTEM_PROMPT,
+        messages=[
+            {"role": "assistant", "content": "Can you count from one to twenty?"},
+            {"role": "user", "content": "My name is Chidi."},
+        ],
+    )
+    return response == "Lovely to meet you, Amarachi!", response, correction
 
 
 def main() -> int:
@@ -92,26 +100,27 @@ def main() -> int:
         "normalized_text=raw_text" in original_source
         and "_normalize_transcript_for_lesson(" not in original_source,
     )
-    first_name_ok, first_name_response = asyncio.run(first_name_guard_check())
+    first_name_ok, first_name_response, corrected_name_response = asyncio.run(first_name_guard_check())
     ok &= check(
         "original_lane_accepts_the_first_name_it_requested",
         first_name_ok,
         first_name_response,
     )
     ok &= check(
+        "original_lane_accepts_a_later_first_name_correction",
+        corrected_name_response == "Lovely to meet you, Amarachi!",
+        corrected_name_response,
+    )
+    ok &= check(
         "first_name_exception_does_not_allow_full_names_or_addresses",
-        not SabiLLM._is_expected_first_name_response(
-            [
-                {"role": "assistant", "content": ORIGINAL_SABI_FIRST_MESSAGE},
-                {"role": "user", "content": "My full name is Amarachi Okafor."},
-            ]
-        )
-        and not SabiLLM._is_expected_first_name_response(
-            [
-                {"role": "assistant", "content": ORIGINAL_SABI_FIRST_MESSAGE},
-                {"role": "user", "content": "My address is 12 Lagos Road."},
-            ]
-        ),
+        guard_input("My full name is Amarachi Okafor.").short_circuit
+        and guard_input("My name is Amarachi Okafor.").short_circuit
+        and guard_input("My address is 12 Lagos Road.").short_circuit,
+    )
+    ok &= check(
+        "Sabi_can_ask_for_a_first_name_but_not_a_full_name",
+        not guard_output("I didn't hear your name clearly. What is your name?").blocked
+        and guard_output("What is your full name?").blocked,
     )
 
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")

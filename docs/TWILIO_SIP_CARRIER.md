@@ -12,6 +12,8 @@ The old turn-by-turn `voice_twilio.py` webhook is not part of this route.
 - Asterisk endpoint: `twilio`
 - Audio codec preference: G.711 mu-law, with A-law fallback
 - Authentication from Asterisk to Twilio: fixed server IP ACL
+- Registration/OPTIONS qualification: disabled (Twilio trunks do not register,
+  and the termination URI does not answer Asterisk's bare-URI probe)
 - Lesson lane: `AudioSocket(${AS_UUID},sabi:9020)`
 - Africa's Talking endpoint remains configured as `africastalking` for rollback
 

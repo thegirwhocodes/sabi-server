@@ -20,6 +20,7 @@ class DiagnosticItem:
     id: str
     domain: str
     prompt: str
+    stt_prompt_tag: str
     expected: tuple[int, ...]
     fail_module: int
     fail_week: int
@@ -45,6 +46,7 @@ class LiteracyDiagnosticItem:
     id: str
     domain: str
     prompt: str
+    stt_prompt_tag: str
     fail_phase: int
     fail_module: int
     fail_week: int
@@ -61,6 +63,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="count_after_29",
         domain="counting",
         prompt="Let's play a quick number game. What number comes after twenty-nine?",
+        stt_prompt_tag="number sequences",
         expected=(30,),
         fail_module=1,
         fail_week=1,
@@ -73,6 +76,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="count_after_99",
         domain="counting",
         prompt="Good. What number comes after ninety-nine?",
+        stt_prompt_tag="number sequences",
         expected=(100,),
         fail_module=1,
         fail_week=2,
@@ -85,6 +89,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="compare_7_3",
         domain="number_sense",
         prompt="Which is bigger: seven or three?",
+        stt_prompt_tag="comparing numbers",
         expected=(7,),
         fail_module=1,
         fail_week=1,
@@ -97,6 +102,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="compare_23_32",
         domain="number_sense",
         prompt="Nice. Which is bigger: twenty-three or thirty-two?",
+        stt_prompt_tag="comparing numbers",
         expected=(32,),
         fail_module=1,
         fail_week=3,
@@ -109,6 +115,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="compare_156_148",
         domain="number_sense",
         prompt="Try one more: which is bigger, one hundred and fifty-six or one hundred and forty-eight?",
+        stt_prompt_tag="comparing numbers",
         expected=(156,),
         fail_module=1,
         fail_week=3,
@@ -121,6 +128,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="add_within_10",
         domain="addition",
         prompt="You buy pure water for three naira and groundnuts for two naira. How much altogether?",
+        stt_prompt_tag="naira, pure water, and groundnuts",
         expected=(5,),
         fail_module=1,
         fail_week=3,
@@ -133,6 +141,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="add_within_20",
         domain="addition",
         prompt="Biscuits cost eight naira and sweets cost seven naira. How much altogether?",
+        stt_prompt_tag="naira, biscuits, and sweets",
         expected=(15,),
         fail_module=2,
         fail_week=5,
@@ -145,6 +154,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="add_two_digit_no_carry",
         domain="addition",
         prompt="Tomatoes cost twenty-three naira and peppers cost fourteen naira. How much altogether?",
+        stt_prompt_tag="naira, tomatoes, and peppers",
         expected=(37,),
         fail_module=2,
         fail_week=6,
@@ -157,6 +167,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="add_two_digit_carry",
         domain="addition",
         prompt="Garri costs forty-seven naira and oil costs thirty-eight naira. How much altogether?",
+        stt_prompt_tag="naira, garri, and oil",
         expected=(85,),
         fail_module=2,
         fail_week=7,
@@ -169,6 +180,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="subtract_within_10",
         domain="subtraction",
         prompt="You have nine naira and spend four naira. How much is left?",
+        stt_prompt_tag="naira subtraction",
         expected=(5,),
         fail_module=3,
         fail_week=9,
@@ -181,6 +193,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="subtract_within_20",
         domain="subtraction",
         prompt="You have fifteen naira and spend eight naira on biscuits. How much is left?",
+        stt_prompt_tag="naira and biscuits",
         expected=(7,),
         fail_module=3,
         fail_week=9,
@@ -193,6 +206,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="subtract_two_digit_borrow",
         domain="subtraction",
         prompt="You have forty-two naira and spend eighteen naira. How much is left?",
+        stt_prompt_tag="naira subtraction",
         expected=(24,),
         fail_module=3,
         fail_week=10,
@@ -205,6 +219,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="multiply_easy",
         domain="multiplication",
         prompt="A mango costs three naira. You buy four mangoes. How much do you pay?",
+        stt_prompt_tag="naira and mangoes",
         expected=(12,),
         fail_module=4,
         fail_week=12,
@@ -217,6 +232,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="multiply_fact",
         domain="multiplication",
         prompt="A notebook costs six naira. You buy seven notebooks. How much do you pay?",
+        stt_prompt_tag="naira and notebooks",
         expected=(42,),
         fail_module=4,
         fail_week=14,
@@ -229,6 +245,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="multiply_money",
         domain="multiplication",
         prompt="One mango costs thirty naira. You buy four mangoes. How much do you pay?",
+        stt_prompt_tag="naira and mangoes",
         expected=(120,),
         fail_module=4,
         fail_week=14,
@@ -241,6 +258,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="divide_sharing",
         domain="division",
         prompt="Twelve oranges are shared equally among three children. How many oranges does each child get?",
+        stt_prompt_tag="fair sharing with oranges",
         expected=(4,),
         fail_module=5,
         fail_week=17,
@@ -253,6 +271,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="divide_fact",
         domain="division",
         prompt="Twenty-four mangoes are packed equally into six trays. How many mangoes are on each tray?",
+        stt_prompt_tag="mangoes and trays",
         expected=(4,),
         fail_module=5,
         fail_week=17,
@@ -265,6 +284,7 @@ NUMERACY_DIAGNOSTIC_ITEMS: tuple[DiagnosticItem, ...] = (
         id="mixed_change_problem",
         domain="word_problems",
         prompt="You buy four mangoes at thirty naira each and pay with two hundred naira. How much change do you get?",
+        stt_prompt_tag="naira, mangoes, and change",
         expected=(80,),
         fail_module=6,
         fail_week=21,
@@ -280,6 +300,7 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
         id="lit_beginning_sound_ball",
         domain="phonemic_awareness_beginning",
         prompt="Let's play a sound game. What sound do you hear at the very beginning of the word ball? Ball.",
+        stt_prompt_tag="beginning sounds",
         fail_phase=1,
         fail_module=1,
         fail_week=1,
@@ -293,6 +314,7 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
         id="lit_rhyme_cat_hat",
         domain="rhyming",
         prompt="Good. Do cat and hat sound the same at the end? If yes, tell me another word that rhymes with cat.",
+        stt_prompt_tag="rhyming words",
         fail_phase=1,
         fail_module=1,
         fail_week=2,
@@ -307,6 +329,7 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
         id="lit_blend_cat",
         domain="phonemic_blending",
         prompt="Now I will say sounds slowly. What word do these sounds make: k, a, t?",
+        stt_prompt_tag="blended sounds and words",
         fail_phase=1,
         fail_module=1,
         fail_week=3,
@@ -320,6 +343,7 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
         id="lit_blend_ship",
         domain="phonemic_blending",
         prompt="Excellent. What word do these sounds make: sh, i, p?",
+        stt_prompt_tag="blended sounds and words",
         fail_phase=1,
         fail_module=1,
         fail_week=4,
@@ -333,6 +357,7 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
         id="lit_letter_sound_s",
         domain="letter_sound_knowledge",
         prompt="Do you know the sounds letters make? What sound does the letter S make?",
+        stt_prompt_tag="letter sounds",
         fail_phase=1,
         fail_module=5,
         fail_week=10,
@@ -346,6 +371,7 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
         id="lit_spell_sat",
         domain="word_reading",
         prompt="I am going to spell a short word. S, A, T. What word is that?",
+        stt_prompt_tag="spoken words from letter sounds",
         fail_phase=2,
         fail_module=6,
         fail_week=13,
@@ -359,6 +385,7 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
         id="lit_story_dog_gate",
         domain="listening_comprehension",
         prompt="Listen to this tiny story. The big dog ran to the gate. It barked at the man. The man jumped back. What did the dog do?",
+        stt_prompt_tag="story comprehension",
         fail_phase=1,
         fail_module=3,
         fail_week=5,
@@ -856,6 +883,7 @@ def _item_payload(item: DiagnosticItem) -> dict[str, Any]:
         "id": item.id,
         "domain": item.domain,
         "prompt": item.prompt,
+        "stt_prompt_tag": item.stt_prompt_tag,
         "expected": list(item.expected),
         "fail_placement": placement_for_failed_item(item),
     }
@@ -866,6 +894,7 @@ def _literacy_item_payload(item: LiteracyDiagnosticItem) -> dict[str, Any]:
         "id": item.id,
         "domain": item.domain,
         "prompt": item.prompt,
+        "stt_prompt_tag": item.stt_prompt_tag,
         "fail_placement": literacy_placement_for_failed_item(item),
     }
 

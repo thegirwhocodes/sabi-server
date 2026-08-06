@@ -52,6 +52,13 @@ def main() -> int:
     ok &= check("opens_call_detail", "/admin/calls/${encodeURIComponent(id)}" in html)
     ok &= check("opens_feedback_for_call", "/admin/feedback/${encodeURIComponent(id)}" in html)
     ok &= check("accepts_simple_key_param", 'params.get("key")' in html and '"X-Admin-Pin"' in html)
+    ok &= check(
+        "remembers_read_only_access_and_hides_pin_from_url",
+        'localStorage.setItem("sabi_admin_key", accessKey)' in html
+        and 'params.delete("pin")' in html
+        and "history.replaceState" in html
+        and "read-only review access" in html,
+    )
     ok &= check("propagates_key_to_audio_tags", "${authParamName}=${encodeURIComponent(accessKey)}" in html)
     ok &= check(
         "direct_call_posts_without_exposing_secrets",

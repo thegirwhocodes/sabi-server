@@ -917,7 +917,7 @@ def render_admin_review_page() -> str:
       </nav>
       <div class="side-foot">
         <div class="health"><span class="health-dot" id="health-dot"></span><span id="health-text">Checking systems...</span></div>
-        <div>Board console · read-only PIN</div>
+        <div>Board console · read-only review access</div>
       </div>
     </aside>
     <div class="content">
@@ -985,6 +985,16 @@ def render_admin_review_page() -> str:
     const params = new URLSearchParams(window.location.search);
     const accessKey = params.get("key") || params.get("api_key") || params.get("pin") || localStorage.getItem("sabi_admin_key") || "";
     if (accessKey) localStorage.setItem("sabi_admin_key", accessKey);
+    // A successful access link is a one-time browser sign-in. Remember it,
+    // then remove the credential from the address bar so Naomi can bookmark
+    // and use the clean backend URL without signing in again.
+    if (accessKey && (params.has("key") || params.has("api_key") || params.has("pin"))) {
+      params.delete("key");
+      params.delete("api_key");
+      params.delete("pin");
+      const cleanQuery = params.toString();
+      history.replaceState(null, "", `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}${window.location.hash}`);
+    }
     const headers = accessKey ? {"X-Admin-Pin": accessKey} : {};
     const authParamName = params.get("api_key") ? "api_key" : "key";
     const state = {

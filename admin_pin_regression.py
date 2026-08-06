@@ -21,6 +21,12 @@ def main() -> int:
     ok &= check("accepts_pin_header", 'request.headers.get("X-Admin-Pin")' in source)
     ok &= check("limits_pin_to_admin_paths", 'path.startswith("/admin/")' in source)
     ok &= check("limits_pin_to_read_only_methods", "READ_ONLY_ADMIN_METHODS" in source)
+    ok &= check(
+        "allows_private_read_only_ip_allowlist",
+        'SABI_ADMIN_TRUSTED_IPS = frozenset(' in source
+        and 'os.getenv("SABI_ADMIN_TRUSTED_IPS", "")' in source
+        and 'self._client_ip(request) in SABI_ADMIN_TRUSTED_IPS' in source,
+    )
     ok &= check("keeps_full_api_key_path", "if key != SABI_API_KEY" in source)
     return 0 if ok else 1
 

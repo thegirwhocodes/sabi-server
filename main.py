@@ -190,6 +190,11 @@ app = FastAPI(
 # API key authentication — protects AI endpoints from unauthorized use
 SABI_API_KEY = get_secret("SABI_API_KEY")
 SABI_ADMIN_PIN = get_secret("SABI_ADMIN_PIN", "123")
+SABI_ADMIN_TRUSTED_IPS = frozenset(
+    value.strip()
+    for value in os.getenv("SABI_ADMIN_TRUSTED_IPS", "").split(",")
+    if value.strip()
+)
 TRUST_API_KEY_FOR_RATE_LIMIT_BYPASS = os.getenv(
     "SABI_TRUST_API_KEY_FOR_RATE_LIMIT_BYPASS", "1"
 ).strip().lower() not in {"0", "false", "no"}
@@ -265,6 +270,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
+    @staticmethod
+    def _client_ip(request: Request) -> str:
+        # nginx replaces X-Real-IP with the actual connecting address. Fall
+        # back to the final X-Forwarded-For hop or Starlette's peer address for
+        # local/test deployments.
+        real_ip = str(request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip
+        forwarded = str(request.headers.get("x-forwarded-for") or "").strip()
+        if forwarded:
+            return forwarded.rsplit(",", 1)[-1].strip()
+        return request.client.host if request.client else "unknown"
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if path in OPEN_PATHS or path.startswith(OPEN_PREFIXES):
@@ -283,6 +301,13 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             and request.method in READ_ONLY_ADMIN_METHODS
             and path.startswith("/admin/")
             and key == SABI_ADMIN_PIN
+        ):
+            return await call_next(request)
+        if (
+            SABI_ADMIN_TRUSTED_IPS
+            and request.method in READ_ONLY_ADMIN_METHODS
+            and path.startswith("/admin/")
+            and self._client_ip(request) in SABI_ADMIN_TRUSTED_IPS
         ):
             return await call_next(request)
         if key != SABI_API_KEY:

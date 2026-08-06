@@ -8,7 +8,7 @@ the Gemini route is evaluated.
 
 Every request uses Naomi's broad human-conversation prompt:
 
-> A Nigerian child on a noisy 8kHz phone call is saying their name, introducing themselves and answering a numeracy lesson in sweets. This could also be the child calling the name of the AI, Sabi, a complaint about the quality of the call or lesson, complaining they can't hear the agent, or some other normal human phrase. Reply with their response
+> A Nigerian child on a noisy 8kHz phone call is saying their name, introducing themselves and walking through a numeracy lesson in sweets. This could also be the child calling the name of the AI, Sabi, a complaint about the quality of the call or lesson, complaining they can't hear the agent, or some other normal human phrase. Reply with their response
 
 The course (`numeracy` or `literacy`) and the final safe topic (`sweets`,
 `naira`, `beginning sounds`, and so on) change automatically from the current

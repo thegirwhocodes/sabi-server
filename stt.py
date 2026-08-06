@@ -245,7 +245,7 @@ def build_gemini_curriculum_prompt(context: str, mode: str = "general") -> tuple
     ).strip()
     lesson = f"a {course} lesson" + (f" in {label}" if label else "")
     prompt = (
-        f"{global_prompt} is saying their name, introducing themselves and answering {lesson}. "
+        f"{global_prompt} is saying their name, introducing themselves and walking through {lesson}. "
         f"{GEMINI_RESPONSE_CONTEXT}"
     ).strip()
     return prompt, course, label

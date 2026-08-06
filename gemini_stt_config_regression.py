@@ -127,7 +127,7 @@ try:
     check("default timeout allows Flash-Lite to finish", captured["timeout"] == 5.5)
     parts = captured["payload"]["contents"][0]["parts"]
     check("audio part sent inline", "inlineData" in parts[0])
-    check("curriculum prompt in payload", "answering a numeracy lesson" in parts[1]["text"])
+    check("curriculum prompt in payload", "walking through a numeracy lesson" in parts[1]["text"])
     check("prompt keeps exact response instruction", "Reply with their response" in parts[1]["text"])
     check(
         "every prompt allows Sabi, complaints, can't-hear, and ordinary speech",
@@ -181,7 +181,7 @@ try:
         mode="literacy",
     )
     check("global noisy-phone prompt is on the literacy turn", "noisy 8kHz phone call" in literacy_prompt)
-    check("literacy course is explicit", "answering a literacy lesson" in literacy_prompt)
+    check("literacy course is explicit", "walking through a literacy lesson" in literacy_prompt)
     check("beginning-sound topic is explicit", "in beginning sounds" in literacy_prompt)
     check("curriculum prompt does not leak exact tutor question", "dog" not in literacy_prompt.lower())
 

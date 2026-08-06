@@ -61,7 +61,7 @@ def main() -> int:
         flags=[],
         directory=ROOT,
         stt_provider="gemini",
-        stt_prompt="A Nigerian child is answering a numeracy lesson in naira. Reply with their response",
+        stt_prompt="A Nigerian child is walking through a numeracy lesson in naira. Reply with their response",
         stt_prompt_mode="curriculum",
         stt_prompt_label="naira",
     )
@@ -76,7 +76,7 @@ def main() -> int:
     ok &= check(
         "turn_sidecar_has_exact_gemini_prompt",
         turn.get("user", {}).get("stt_prompt")
-        == "A Nigerian child is answering a numeracy lesson in naira. Reply with their response"
+        == "A Nigerian child is walking through a numeracy lesson in naira. Reply with their response"
         and turn.get("user", {}).get("stt_prompt_mode") == "curriculum"
         and turn.get("user", {}).get("stt_prompt_label") == "naira",
         turn.get("user", {}),

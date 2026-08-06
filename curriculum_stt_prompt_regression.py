@@ -40,7 +40,7 @@ def check_prompt(name: str, source: str, course: str) -> None:
         mode="literacy" if course == "literacy" else "general",
     )
     assert actual_course == course, f"{name}: expected {course}, got {actual_course}"
-    assert f"answering a {course} lesson" in prompt, f"{name}: missing course"
+    assert f"walking through a {course} lesson" in prompt, f"{name}: missing course"
     assert all(required in prompt for required in REQUIRED), f"{name}: incomplete universal prompt"
     # The curriculum row selects only a safe category. Its full question,
     # numbers, examples, and expected answer must never be copied into Gemini.

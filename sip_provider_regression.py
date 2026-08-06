@@ -26,6 +26,7 @@ def main() -> int:
     dialplan = (ROOT / "asterisk" / "extensions.conf").read_text()
     example_env = (ROOT / ".env.example").read_text()
     compose = (ROOT / "docker-compose.yml").read_text()
+    firewall = (ROOT / "ops" / "apply-docker-firewall.sh").read_text()
 
     twilio = section(pjsip, "twilio")
     twilio_aor = section(pjsip, "twilio-aor")
@@ -58,7 +59,28 @@ def main() -> int:
     )
     ok &= check(
         "twilio_signaling_is_allowlisted",
-        "endpoint=twilio" in twilio_identify and "match=54.172.60.0/23" in twilio_identify,
+        "endpoint=twilio" in twilio_identify
+        and all(
+            f"match={cidr}" in twilio_identify and f'"{cidr}"' in firewall
+            for cidr in (
+                "54.172.60.0/30",
+                "54.244.51.0/30",
+                "54.171.127.192/30",
+                "35.156.191.128/30",
+                "54.65.63.192/30",
+                "54.169.127.128/30",
+                "54.252.254.64/30",
+                "177.71.206.192/30",
+            )
+        ),
+    )
+    ok &= check(
+        "firewall_accepts_carriers_before_default_sip_drop",
+        'ensure_v4_rule -i enp4s0 -p udp -s "$AT_IP" --dport 5060 -j ACCEPT' in firewall
+        and 'ensure_v4_rule -i enp4s0 -p udp -s "$cidr" --dport 5060 -j ACCEPT' in firewall
+        and 'ensure_v4_rule -i enp4s0 -p udp --dport 5060 -j DROP' in firewall
+        and firewall.index('ensure_v4_rule -i enp4s0 -p udp --dport 5060 -j DROP')
+        < firewall.index('ensure_v4_rule -i enp4s0 -p udp -s "$AT_IP" --dport 5060 -j ACCEPT'),
     )
     ok &= check(
         "twilio_inbound_reuses_production_lane",

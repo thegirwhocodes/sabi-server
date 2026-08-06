@@ -17,6 +17,27 @@ The old turn-by-turn `voice_twilio.py` webhook is not part of this route.
 - Lesson lane: `AudioSocket(${AS_UUID},sabi:9020)`
 - Africa's Talking endpoint remains configured as `africastalking` for rollback
 
+## Firewall prerequisite and August 6 incident
+
+Twilio must not be selected until UDP SIP responses from every documented
+Twilio regional signaling `/30` can reach Asterisk on port 5060. The production
+firewall source of truth is `ops/apply-docker-firewall.sh`.
+
+During the first controlled test on August 6, one operator request produced
+eight PSTN calls. The application logged only one originate and no callback
+retries. Asterisk repeatedly transmitted the unanswered SIP `INVITE` because
+the old firewall accepted only Africa's Talking as a SIP source. Twilio created
+new PSTN legs from those retransmissions, while Asterisk never received the SIP
+answer; this is also why answered calls carried no Sabi audio.
+
+Safety state after the incident:
+
+- automatic callback retries default off and are capped at one attempt;
+- production outbound routing stays on Africa's Talking until the Twilio
+  firewall rules are installed and verified;
+- never use a real phone to verify the firewall itself—first prove a Twilio SIP
+  response reaches Asterisk, then request one explicit human test call.
+
 The server chooses the outbound carrier with:
 
 ```dotenv
@@ -43,5 +64,6 @@ destinations can be called, and public use requires upgrading the account.
 Official references:
 
 - https://www.twilio.com/docs/sip-trunking
+- https://www.twilio.com/docs/sip-trunking/ip-addresses
 - https://www.twilio.com/docs/sip-trunking/api
 - https://www.twilio.com/docs/usage/tutorials/how-to-use-your-free-trial-account

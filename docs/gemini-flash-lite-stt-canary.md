@@ -6,18 +6,19 @@ the Gemini route is evaluated.
 
 ## Per-turn prompt policy
 
-Every request uses Naomi's broad human-conversation prompt:
+Every request uses Naomi's exact-current-question prompt. For example:
 
-> A Nigerian child on a noisy 8kHz phone call is saying their name, introducing themselves and walking through a numeracy lesson in sweets. This could also be the child calling the name of the AI, Sabi, a complaint about the quality of the call or lesson, complaining they can't hear the agent, or some other normal human phrase. Reply with their response
+> A Nigerian child on a noisy 8kHz phone call is walking through a numeracy lesson, with Sabi their AI tutor, answering the question: "Do you have five fingers on one hand?" They could also be complaining about the quality of the call or lesson or some other human phrase. Reply with their response.
 
-The course (`numeracy` or `literacy`) and the final safe topic (`sweets`,
-`naira`, `beginning sounds`, and so on) change automatically from the current
-curriculum turn. The question's operands, examples, and expected answer are
-never sent to Gemini. The exact prompt used is stored on every call-review
-turn so prompt behavior remains auditable.
+The course (`numeracy` or `literacy`) and the exact final question or instruction
+change automatically from the current tutor turn. A preceding acknowledgement
+is discarded, so an old object such as `sweets` cannot mislabel a new question
+about `mangoes`. The correct answer is never added as a separate hint. The exact
+prompt used is stored on every call-review turn so prompt behavior remains
+auditable.
 
-Gemini `generateContent` calls are stateless, so the shared context and turn
-tag are attached to every audio request. A single persistent HTTP client reuses
+Gemini `generateContent` calls are stateless, so the shared context and current
+question are attached to every audio request. A single persistent HTTP client reuses
 connections across turns. Thinking is set to `minimal`, and the canary timeout
 is 5.5 seconds.
 

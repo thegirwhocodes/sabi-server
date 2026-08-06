@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-"""Prove every live curriculum row receives Naomi's universal Gemini prompt."""
+"""Prove curriculum turns receive Naomi's exact-question Gemini prompt."""
 
 from __future__ import annotations
-
-import re
 
 from curriculum_path import LESSON_TITLES, LITERACY_LESSON_TITLES
 from diagnostic_flow import LITERACY_DIAGNOSTIC_ITEMS, NUMERACY_DIAGNOSTIC_ITEMS
 from learning_state import SCAFFOLD_LADDERS
-from stt import build_gemini_curriculum_prompt
+from stt import _current_tutor_question, build_gemini_curriculum_prompt
 
 
 REQUIRED = (
     "A Nigerian child on a noisy 8kHz phone call",
-    "saying their name, introducing themselves",
-    "name of the AI, Sabi",
-    "a complaint about the quality of the call or lesson",
-    "complaining they can't hear the agent",
-    "some other normal human phrase",
-    "Reply with their response",
+    "with Sabi their AI tutor",
+    "answering the question:",
+    "complaining about the quality of the call or lesson",
+    "some other human phrase",
+    "Reply with their response.",
 )
 
 LITERACY_SCAFFOLDS = {
@@ -42,11 +39,8 @@ def check_prompt(name: str, source: str, course: str) -> None:
     assert actual_course == course, f"{name}: expected {course}, got {actual_course}"
     assert f"walking through a {course} lesson" in prompt, f"{name}: missing course"
     assert all(required in prompt for required in REQUIRED), f"{name}: incomplete universal prompt"
-    # The curriculum row selects only a safe category. Its full question,
-    # numbers, examples, and expected answer must never be copied into Gemini.
-    assert source not in prompt, f"{name}: leaked full curriculum source"
-    numeric_tokens = re.findall(r"\b\d+\b", prompt)
-    assert not numeric_tokens, f"{name}: leaked a numeric operand: {numeric_tokens}"
+    expected = _current_tutor_question(context)
+    assert expected in prompt, f"{name}: missing exact final tutor question or instruction"
 
 
 def main() -> int:

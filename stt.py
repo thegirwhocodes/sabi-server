@@ -110,14 +110,11 @@ LITERACY_WORDS = {
 
 WHISPER_CLI_PROVIDERS = {"whisper_cli", "openai_whisper", "openai-whisper", "cli_whisper"}
 
-# Every Gemini turn uses the same broad human-conversation frame that recovered
-# both `Sabi` and `one sweet` from the Aug 5 2:47 PM call. The curriculum only
-# supplies a safe course/topic label; operands and expected answers never enter
-# the STT prompt.
+# Every Gemini turn uses Naomi's exact-question frame. The current question or
+# instruction is useful acoustic context; the correct answer is never added.
 GEMINI_RESPONSE_CONTEXT = (
-    "This could also be the child calling the name of the AI, Sabi, a complaint about "
-    "the quality of the call or lesson, complaining they can't hear the agent, or some "
-    "other normal human phrase. Reply with their response"
+    "They could also be complaining about the quality of the call or lesson or some "
+    "other human phrase. Reply with their response."
 )
 
 NUMERACY_CONTEXT_LABELS: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -144,14 +141,40 @@ NUMERACY_CONTEXT_LABELS: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
-def _context_sections(context: str) -> tuple[str, str]:
-    """Return the exact tutor turn first and curriculum metadata second."""
+def _raw_context_sections(context: str) -> tuple[str, str]:
+    """Return the tutor turn and metadata while preserving display text."""
     raw = " ".join(str(context or "").split())
     marker = "Exact recent tutor prompt:"
     if marker in raw:
         metadata, exact = raw.split(marker, 1)
-        return _plain_text(exact), _plain_text(metadata)
-    return _plain_text(raw), ""
+        return exact.strip(), metadata.strip()
+    return raw.strip(), ""
+
+
+def _context_sections(context: str) -> tuple[str, str]:
+    """Return normalized tutor turn first and curriculum metadata second."""
+    exact, metadata = _raw_context_sections(context)
+    return _plain_text(exact), _plain_text(metadata)
+
+
+def _current_tutor_question(context: str) -> str:
+    """Extract the final question or instruction the child is answering now."""
+    exact, _metadata = _raw_context_sections(context)
+    if not exact:
+        return ""
+    if exact.endswith("?"):
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", exact)
+            if sentence.strip()
+        ]
+        current = sentences[-1] if sentences else exact
+    else:
+        # Keep non-question instructions intact. This also avoids treating
+        # abbreviations such as "vs." as sentence boundaries.
+        current = exact
+    # Keep the wrapper unambiguous if Sabi happens to use quotation marks.
+    return current.replace('"', "'")
 
 
 def _contains_context_phrase(text: str, phrase: str) -> bool:
@@ -236,16 +259,17 @@ def _curriculum_course(context: str, mode: str) -> str:
 
 
 def build_gemini_curriculum_prompt(context: str, mode: str = "general") -> tuple[str, str, str]:
-    """Build Naomi's universal prompt with one non-answer curriculum label."""
+    """Build Naomi's exact-current-question prompt without an answer hint."""
     course = _curriculum_course(context, mode)
     label = _literacy_context_label(context) if course == "literacy" else _numeracy_context_label(context)
     global_prompt = os.getenv(
         "SABI_GEMINI_STT_GLOBAL_PROMPT",
         "A Nigerian child on a noisy 8kHz phone call",
     ).strip()
-    lesson = f"a {course} lesson" + (f" in {label}" if label else "")
+    question = _current_tutor_question(context) or "Please respond to Sabi."
     prompt = (
-        f"{global_prompt} is saying their name, introducing themselves and walking through {lesson}. "
+        f"{global_prompt} is walking through a {course} lesson, with Sabi their AI tutor, "
+        f'answering the question: "{question}" '
         f"{GEMINI_RESPONSE_CONTEXT}"
     ).strip()
     return prompt, course, label

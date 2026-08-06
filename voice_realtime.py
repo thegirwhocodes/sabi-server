@@ -488,10 +488,10 @@ def _recent_assistant_stt_context(
     messages: list[dict[str, str]],
     state: dict | None = None,
 ) -> str:
-    """Give STT the current lesson metadata and exact tutor question.
+    """Give STT the current lesson metadata and exact tutor elicitation.
 
-    This deliberately describes the expected response *type* but never inserts
-    the correct answer, which would make a generative audio model hallucinate.
+    Gemini receives the exact question or instruction the learner is responding
+    to, but never the correct answer supplied separately as a hint.
     """
     state = state or {}
     literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}

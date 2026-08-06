@@ -482,6 +482,9 @@ def render_admin_review_page() -> str:
     .timeline-dot.sabi { background: var(--gold-deep); }
     .timeline-text { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; background: #fffdf8; border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; }
     .timeline-note { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+    .stt-prompt-box { display: grid; gap: 7px; padding: 10px 11px; border: 1px solid #c9b27f; border-radius: 9px; background: #fbf3df; }
+    .stt-prompt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .stt-prompt-text { color: #3f3524; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
     .audio-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .turn-card { border: 1px solid var(--line); border-radius: 13px; background: var(--card); overflow: hidden; }
     .turn-head { padding: 11px 14px; background: #faf5e8; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
@@ -3464,6 +3467,7 @@ def render_admin_review_page() -> str:
             <div class="timeline-text">${escapeHtml(childText)}</div>
             <div class="timeline-note">This is what Sabi transcribed from the clip above.${escapeHtml(confidence)}</div>
             ${lessonText && lessonText !== childText ? `<div class="timeline-note">Lesson text after cleanup: ${escapeHtml(lessonText)}</div>` : ""}
+            ${sttPromptBox(user)}
             ${user.has_audio ? `<button class="stt-compare-btn" data-stt-compare="${escapeHtml(turn.turn_index)}">Compare Groq vs Intron on this clip</button><div id="stt-compare-${escapeHtml(turn.turn_index)}"></div>` : ""}
             ${user.has_audio ? `<div class="stt-correction-box" data-correction-box="${escapeHtml(turn.turn_index)}">
               <div class="mini-label">Human-correct this clip</div>
@@ -3486,6 +3490,20 @@ def render_admin_review_page() -> str:
         </div>
       </div>`;
     }
+    function sttPromptBox(user) {
+      if (String(user.stt_provider || "").toLowerCase() !== "gemini") return "";
+      const prompt = String(user.stt_prompt || "").trim();
+      const mode = String(user.stt_prompt_mode || "").trim();
+      const label = String(user.stt_prompt_label || "").trim();
+      const metadata = [mode ? `mode: ${mode}` : "", label ? `lesson tag: ${label}` : ""].filter(Boolean).join(" · ");
+      return `<div class="stt-prompt-box">
+        <div class="stt-prompt-head">
+          <span class="mini-label">Exact prompt sent to Gemini STT</span>
+          ${metadata ? `<span class="timeline-note">${escapeHtml(metadata)}</span>` : ""}
+        </div>
+        <div class="stt-prompt-text">${escapeHtml(prompt || "The exact prompt was not recorded for this older turn.")}</div>
+      </div>`;
+    }
     function turnBlock(turn) {
       const user = turn.user || {};
       const assistant = turn.assistant || {};
@@ -3506,6 +3524,7 @@ def render_admin_review_page() -> str:
               <div class="quote">Transcribed: ${escapeHtml(user.stt_transcript || "")}</div>
               <div class="quote">Lesson text: ${escapeHtml(user.normalized_transcript || "")}</div>
               <div class="small">Confidence ${escapeHtml(user.stt_confidence ?? "")} · ${fmtSeconds(user.audio_seconds)}${user.stt_provider ? ` · heard by ${escapeHtml(providerLabel(user.stt_provider))}` : ""}</div>
+              ${sttPromptBox(user)}
             </div>
             <div class="section">
               <h3>Sabi</h3>

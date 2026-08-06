@@ -160,6 +160,14 @@ def main() -> int:
     )
     ok &= check("renders_exact_tts_text", "Sent to TTS" in html and "assistant.tts_text" in html)
     ok &= check(
+        "renders_exact_gemini_stt_prompt_per_turn",
+        "Exact prompt sent to Gemini STT" in html
+        and "user.stt_prompt" in html
+        and "user.stt_prompt_mode" in html
+        and "user.stt_prompt_label" in html
+        and "The exact prompt was not recorded for this older turn." in html,
+    )
+    ok &= check(
         "supports_consent_separated_human_stt_corrections",
         "Human-correct this clip" in html
         and "consent_for_model_training" in html

@@ -60,19 +60,30 @@ def main() -> int:
         timings={"stt_seconds": 0.24, "llm_seconds": 1.1, "tts_seconds": 0.38},
         flags=[],
         directory=ROOT,
-        stt_provider="groq",
+        stt_provider="gemini",
+        stt_prompt="A Nigerian child is answering a numeracy lesson in naira. Reply with their response",
+        stt_prompt_mode="curriculum",
+        stt_prompt_label="naira",
     )
     sidecar = ROOT / f"call_{call_uuid}.json"
     data = json.loads(sidecar.read_text())
     turn = data["turns"][0]
     ok &= check(
         "turn_sidecar_has_stt_provider",
-        turn.get("user", {}).get("stt_provider") == "groq",
+        turn.get("user", {}).get("stt_provider") == "gemini",
+        turn.get("user", {}),
+    )
+    ok &= check(
+        "turn_sidecar_has_exact_gemini_prompt",
+        turn.get("user", {}).get("stt_prompt")
+        == "A Nigerian child is answering a numeracy lesson in naira. Reply with their response"
+        and turn.get("user", {}).get("stt_prompt_mode") == "curriculum"
+        and turn.get("user", {}).get("stt_prompt_label") == "naira",
         turn.get("user", {}),
     )
     ok &= check(
         "call_rollup_lists_stt_providers_used",
-        data.get("stt_providers_used") == ["groq"],
+        data.get("stt_providers_used") == ["gemini"],
         data.get("stt_providers_used"),
     )
 
@@ -99,7 +110,7 @@ def main() -> int:
     data = json.loads(sidecar.read_text())
     ok &= check(
         "call_rollup_aggregates_multiple_providers",
-        data.get("stt_providers_used") == ["groq", "intron"],
+        data.get("stt_providers_used") == ["gemini", "intron"],
         data.get("stt_providers_used"),
     )
 
@@ -156,7 +167,7 @@ def main() -> int:
     item = listing["items"][0] if listing["items"] else {}
     ok &= check(
         "admin_calls_index_exposes_stt_providers_used",
-        sorted(item.get("stt_providers_used") or []) == ["groq", "intron", "local_whisper"],
+        sorted(item.get("stt_providers_used") or []) == ["gemini", "intron", "local_whisper"],
         item.get("stt_providers_used"),
     )
 

@@ -172,6 +172,21 @@ try:
     check("global noisy-phone prompt is on the name turn", "noisy 8kHz phone call" in name_prompt)
     check("name turn keeps broad name context", "saying their name" in name_prompt)
     check("name turn explicitly allows calling Sabi", "name of the AI, Sabi" in name_prompt)
+    greeting_name_prompt = sst._gemini_prompt(
+        "Lesson metadata: course=numeracy; skill=market numeracy. "
+        "Exact recent tutor prompt: Hello! I'm Sabi, your learning friend. What is your name?",
+        mode="general",
+    )
+    check(
+        "learning-friend greeting is not mislabeled as fair sharing",
+        "in fair sharing" not in greeting_name_prompt,
+    )
+    sharing_prompt = sst._gemini_prompt(
+        "Lesson metadata: course=numeracy; skill=division. "
+        "Exact recent tutor prompt: Share six mangoes equally between two friends. How many does each get?",
+        mode="general",
+    )
+    check("real sharing question keeps fair-sharing tag", "in fair sharing" in sharing_prompt)
 
     # ---- strict Gemini-first: missing key becomes an unclear turn, not another provider ----
     sst._gemini_key = ""

@@ -141,7 +141,6 @@ NUMERACY_CONTEXT_LABELS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("coin", "coins"), "coins"),
     (("bag", "bags"), "bags"),
     (("tray", "trays"), "trays"),
-    (("child", "children", "friend", "friends", "people", "person"), "fair sharing"),
 )
 
 
@@ -162,6 +161,18 @@ def _contains_context_phrase(text: str, phrase: str) -> bool:
 def _numeracy_context_label(context: str) -> str:
     exact, metadata = _context_sections(context)
     for source in (exact, metadata):
+        # A person noun alone is not a lesson topic. In particular, the
+        # onboarding greeting calls Sabi a "learning friend"; treating that
+        # as fair-sharing context incorrectly biases the learner-name turn.
+        # Require an actual sharing/grouping cue before adding this label.
+        if any(
+            cue in source
+            for cue in (
+                "share", "shared", "sharing", "equally", "equal groups",
+                "each get", "each person gets", "between them",
+            )
+        ):
+            return "fair sharing"
         for phrases, label in NUMERACY_CONTEXT_LABELS:
             if any(_contains_context_phrase(source, phrase) for phrase in phrases):
                 return label

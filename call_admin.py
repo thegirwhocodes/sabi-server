@@ -260,6 +260,9 @@ def append_call_turn_review(
     flags: list[str] | None = None,
     directory: Path | None = None,
     stt_provider: str = "",
+    stt_prompt: str = "",
+    stt_prompt_mode: str = "",
+    stt_prompt_label: str = "",
     tts_provider: str = "",
 ) -> dict[str, Any] | None:
     """Attach one complete tutor turn to the call review sidecar.
@@ -296,6 +299,9 @@ def append_call_turn_review(
         timings=timings or {},
         flags=flags or [],
         stt_provider=stt_provider,
+        stt_prompt=stt_prompt,
+        stt_prompt_mode=stt_prompt_mode,
+        stt_prompt_label=stt_prompt_label,
         tts_provider=tts_provider,
     )
     turns = [
@@ -576,6 +582,9 @@ def _turn_review_record(
     timings: dict[str, Any],
     flags: list[str],
     stt_provider: str = "",
+    stt_prompt: str = "",
+    stt_prompt_mode: str = "",
+    stt_prompt_label: str = "",
     tts_provider: str = "",
 ) -> dict[str, Any]:
     state_before = _learning_state_review(learning_state_before or {})
@@ -590,6 +599,9 @@ def _turn_review_record(
             "stt_transcript": stt_transcript,
             "stt_confidence": round(float(stt_confidence or 0), 3),
             "stt_provider": str(stt_provider or ""),
+            "stt_prompt": str(stt_prompt or ""),
+            "stt_prompt_mode": str(stt_prompt_mode or ""),
+            "stt_prompt_label": str(stt_prompt_label or ""),
             "normalized_transcript": normalized_transcript,
             "normalization_changed": normalized_changed,
             "input_audio_note": (

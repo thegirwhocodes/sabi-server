@@ -1,8 +1,7 @@
 """Regression for the Gemini multimodal STT provider.
 
-Covers: closed-vocab shape hints (number / literacy word / name / general),
-name-context detection, Gemini payload construction + response parsing, and
-graceful fallback when GEMINI_API_KEY is absent. Runs with no GPU/network:
+Covers the universal curriculum prompt, safe course/topic labels, payload
+construction + response parsing, and strict failure behavior. Runs with no GPU/network:
 httpx.post is monkeypatched and faster-whisper is never loaded (a GROQ key is
 present so the local model is skipped).
 """
@@ -20,10 +19,7 @@ os.environ["SABI_STT_VAD_GATE"] = "0"
 
 import httpx
 
-from stt import SpeechToText, _expects_name
-
-# _gemini_shape_hint is a method; call it unbound (it only reads `context`).
-shape_hint = SpeechToText._gemini_shape_hint
+from stt import SpeechToText, _expects_name, build_gemini_curriculum_prompt
 
 
 def _tiny_wav() -> str:
@@ -52,23 +48,28 @@ check("name cue detected", _expects_name("Okay, what is your name?"))
 check("name cue variant", _expects_name("Tell me your name after the beep"))
 check("non-name not detected", not _expects_name("How many mangoes are left?"))
 
-# ---- closed-vocab shape hints (the mode that won the bake-off) ----
-check("number hint", "NUMBER" in shape_hint(None, "How many are left? Count them."))
-check("literacy-word hint", "one word" in shape_hint(None, "Can you say a word that rhymes with hat?").lower())
-check(
-    "literacy-sound hint",
-    "speech sound or letter sound" in shape_hint(None, "What sound comes first at the start of dog?").lower(),
+# ---- universal curriculum prompt ----
+sweets_prompt, sweets_course, sweets_label = build_gemini_curriculum_prompt(
+    "Lesson metadata: course=numeracy; lesson_title=Subtraction. "
+    "Exact recent tutor prompt: You have two sweets and give one away. How many sweets are left?"
 )
-check("name hint", "name" in shape_hint(None, "What is your name?").lower())
-check("general hint", "Transcribe exactly" in shape_hint(None, "Tell me about your day"))
-check(
-    "numeric hint preserves repeat requests",
-    "Never turn a control request into a guessed answer" in shape_hint(None, "How many are left?"),
+check("sweets turn is numeracy", sweets_course == "numeracy")
+check("sweets unit is preserved", sweets_label == "sweets" and "numeracy lesson in sweets" in sweets_prompt)
+check("universal prompt includes name and introduction", "saying their name, introducing themselves" in sweets_prompt)
+check("universal prompt explicitly names Sabi", "name of the AI, Sabi" in sweets_prompt)
+check("universal prompt includes can't-hear complaint", "can't hear the agent" in sweets_prompt)
+check("universal prompt includes normal human phrase", "some other normal human phrase" in sweets_prompt)
+check("universal prompt never leaks operands", "two" not in sweets_prompt and "one" not in sweets_prompt)
+
+literacy_universal, literacy_course, literacy_label = build_gemini_curriculum_prompt(
+    "Lesson metadata: course=literacy; lesson_title=Beginning Sounds. "
+    "Exact recent tutor prompt: What sound comes first at the start of dog?",
+    mode="literacy",
 )
-check(
-    "numeric hint names switch-subject requests",
-    "asks to switch subjects" in shape_hint(None, "How many mangoes are left?"),
-)
+check("literacy turn is literacy", literacy_course == "literacy")
+check("literacy topic is preserved", literacy_label == "beginning sounds")
+check("literacy prompt uses same human alternatives", "name of the AI, Sabi" in literacy_universal and "can't hear" in literacy_universal)
+check("literacy prompt never leaks example word", "dog" not in literacy_universal.lower())
 
 # ---- payload construction + response parsing ----
 captured = {}
@@ -122,12 +123,13 @@ try:
     check("default timeout allows Flash-Lite to finish", captured["timeout"] == 5.5)
     parts = captured["payload"]["contents"][0]["parts"]
     check("audio part sent inline", "inlineData" in parts[0])
-    check("number tag in prompt", "responding to a numeracy question" in parts[1]["text"])
-    check("number tag keeps exact response instruction", "Reply with their response." in parts[1]["text"])
+    check("curriculum prompt in payload", "answering a numeracy lesson" in parts[1]["text"])
+    check("prompt keeps exact response instruction", "Reply with their response" in parts[1]["text"])
     check(
-        "every prompt allows complaints or the child calling Sabi",
-        parts[1]["text"].endswith(
-            "This could also be a complaint about the quality of the call or lesson, or the child calling your name."
+        "every prompt allows Sabi, complaints, can't-hear, and ordinary speech",
+        all(
+            phrase in parts[1]["text"]
+            for phrase in ("name of the AI, Sabi", "quality of the call or lesson", "can't hear the agent", "normal human phrase")
         ),
     )
     check(
@@ -140,7 +142,6 @@ try:
     os.environ["SABI_GEMINI_STT_PROMPT_MODE"] = "lesson_exact"
     exact_prompt = sst._gemini_prompt("What is your name?", mode="general")
     check("exact AI Studio prompt configurable", "Reply with their responses" in exact_prompt)
-    check("exact prompt also gets control context", exact_prompt.endswith("or the child calling your name."))
     os.environ.pop("SABI_GEMINI_STT_PROMPT_MODE", None)
 
     literacy_prompt = sst._gemini_prompt(
@@ -149,25 +150,24 @@ try:
         mode="literacy",
     )
     check("global noisy-phone prompt is on the literacy turn", "noisy 8kHz phone call" in literacy_prompt)
-    check("phonemics tag is explicit", "literacy phonemics question" in literacy_prompt)
-    check("beginning-sound response type is explicit", "one spoken beginning letter sound" in literacy_prompt)
-    check("compact tag does not leak exact tutor question", "dog" not in literacy_prompt.lower())
-    check("compact tag contains no example answer", " d, " not in literacy_prompt.lower())
+    check("literacy course is explicit", "answering a literacy lesson" in literacy_prompt)
+    check("beginning-sound topic is explicit", "in beginning sounds" in literacy_prompt)
+    check("curriculum prompt does not leak exact tutor question", "dog" not in literacy_prompt.lower())
 
     naira_prompt = sst._gemini_prompt(
         "Lesson metadata: course=numeracy; skill=subtraction. "
         "Exact recent tutor prompt: You have five naira and spend three. How much is left?",
         mode="general",
     )
-    check("naira tag is explicit", "numeracy question in naira" in naira_prompt)
-    check("naira tag keeps exact response instruction", "Reply with their response." in naira_prompt)
+    check("naira context is explicit", "numeracy lesson in naira" in naira_prompt)
+    check("naira prompt keeps exact response instruction", "Reply with their response" in naira_prompt)
     check("global noisy-phone prompt is on the naira turn", "noisy 8kHz phone call" in naira_prompt)
     check("naira tag does not leak operands", "five" not in naira_prompt and "three" not in naira_prompt)
 
     name_prompt = sst._gemini_prompt("What is your name?", mode="general")
     check("global noisy-phone prompt is on the name turn", "noisy 8kHz phone call" in name_prompt)
-    check("name turn receives only a response-type tag", "saying their name" in name_prompt)
-    check("name tag keeps exact response instruction", "Reply with their response." in name_prompt)
+    check("name turn keeps broad name context", "saying their name" in name_prompt)
+    check("name turn explicitly allows calling Sabi", "name of the AI, Sabi" in name_prompt)
 
     # ---- strict Gemini-first: missing key becomes an unclear turn, not another provider ----
     sst._gemini_key = ""

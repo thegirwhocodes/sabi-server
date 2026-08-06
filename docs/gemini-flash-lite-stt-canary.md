@@ -6,23 +6,15 @@ evaluated.
 
 ## Per-turn prompt policy
 
-Every request contains the shared context:
+Every request uses Naomi's broad human-conversation prompt:
 
-> A Nigerian child on a noisy 8kHz phone call
+> A Nigerian child on a noisy 8kHz phone call is saying their name, introducing themselves and answering a numeracy lesson in sweets. This could also be the child calling the name of the AI, Sabi, a complaint about the quality of the call or lesson, complaining they can't hear the agent, or some other normal human phrase. Reply with their response
 
-Sabi then appends one compact tag selected from the current lesson state and
-the response type. Examples include:
-
-- `is saying their name. Reply with their response.`
-- `is responding to a numeracy question. Reply with their response.`
-- `is responding to a numeracy question in naira. Reply with their response.`
-- `is responding with one spoken beginning letter sound to a literacy phonemics question. Reply with the sound they say.`
-- `is responding to a literacy word question. Reply with their response.`
-
-The selector may inspect the tutor's latest question locally, but the tagged
-prompt does not send that question, its operands, examples, or the expected
-answer to Gemini. This gives the model the response category without turning
-the prompt into an answer hint.
+The course (`numeracy` or `literacy`) and the final safe topic (`sweets`,
+`naira`, `beginning sounds`, and so on) change automatically from the current
+curriculum turn. The question's operands, examples, and expected answer are
+never sent to Gemini. The exact prompt used is stored on every call-review
+turn so prompt behavior remains auditable.
 
 Gemini `generateContent` calls are stateless, so the shared context and turn
 tag are attached to every audio request. A single persistent HTTP client reuses
@@ -49,10 +41,10 @@ maximum length.
 SABI_STT_TEST_PROVIDER=gemini
 SABI_LITERACY_STT_TEST_PROVIDER=gemini
 SABI_GEMINI_STT_MODEL=gemini-3.5-flash-lite
-SABI_GEMINI_STT_PROMPT_MODE=tagged
+SABI_GEMINI_STT_PROMPT_MODE=curriculum
 SABI_GEMINI_STT_GLOBAL_PROMPT=A Nigerian child on a noisy 8kHz phone call
 SABI_GEMINI_STT_THINKING_LEVEL=minimal
-SABI_GEMINI_STT_TIMEOUT=3.5
+SABI_GEMINI_STT_TIMEOUT=5.5
 ```
 
 Keep `GEMINI_API_KEY` in the server secret store. Never put it in a request URL

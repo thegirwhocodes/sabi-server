@@ -25,6 +25,7 @@ import httpx
 from answer_matcher import extract_number
 from call_admin import merge_call_hangup_event, write_call_review_record
 from call_admin import append_call_turn_review, call_turn_audio_path, write_call_learning_summary
+from curriculum_path import resolve_literacy_lesson, resolve_numeracy_lesson
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
 from numeric_grading import analyze_latest_numeric_turn
@@ -549,20 +550,9 @@ def _recent_assistant_stt_context(
     """
     state = state or {}
     literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
-    numeric_context = has_numeric_lesson_context(messages)
-    course = "numeracy" if numeric_context else str(state.get("course") or "numeracy")
-    if _is_literacy_state(state) and not numeric_context:
-        course = "literacy"
-    metadata = [
-        f"course={course}",
-        f"module={literacy.get('current_module') if course == 'literacy' else state.get('current_module')}",
-        f"lesson={literacy.get('current_lesson') if course == 'literacy' else state.get('current_lesson')}",
-        f"skill={literacy.get('active_skill') if course == 'literacy' else state.get('active_skill')}",
-        f"phase={literacy.get('phase') if course == 'literacy' else state.get('phase')}",
-    ]
-    # Only the latest tutor turn defines the response expected *now*. Including
-    # an earlier name/number question can select the wrong Gemini tag on the
-    # next lesson turn.
+    # The outgoing tutor turn alone defines the response expected now. Older
+    # maths wording must not turn a new literacy question into a numeric STT
+    # prompt (a failure observed in the Aug 6 callback).
     recent_tutor = next(
         (
             str(message.get("content") or "")
@@ -571,6 +561,25 @@ def _recent_assistant_stt_context(
         ),
         "",
     )
+    numeric_context = has_numeric_lesson_context(
+        [{"role": "assistant", "content": recent_tutor}]
+    )
+    course = "numeracy" if numeric_context else str(state.get("course") or "numeracy")
+    if _is_literacy_state(state) and not numeric_context:
+        course = "literacy"
+    lesson = (
+        resolve_literacy_lesson(state)
+        if course == "literacy"
+        else resolve_numeracy_lesson(state)
+    )
+    metadata = [
+        f"course={course}",
+        f"module={literacy.get('current_module') if course == 'literacy' else state.get('current_module')}",
+        f"lesson={literacy.get('current_lesson') if course == 'literacy' else state.get('current_lesson')}",
+        f"skill={literacy.get('active_skill') if course == 'literacy' else state.get('active_skill')}",
+        f"phase={literacy.get('phase') if course == 'literacy' else state.get('phase')}",
+        f"lesson_title={(lesson or {}).get('title') or 'current lesson'}",
+    ]
     return f"Lesson metadata: {'; '.join(metadata)}. Exact recent tutor prompt: {recent_tutor}"
 
 
@@ -1695,6 +1704,9 @@ class RealtimeCall:
                 flags=flags or [],
                 directory=SHARED_AUDIO_DIR,
                 stt_provider=str(transcript.get("provider") or ""),
+                stt_prompt=str(transcript.get("gemini_prompt") or ""),
+                stt_prompt_mode=str(transcript.get("gemini_prompt_mode") or ""),
+                stt_prompt_label=str(transcript.get("gemini_prompt_label") or ""),
                 tts_provider=self.last_tts_provider if assistant_text else "",
             )
         except Exception as exc:

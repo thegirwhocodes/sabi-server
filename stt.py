@@ -109,6 +109,135 @@ LITERACY_WORDS = {
 
 WHISPER_CLI_PROVIDERS = {"whisper_cli", "openai_whisper", "openai-whisper", "cli_whisper"}
 
+# Every Gemini turn uses the same broad human-conversation frame that recovered
+# both `Sabi` and `one sweet` from the Aug 5 2:47 PM call. The curriculum only
+# supplies a safe course/topic label; operands and expected answers never enter
+# the STT prompt.
+GEMINI_RESPONSE_CONTEXT = (
+    "This could also be the child calling the name of the AI, Sabi, a complaint about "
+    "the quality of the call or lesson, complaining they can't hear the agent, or some "
+    "other normal human phrase. Reply with their response"
+)
+
+NUMERACY_CONTEXT_LABELS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("naira", "kobo", "money", "price", "prices", "cost", "costs", "pay", "paid", "spend", "spent", "change", "fare", "budget"), "naira"),
+    (("sweet", "sweets", "candy", "candies"), "sweets"),
+    (("finger", "fingers"), "fingers"),
+    (("pure water", "water sachet", "water sachets"), "pure water"),
+    (("groundnut", "groundnuts"), "groundnuts"),
+    (("mango", "mangoes"), "mangoes"),
+    (("orange", "oranges"), "oranges"),
+    (("biscuit", "biscuits"), "biscuits"),
+    (("plantain", "plantains"), "plantains"),
+    (("tomato", "tomatoes"), "tomatoes"),
+    (("pepper", "peppers"), "peppers"),
+    (("notebook", "notebooks", "exercise book", "exercise books", "book", "books"), "books"),
+    (("egg", "eggs"), "eggs"),
+    (("bread",), "bread"),
+    (("garri",), "garri"),
+    (("rice",), "rice"),
+    (("oil",), "oil"),
+    (("coin", "coins"), "coins"),
+    (("bag", "bags"), "bags"),
+    (("tray", "trays"), "trays"),
+    (("child", "children", "friend", "friends", "people", "person"), "fair sharing"),
+)
+
+
+def _context_sections(context: str) -> tuple[str, str]:
+    """Return the exact tutor turn first and curriculum metadata second."""
+    raw = " ".join(str(context or "").split())
+    marker = "Exact recent tutor prompt:"
+    if marker in raw:
+        metadata, exact = raw.split(marker, 1)
+        return _plain_text(exact), _plain_text(metadata)
+    return _plain_text(raw), ""
+
+
+def _contains_context_phrase(text: str, phrase: str) -> bool:
+    return bool(re.search(rf"(?<![a-z]){re.escape(phrase)}(?![a-z])", text))
+
+
+def _numeracy_context_label(context: str) -> str:
+    exact, metadata = _context_sections(context)
+    for source in (exact, metadata):
+        for phrases, label in NUMERACY_CONTEXT_LABELS:
+            if any(_contains_context_phrase(source, phrase) for phrase in phrases):
+                return label
+        if any(
+            cue in source
+            for cue in (
+                "what number", "which number", "count", "comes after", "comes before",
+                "bigger", "smaller", "plus", "minus", "times", "divide", "division",
+                "addition", "subtraction", "multiplication",
+            )
+        ):
+            return "numbers"
+    return ""
+
+
+def _literacy_context_label(context: str) -> str:
+    exact, metadata = _context_sections(context)
+    source = f"{exact} {metadata}".strip()
+    if "environmental sound" in source or ("noise" in source and "sound" in source):
+        return "environmental and speech sounds"
+    if any(cue in source for cue in ("beginning sound", "first sound", "sound starts", "sound comes first", "at the start")):
+        return "beginning sounds"
+    if any(cue in source for cue in ("ending sound", "last sound", "sound at the end", "ends with")):
+        return "ending sounds"
+    if "rhyme" in source or "rhyming" in source:
+        return "rhyming words"
+    if "syllable" in source or "word parts" in source:
+        return "syllables"
+    if any(cue in source for cue in ("blend", "sounds make", "put it together")):
+        return "blended sounds and words"
+    if any(cue in source for cue in ("segment", "breaking words", "break the word")):
+        return "segmented sounds"
+    if any(cue in source for cue in ("deleting", "delete the", "without the first", "without the last")):
+        return "sound deletion"
+    if any(cue in source for cue in ("substitution", "changing the sound", "change the first", "change the last", "change the middle")):
+        return "sound substitution"
+    if any(cue in source for cue in ("letter sound", "letter s", "letters make", "spell a short word")):
+        return "letter sounds and spoken words"
+    if any(cue in source for cue in ("story", "what did", "who ran", "retell", "main idea", "comprehension")):
+        return "story comprehension"
+    if any(cue in source for cue in ("sentence", "grammar", "tense", "adjective", "comparative", "superlative")):
+        return "spoken sentences"
+    if any(cue in source for cue in ("vocabulary", "body parts", "family", "community", "market words", "animals", "weather", "nature")):
+        return "spoken vocabulary"
+    if _expects_literacy_sound_answer(context):
+        return "spoken sounds"
+    if _expects_literacy_word_answer(context):
+        return "spoken words"
+    return ""
+
+
+def _curriculum_course(context: str, mode: str) -> str:
+    normalized = _plain_text(context)
+    if "course=literacy" in normalized or str(mode or "").lower() == "literacy":
+        return "literacy"
+    if "course=numeracy" in normalized or _expects_number(context):
+        return "numeracy"
+    if any(cue in normalized for cue in ("phonemic", "phonics", "rhyme", "syllable", "letter sound", "story comprehension")):
+        return "literacy"
+    return "numeracy"
+
+
+def build_gemini_curriculum_prompt(context: str, mode: str = "general") -> tuple[str, str, str]:
+    """Build Naomi's universal prompt with one non-answer curriculum label."""
+    course = _curriculum_course(context, mode)
+    label = _literacy_context_label(context) if course == "literacy" else _numeracy_context_label(context)
+    global_prompt = os.getenv(
+        "SABI_GEMINI_STT_GLOBAL_PROMPT",
+        "A Nigerian child on a noisy 8kHz phone call",
+    ).strip()
+    lesson = f"a {course} lesson" + (f" in {label}" if label else "")
+    prompt = (
+        f"{global_prompt} is saying their name, introducing themselves and answering {lesson}. "
+        f"{GEMINI_RESPONSE_CONTEXT}"
+    ).strip()
+    return prompt, course, label
+
 
 def _expects_number(context: str) -> bool:
     """True when the recent tutor prompt is asking for a numeric answer, so STT
@@ -373,6 +502,8 @@ class SpeechToText:
                             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
                             "provider": "gemini",
                             "gemini_model": self._gemini_model,
+                            "gemini_prompt": self._gemini_prompt(context, mode=mode),
+                            "gemini_prompt_mode": os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "curriculum").strip().lower(),
                             "provider_error": f"{e.__class__.__name__}: {_safe_error_text(e)}",
                         }
                     logger.warning("Gemini STT failed (%s), falling back to Groq/Whisper", e)
@@ -387,6 +518,8 @@ class SpeechToText:
                         "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
                         "provider": "gemini",
                         "gemini_model": self._gemini_model,
+                        "gemini_prompt": self._gemini_prompt(context, mode=mode),
+                        "gemini_prompt_mode": os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "curriculum").strip().lower(),
                         "provider_error": "GEMINI_API_KEY is not configured",
                     }
                 logger.warning("Gemini STT requested but GEMINI_API_KEY is not configured; using Groq/Whisper")
@@ -443,132 +576,19 @@ class SpeechToText:
             )
         return prompt
 
-    def _gemini_shape_hint(self, context: str) -> str:
-        """Closed-vocab hint derived from the LESSON state (never the answer).
-
-        This is the mode that won the Jul 2026 gold-clip bake-off: telling
-        Gemini the expected SHAPE of the answer (number / single word / name)
-        sharply improves recovery of warbled Nigerian child speech, while a
-        bare "transcribe this" prompt does not.
-        """
-        control_rule = (
-            "A control request always overrides the expected answer type: if the child says they "
-            "did not hear, asks Sabi to repeat the question, asks for help, or asks to switch subjects, "
-            "transcribe that request literally and in full. Never turn a control request into a guessed answer. "
-        )
-        if _expects_number(context):
-            return (
-                f"{control_rule}Otherwise, the child is answering a maths question with a NUMBER. "
-                "For an actual answer, reply with only the number they said (as digits or a number word)."
-            )
-        if _expects_literacy_sound_answer(context):
-            return (
-                f"{control_rule}Otherwise, the child is answering with one short speech sound or letter "
-                "sound, such as d, ddd, b, or bbb. Preserve that sound literally; never convert it into "
-                "a number word or a tutor-feedback word."
-            )
-        if _expects_literacy_word_answer(context):
-            return (
-                f"{control_rule}Otherwise, the child is reading or sounding out a single English word. "
-                "For an actual answer, reply with only that one word."
-            )
-        if _expects_name(context):
-            return (
-                f"{control_rule}Otherwise, the child is saying their name, often a Nigerian name such "
-                "as Gideon, Oluremi, or Chukwuemeka. For an actual answer, reply with only the name."
-            )
-        return f"{control_rule}Transcribe exactly what the child said. Reply with only the transcript."
-
-    def _gemini_tagged_prompt(self, context: str, mode: str = "general") -> str:
-        """Choose a compact lesson tag without ever supplying the answer.
-
-        This reproduces the prompt pattern that correctly recovered `d` and
-        `2 naira` from the Aug 5 phone clips. The exact tutor question is used
-        locally to select the tag, but is not sent to Gemini, avoiding answer
-        leakage and prompt-induced hallucination.
-        """
-        global_prompt = os.getenv(
-            "SABI_GEMINI_STT_GLOBAL_PROMPT",
-            "A Nigerian child on a noisy 8kHz phone call",
-        ).strip()
-        normalized = _plain_text(context)
-        if _expects_name(context):
-            turn_tag = "is saying their name. Reply with their response."
-        elif _expects_number(context) and _expects_naira_answer(context):
-            turn_tag = "is responding to a numeracy question in naira. Reply with their response."
-        elif _expects_number(context):
-            turn_tag = "is responding to a numeracy question. Reply with their response."
-        elif _expects_literacy_sound_answer(context) or "phonemic" in normalized or "phonics" in normalized:
-            if "ending" in normalized or "at the end" in normalized:
-                sound_type = "one spoken ending letter sound"
-            elif any(cue in normalized for cue in ("beginning", "at the start", "comes first", "sound starts")):
-                sound_type = "one spoken beginning letter sound"
-            else:
-                sound_type = "one short spoken English sound"
-            turn_tag = (
-                f"is responding with {sound_type} to a literacy phonemics question. "
-                "Reply with the sound they say."
-            )
-        elif _expects_literacy_word_answer(context) or "rhyme" in normalized:
-            turn_tag = "is responding to a literacy word question. Reply with their response."
-        elif str(mode or "").lower() == "literacy":
-            turn_tag = "is responding to a literacy question. Reply with their response."
-        else:
-            turn_tag = "is responding during a lesson. Reply with their response."
-        return self._append_gemini_control_context(f"{global_prompt} {turn_tag}")
-
-    @staticmethod
-    def _append_gemini_control_context(prompt: str) -> str:
-        """Keep non-answer speech available to Gemini on every lesson turn."""
-        control_context = os.getenv(
-            "SABI_GEMINI_STT_CONTROL_CONTEXT",
-            (
-                "This could also be a complaint about the quality of the call or lesson, "
-                "or the child calling your name."
-            ),
-        ).strip()
-        return f"{prompt.strip()} {control_context}".strip()
-
     def _gemini_prompt(self, context: str, mode: str = "general") -> str:
-        """Build the audio prompt without ever including the expected answer.
-
-        ``tagged`` is the production-safe default: it sends only a compact
-        response category selected from lesson state, never the answer. The
-        more verbose ``shape`` mode combines the noisy-phone framing with an
-        answer type and exact question context. The
-        ``lesson_exact`` canary reproduces the exact AI Studio wording that
-        first recovered the full Oluremi/Gideon calls. It is intentionally
-        configurable because the generative audio model is prompt-sensitive.
-        """
+        """Build the universal curriculum-aware prompt without an answer hint."""
         lesson_prompt = os.getenv(
             "SABI_GEMINI_STT_LESSON_PROMPT",
             "A Nigerian child on a noisy 8kHz phone call is saying their name, "
             "introducing themselves and walking through a numeracy lesson. "
             "Reply with their responses",
         ).strip()
-        recent_context = _clean_prompt_context(context, limit=800)
-        prompt_mode = os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "tagged").strip().lower()
+        prompt_mode = os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "curriculum").strip().lower()
         if prompt_mode == "lesson_exact":
-            return self._append_gemini_control_context(lesson_prompt)
-        if prompt_mode == "tagged":
-            return self._gemini_tagged_prompt(context, mode=mode)
-        if prompt_mode == "lesson_plus_shape":
-            context_line = f" Current lesson and exact tutor-question context: {recent_context}." if recent_context else ""
-            return self._append_gemini_control_context(
-                f"{lesson_prompt}.{context_line} {self._gemini_shape_hint(context)}"
-            )
-        lesson_kind = "literacy" if str(mode or "").lower() == "literacy" else "numeracy or general"
-        preamble = (
-            "This audio is a Nigerian child speaking English on a noisy, low-quality "
-            f"8kHz telephone call during a {lesson_kind} lesson. This is one turn from a longer "
-            "conversation, and background noise is likely. "
-        )
-        if recent_context:
-            preamble += (
-                f"Current lesson and exact tutor-question context: {recent_context}. "
-                "The supplied audio contains the child's response, not the tutor's question. "
-            )
-        return self._append_gemini_control_context(preamble + self._gemini_shape_hint(context))
+            return lesson_prompt
+        prompt, _course, _label = build_gemini_curriculum_prompt(context, mode)
+        return prompt
 
     def _transcribe_gemini(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
         """Transcribe via Gemini multimodal audio (3.5 Flash-Lite by default).
@@ -585,6 +605,7 @@ class SpeechToText:
         ext = Path(audio_path).suffix.lower()
         mime = "audio/mpeg" if ext in (".mp3", ".m4a") else "audio/wav"
         prompt = self._gemini_prompt(context, mode=mode)
+        _prompt_copy, prompt_course, prompt_label = build_gemini_curriculum_prompt(context, mode)
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{self._gemini_model}:generateContent"
@@ -635,7 +656,10 @@ class SpeechToText:
             "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
             "provider": "gemini",
             "gemini_model": self._gemini_model,
-            "gemini_prompt_mode": os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "tagged").strip().lower(),
+            "gemini_prompt_mode": os.getenv("SABI_GEMINI_STT_PROMPT_MODE", "curriculum").strip().lower(),
+            "gemini_prompt": prompt,
+            "gemini_prompt_course": prompt_course,
+            "gemini_prompt_label": prompt_label,
             "provider_latency_seconds": round(provider_latency_seconds, 3),
             "usage_metadata": data.get("usageMetadata") or {},
         }

@@ -460,6 +460,46 @@ class SabiLLM:
             messages, student_id, current_module, memory, course, learning_state
         )
 
+        return await self._generate_from_system_prompt(system_prompt, chat_messages)
+
+    async def generate_with_system_prompt(
+        self,
+        *,
+        system_prompt: str,
+        messages: list[dict],
+        call_id: Optional[str] = None,
+        channel: Optional[str] = None,
+    ) -> str:
+        """Generate with a caller-supplied canonical prompt and no Sabi RAG.
+
+        This powers the isolated original-hackathon comparison lane. Input and
+        output safety guards remain enabled, but current curriculum routing,
+        learner state, numeric hints, and scaffold directives are not added.
+        """
+        if not messages:
+            messages = [{"role": "user", "content": "Hi, I want to learn!"}]
+        chat_messages = [m for m in messages if m.get("role") in ("user", "assistant")]
+        latest_user = self._latest_user_text(chat_messages)
+        input_guard = guard_input(latest_user) if latest_user else None
+        if input_guard and input_guard.short_circuit:
+            if input_guard.flag_for_safeguarding:
+                self._record_safeguarding_incident(
+                    input_guard,
+                    latest_user,
+                    None,
+                    channel or "sabi-original-phone",
+                    call_id,
+                )
+            return input_guard.safe_response or "Let's keep going with our lesson."
+        return await self._generate_from_system_prompt(system_prompt, chat_messages)
+
+    async def _generate_from_system_prompt(
+        self,
+        system_prompt: str,
+        chat_messages: list[dict],
+    ) -> str:
+        """Run the configured provider chain for an already-built prompt."""
+
         # Try providers in priority order
         if self.primary == "cerebras" and CEREBRAS_API_KEY and "cerebras" not in self.disabled_providers:
             try:

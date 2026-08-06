@@ -152,6 +152,18 @@ async def lifespan(app: FastAPI):
         # (e.g. chatterbox) without touching the production chain on 9019.
         tts_primary=os.getenv("SABI_TTS_TEST_PRIMARY", ""),
     )
+    original_audiosocket_server = await start_audiosocket_server(
+        # The comparison lane uses the same lesson-aware Gemini STT instance
+        # as the currently promoted test/public route. Only conversation
+        # orchestration changes.
+        stt=app.state.intron_stt,
+        llm=app.state.llm,
+        tts=app.state.tts,
+        memory=app.state.memory,
+        port=int(os.getenv("SABI_ORIGINAL_AUDIOSOCKET_PORT", "9021")),
+        tts_primary=os.getenv("SABI_ORIGINAL_TTS_PRIMARY", "elevenlabs"),
+        conversation_style="original",
+    )
 
     logger.info("All models loaded. Sabi is ready.")
     yield
@@ -162,6 +174,8 @@ async def lifespan(app: FastAPI):
     await audiosocket_server.wait_closed()
     intron_audiosocket_server.close()
     await intron_audiosocket_server.wait_closed()
+    original_audiosocket_server.close()
+    await original_audiosocket_server.wait_closed()
     agi_server.close()
     await agi_server.wait_closed()
 
@@ -1115,6 +1129,43 @@ async def direct_sabi_intron_call(
         "attempt": safe_attempt,
         "delay_seconds": safe_delay,
         "context": "sabi-callback-intron",
+    })
+
+
+@app.post("/admin/asterisk/direct-call-original")
+async def direct_original_sabi_call(
+    phone: str = Form(...),
+    attempt: int = Form(1),
+    delay_seconds: float = Form(0),
+):
+    """Call the isolated original-hackathon prompt + Gemini STT lane."""
+    normalized_phone = normalize_direct_call_phone(phone)
+    if not normalized_phone:
+        logger.warning("Direct original Sabi call rejected: invalid phone number")
+        return JSONResponse({"status": "rejected", "reason": "invalid_phone"}, status_code=400)
+
+    safe_attempt = max(1, attempt)
+    safe_delay = max(0, delay_seconds)
+    logger.info(
+        "Direct original Sabi call requested for %s attempt=%s delay=%.1fs",
+        normalized_phone,
+        safe_attempt,
+        safe_delay,
+    )
+    asyncio.create_task(
+        ami_originate(
+            normalized_phone,
+            attempt=safe_attempt,
+            delay_seconds=safe_delay,
+            context="sabi-callback-original",
+        )
+    )
+    return JSONResponse({
+        "status": "direct_original_call_initiated",
+        "phone": normalized_phone,
+        "attempt": safe_attempt,
+        "delay_seconds": safe_delay,
+        "context": "sabi-callback-original",
     })
 
 

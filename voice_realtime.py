@@ -29,6 +29,7 @@ from curriculum_path import resolve_literacy_lesson, resolve_numeracy_lesson
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
 from numeric_grading import analyze_latest_numeric_turn, question_expects_numeric_answer
+from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, original_sabi_prompt_for_phone
 from transcript_normalizer import (
     is_likely_stt_hallucination_transcript,
     is_phone_system_transcript,
@@ -695,7 +696,7 @@ async def _send_packet(writer: asyncio.StreamWriter, packet_type: int, payload: 
 
 class RealtimeCall:
     def __init__(self, call_uuid: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                 stt, llm, tts, memory, tts_primary: str = ""):
+                 stt, llm, tts, memory, tts_primary: str = "", conversation_style: str = "current"):
         self.call_uuid = call_uuid
         self.reader = reader
         self.writer = writer
@@ -703,6 +704,7 @@ class RealtimeCall:
         self.llm = llm
         self.tts = tts
         self.memory = memory
+        self.conversation_style = (conversation_style or "current").strip().lower()
         # Per-lane TTS provider override. Empty = global SABI_TTS_PRIMARY.
         # The isolated test lane (port 9020) sets this from
         # SABI_TTS_TEST_PRIMARY so Chatterbox can be canaried without touching
@@ -1678,6 +1680,210 @@ class RealtimeCall:
                 exc,
             )
 
+    async def run_original_sabi(self) -> None:
+        """Run the original hackathon prompt with Gemini STT and no state engine.
+
+        This intentionally bypasses learner lookup, deterministic grading,
+        diagnostics, scaffold depth, curriculum-path injection, answer gating,
+        transcript normalization, keypad teaching, and session-state writes.
+        Audio transport, call review, safety guards, and TTS remain available
+        so the comparison can run safely on the same phone infrastructure.
+        """
+        call_started_at = time.monotonic()
+        logger.info(
+            "Original Sabi call start uuid=%s phone=%s mode=%s attempt=%s",
+            self.call_uuid,
+            self.phone,
+            self.mode,
+            self.attempt,
+        )
+        reader_task = asyncio.create_task(self.read_loop())
+        messages: list[dict[str, str]] = [
+            {"role": "assistant", "content": ORIGINAL_SABI_FIRST_MESSAGE}
+        ]
+        system_prompt = original_sabi_prompt_for_phone(self.phone)
+
+        try:
+            greeting_pcm = await self.synthesize_pcm(
+                ORIGINAL_SABI_FIRST_MESSAGE,
+                "rt_original_greeting",
+            )
+            interrupted = await self.play_pcm_with_barge(
+                greeting_pcm,
+                speech_threshold=SPEECH_RMS_THRESHOLD,
+                end_silence_frames=END_SILENCE_FRAMES,
+                barge_grace_ms=INITIAL_GREETING_BARGE_GRACE_MS,
+            )
+            if self.hungup:
+                self.set_end_reason("channel_closed_during_greeting")
+                return
+
+            for turn in range(MAX_TURNS):
+                if self.hungup:
+                    break
+                if time.monotonic() - call_started_at >= MAX_CALL_SECONDS:
+                    self.set_end_reason("max_call_seconds")
+                    break
+
+                utterance_from_barge = interrupted is not None
+                utterance = interrupted or await self.wait_for_utterance(
+                    end_silence_frames=END_SILENCE_FRAMES,
+                    speech_threshold=SPEECH_RMS_THRESHOLD,
+                )
+                interrupted = None
+                if not utterance:
+                    self.set_end_reason(
+                        "channel_closed_waiting_for_speech" if self.hungup else "no_utterance"
+                    )
+                    break
+
+                turn_start = time.monotonic()
+                user_audio_path = call_turn_audio_path(
+                    self.call_uuid,
+                    turn,
+                    "user",
+                    SHARED_AUDIO_DIR,
+                )
+                stt_context = _recent_assistant_stt_context(
+                    messages,
+                    {"course": "numeracy", "active_skill": "market numeracy"},
+                )
+                transcript = await self.transcribe_pcm(
+                    utterance,
+                    turn,
+                    user_audio_path,
+                    mode="general",
+                    context=stt_context,
+                )
+                raw_text = str(transcript.get("text") or "").strip()
+                turn_flags = ["original_sabi_lane", "no_deterministic_learning_state"]
+                if utterance_from_barge:
+                    turn_flags.append("barge_in")
+
+                if _looks_like_carrier_audio(raw_text):
+                    turn_flags.append("carrier_or_voicemail_audio")
+                    self.persist_turn_review(
+                        turn=turn,
+                        user_audio_path=user_audio_path,
+                        transcript=transcript,
+                        raw_text=raw_text,
+                        normalized_text=raw_text,
+                        learning_state_before={},
+                        learning_state_after={},
+                        flags=turn_flags,
+                        timings={
+                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                        },
+                    )
+                    self.set_end_reason("carrier_or_voicemail_audio")
+                    break
+
+                if raw_text:
+                    learner_text = raw_text
+                else:
+                    learner_text = "[The phone audio was unclear.]"
+                    turn_flags.append("unclear_audio_passed_to_original_llm")
+                messages.append({"role": "user", "content": learner_text})
+
+                llm_start = time.monotonic()
+                response = await self.llm.generate_with_system_prompt(
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    call_id=self.call_id,
+                    channel="asterisk_audiosocket_original_sabi",
+                )
+                llm_latency = time.monotonic() - llm_start
+                messages.append({"role": "assistant", "content": response})
+
+                tts_start = time.monotonic()
+                response_pcm = await self.synthesize_pcm(response, "rt_original_resp")
+                tts_latency = time.monotonic() - tts_start
+                self.persist_turn_review(
+                    turn=turn,
+                    user_audio_path=user_audio_path,
+                    transcript=transcript,
+                    raw_text=raw_text,
+                    normalized_text=raw_text,
+                    learning_state_before={},
+                    learning_state_after={},
+                    assistant_text=response,
+                    assistant_pcm=response_pcm,
+                    flags=turn_flags,
+                    timings={
+                        "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                        "llm_seconds": round(llm_latency, 3),
+                        "tts_seconds": round(tts_latency, 3),
+                        "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                    },
+                )
+                logger.info(
+                    "Original Sabi turn=%s transcript=%r llm=%.2fs response=%r",
+                    turn,
+                    raw_text,
+                    llm_latency,
+                    response,
+                )
+                interrupted = await self.play_pcm_with_barge(
+                    response_pcm,
+                    speech_threshold=SPEECH_RMS_THRESHOLD,
+                    end_silence_frames=END_SILENCE_FRAMES,
+                )
+                if should_wrap_up(
+                    messages,
+                    response,
+                    elapsed_seconds=time.monotonic() - call_started_at,
+                ):
+                    self.set_end_reason("original_sabi_wrap_up")
+                    break
+        except Exception as exc:
+            self.set_end_reason(f"exception:{type(exc).__name__}")
+            logger.error(
+                "Original Sabi call error uuid=%s: %s",
+                self.call_uuid,
+                exc,
+                exc_info=True,
+            )
+        finally:
+            if self.end_reason == "unknown":
+                self.end_reason = "channel_closed" if self.hungup else "normal_loop_complete"
+            duration_seconds = int(time.monotonic() - call_started_at)
+            self.hungup = True
+            reader_task.cancel()
+            try:
+                await _send_packet(self.writer, AUDIO_TYPE_HANGUP)
+            except Exception:
+                pass
+            self.writer.close()
+            try:
+                await self.writer.wait_closed()
+            except Exception:
+                pass
+            user_turns = sum(1 for message in messages if message.get("role") == "user")
+            assistant_turns = sum(1 for message in messages if message.get("role") == "assistant")
+            write_call_review_record(
+                call_uuid=self.call_uuid,
+                call_id=self.call_id,
+                phone_number=self.phone,
+                mode=self.mode,
+                attempt=self.attempt,
+                student_id=None,
+                end_reason=self.end_reason,
+                duration_seconds=duration_seconds,
+                user_turns=user_turns,
+                assistant_turns=assistant_turns,
+                hangup_event=HANGUP_EVENTS.get(self.call_uuid),
+                directory=SHARED_AUDIO_DIR,
+            )
+            logger.warning(
+                "Original Sabi call complete uuid=%s phone=%s end_reason=%s duration=%ss turns=%s",
+                self.call_uuid,
+                self.phone,
+                self.end_reason,
+                duration_seconds,
+                user_turns,
+            )
+
     async def run(self) -> None:
         call_started_at = time.monotonic()
         logger.info(
@@ -2308,7 +2514,8 @@ class RealtimeCall:
 
 
 async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                                  stt, llm, tts, memory, tts_primary: str = "") -> None:
+                                  stt, llm, tts, memory, tts_primary: str = "",
+                                  conversation_style: str = "current") -> None:
     peer_info = writer.get_extra_info("peername")
     try:
         packet_type, payload = await _read_packet(reader)
@@ -2317,22 +2524,43 @@ async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.
             writer.close()
             return
         call_uuid = str(uuid.UUID(bytes=payload))
-        await RealtimeCall(
-            call_uuid, reader, writer, stt, llm, tts, memory, tts_primary=tts_primary
-        ).run()
+        call = RealtimeCall(
+            call_uuid,
+            reader,
+            writer,
+            stt,
+            llm,
+            tts,
+            memory,
+            tts_primary=tts_primary,
+            conversation_style=conversation_style,
+        )
+        if call.conversation_style == "original":
+            await call.run_original_sabi()
+        else:
+            await call.run()
     except Exception as exc:
         logger.error("AudioSocket connection error from %s: %s", peer_info, exc, exc_info=True)
         writer.close()
 
 
 async def start_audiosocket_server(stt, llm, tts, memory, host: str = "0.0.0.0", port: int = 9019,
-                                   tts_primary: str = ""):
+                                   tts_primary: str = "", conversation_style: str = "current"):
     async def client_handler(reader, writer):
-        await handle_audiosocket_call(reader, writer, stt, llm, tts, memory, tts_primary=tts_primary)
+        await handle_audiosocket_call(
+            reader,
+            writer,
+            stt,
+            llm,
+            tts,
+            memory,
+            tts_primary=tts_primary,
+            conversation_style=conversation_style,
+        )
 
     server = await asyncio.start_server(client_handler, host, port)
     logger.info(
-        "AudioSocket realtime server listening on %s:%s tts_primary=%s",
-        host, port, tts_primary or "(global)",
+        "AudioSocket realtime server listening on %s:%s tts_primary=%s conversation_style=%s",
+        host, port, tts_primary or "(global)", conversation_style,
     )
     return server

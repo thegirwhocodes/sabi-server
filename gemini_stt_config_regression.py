@@ -1,12 +1,13 @@
 """Regression for the Gemini multimodal STT provider.
 
-Covers the exact-current-question curriculum prompt, payload
+Covers the universal curriculum prompt, safe course/topic labels, payload
 construction + response parsing, and strict failure behavior. Runs with no GPU/network:
 httpx.post is monkeypatched and faster-whisper is never loaded (a GROQ key is
 present so the local model is skipped).
 """
 
 import os
+import re
 import tempfile
 import wave
 
@@ -54,12 +55,15 @@ sweets_prompt, sweets_course, sweets_label = build_gemini_curriculum_prompt(
     "Exact recent tutor prompt: You have two sweets and give one away. How many sweets are left?"
 )
 check("sweets turn is numeracy", sweets_course == "numeracy")
-check("sweets unit remains recorded as metadata", sweets_label == "sweets")
-check("universal prompt identifies Sabi as tutor", "with Sabi their AI tutor" in sweets_prompt)
-check("universal prompt includes exact final question", 'answering the question: "How many sweets are left?"' in sweets_prompt)
-check("universal prompt includes call-or-lesson complaint", "quality of the call or lesson" in sweets_prompt)
-check("universal prompt includes normal human phrase", "some other human phrase" in sweets_prompt)
-check("preceding tutor explanation is excluded", "two sweets" not in sweets_prompt and "one away" not in sweets_prompt)
+check("sweets unit is preserved", sweets_label == "sweets" and "numeracy lesson in sweets" in sweets_prompt)
+check("universal prompt includes name and introduction", "saying their name, introducing themselves" in sweets_prompt)
+check("universal prompt explicitly names Sabi", "name of the AI, Sabi" in sweets_prompt)
+check("universal prompt includes can't-hear complaint", "can't hear the agent" in sweets_prompt)
+check("universal prompt includes normal human phrase", "some other normal human phrase" in sweets_prompt)
+check(
+    "universal prompt never leaks operands",
+    not re.search(r"\b(?:one|two)\b", sweets_prompt.lower()),
+)
 
 literacy_universal, literacy_course, literacy_label = build_gemini_curriculum_prompt(
     "Lesson metadata: course=literacy; lesson_title=Beginning Sounds. "
@@ -68,8 +72,8 @@ literacy_universal, literacy_course, literacy_label = build_gemini_curriculum_pr
 )
 check("literacy turn is literacy", literacy_course == "literacy")
 check("literacy topic is preserved", literacy_label == "beginning sounds")
-check("literacy prompt uses same human alternatives", "with Sabi their AI tutor" in literacy_universal and "quality of the call or lesson" in literacy_universal)
-check("literacy prompt includes exact final question", 'answering the question: "What sound comes first at the start of dog?"' in literacy_universal)
+check("literacy prompt uses same human alternatives", "name of the AI, Sabi" in literacy_universal and "can't hear" in literacy_universal)
+check("literacy prompt never leaks example word", "dog" not in literacy_universal.lower())
 
 # ---- payload construction + response parsing ----
 captured = {}
@@ -126,10 +130,10 @@ try:
     check("curriculum prompt in payload", "walking through a numeracy lesson" in parts[1]["text"])
     check("prompt keeps exact response instruction", "Reply with their response" in parts[1]["text"])
     check(
-        "every prompt allows Sabi, complaints, and ordinary speech",
+        "every prompt allows Sabi, complaints, can't-hear, and ordinary speech",
         all(
             phrase in parts[1]["text"]
-            for phrase in ("with Sabi their AI tutor", "quality of the call or lesson", "some other human phrase")
+            for phrase in ("name of the AI, Sabi", "quality of the call or lesson", "can't hear the agent", "normal human phrase")
         ),
     )
     check(
@@ -178,22 +182,23 @@ try:
     )
     check("global noisy-phone prompt is on the literacy turn", "noisy 8kHz phone call" in literacy_prompt)
     check("literacy course is explicit", "walking through a literacy lesson" in literacy_prompt)
-    check("curriculum prompt includes exact tutor question", 'answering the question: "What sound starts dog?"' in literacy_prompt)
+    check("beginning-sound topic is explicit", "in beginning sounds" in literacy_prompt)
+    check("curriculum prompt does not leak exact tutor question", "dog" not in literacy_prompt.lower())
 
     naira_prompt = sst._gemini_prompt(
         "Lesson metadata: course=numeracy; skill=subtraction. "
         "Exact recent tutor prompt: You have five naira and spend three. How much is left?",
         mode="general",
     )
-    check("naira question is explicit", 'answering the question: "How much is left?"' in naira_prompt)
+    check("naira context is explicit", "numeracy lesson in naira" in naira_prompt)
     check("naira prompt keeps exact response instruction", "Reply with their response" in naira_prompt)
     check("global noisy-phone prompt is on the naira turn", "noisy 8kHz phone call" in naira_prompt)
-    check("only the final eliciting question is copied", "five" not in naira_prompt and "three" not in naira_prompt)
+    check("naira tag does not leak operands", "five" not in naira_prompt and "three" not in naira_prompt)
 
     name_prompt = sst._gemini_prompt("What is your name?", mode="general")
     check("global noisy-phone prompt is on the name turn", "noisy 8kHz phone call" in name_prompt)
-    check("name turn includes exact name question", 'answering the question: "What is your name?"' in name_prompt)
-    check("name turn identifies Sabi as tutor", "with Sabi their AI tutor" in name_prompt)
+    check("name turn keeps broad name context", "saying their name" in name_prompt)
+    check("name turn explicitly allows calling Sabi", "name of the AI, Sabi" in name_prompt)
     greeting_name_prompt = sst._gemini_prompt(
         "Lesson metadata: course=numeracy; skill=market numeracy. "
         "Exact recent tutor prompt: Hello! I'm Sabi, your learning friend. What is your name?",
@@ -208,7 +213,7 @@ try:
         "Exact recent tutor prompt: Share six mangoes equally between two friends. How many does each get?",
         mode="general",
     )
-    check("real sharing question is supplied exactly", 'answering the question: "How many does each get?"' in sharing_prompt)
+    check("real sharing question keeps fair-sharing tag", "in fair sharing" in sharing_prompt)
 
     # ---- strict Gemini-first: missing key becomes an unclear turn, not another provider ----
     sst._gemini_key = ""

@@ -6,7 +6,7 @@ Components:
 - STT: faster-whisper (Whisper large-v3)
 - LLM: Claude Haiku (primary) / Ollama Llama 3.1 8B (fallback) + RAG
 - TTS: YarnGPT API (Nigerian voices)
-- Telephony: Africa's Talking voice webhooks + Asterisk SIP (flash callback)
+- Telephony: Twilio/Africa's Talking SIP + Asterisk AudioSocket
 
 Run: uvicorn main:app --host 0.0.0.0 --port 8000
 """
@@ -526,7 +526,26 @@ AMI_HOST = os.getenv("AMI_HOST", "asterisk")
 AMI_PORT = int(os.getenv("AMI_PORT", "5038"))
 AMI_USER = os.getenv("AMI_USER", "sabi")
 AMI_SECRET = os.getenv("AMI_SECRET", "sabi_ami_secret_change_me")
-SABI_CALLER_ID = os.getenv("SABI_CALLER_ID", "+2342017001459")
+SIP_PROVIDER_ENDPOINTS = {
+    "africastalking": "africastalking",
+    "twilio": "twilio",
+}
+SABI_SIP_PROVIDER = os.getenv("SABI_SIP_PROVIDER", "africastalking").strip().lower()
+if SABI_SIP_PROVIDER not in SIP_PROVIDER_ENDPOINTS:
+    logger.warning(
+        "Unknown SABI_SIP_PROVIDER=%r; keeping Africa's Talking as the safe fallback",
+        SABI_SIP_PROVIDER,
+    )
+    SABI_SIP_PROVIDER = "africastalking"
+SABI_SIP_ENDPOINT = SIP_PROVIDER_ENDPOINTS[SABI_SIP_PROVIDER]
+DEFAULT_SIP_CALLER_IDS = {
+    "africastalking": "+2342017001459",
+    "twilio": "+17153122345",
+}
+SABI_CALLER_ID = os.getenv(
+    "SABI_CALLER_ID",
+    DEFAULT_SIP_CALLER_IDS[SABI_SIP_PROVIDER],
+).strip()
 FLASH_CALLBACK_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_DELAY_SECONDS", "4"))
 FLASH_CALLBACK_RETRY_DELAY_SECONDS = float(os.getenv("FLASH_CALLBACK_RETRY_DELAY_SECONDS", "10"))
 FLASH_CALLBACK_MAX_ATTEMPTS = int(os.getenv("FLASH_CALLBACK_MAX_ATTEMPTS", "3"))
@@ -908,7 +927,7 @@ async def ami_originate(
     delay_seconds: float | None = None,
     context: str = "sabi-callback",
 ):
-    """Send AMI Originate command to Asterisk to call the child back."""
+    """Send AMI Originate through the selected SIP carrier to call the child."""
     reader, writer = await asyncio.open_connection(AMI_HOST, AMI_PORT)
 
     # Read AMI banner
@@ -939,7 +958,7 @@ async def ami_originate(
     # Originate outbound call
     writer.write(
         f"Action: Originate\r\n"
-        f"Channel: PJSIP/{phone}@africastalking\r\n"
+        f"Channel: PJSIP/{phone}@{SABI_SIP_ENDPOINT}\r\n"
         f"Context: {context}\r\n"
         f"Exten: {phone}\r\n"
         f"Priority: 1\r\n"
@@ -967,8 +986,8 @@ async def ami_originate(
 async def flash_callback(phone: str = Form(...)):
     """
     Flash callback trigger — called by Asterisk after hanging up on an incoming call.
-    Initiates outbound call to the child via AMI Originate.
-    Child pays ₦0. We pay ₦3/min SIP outgoing.
+    Initiates an outbound call to the child through the selected SIP carrier.
+    The carrier rate depends on `SABI_SIP_PROVIDER` and the destination.
     """
     incoming_phone, callback_phone = resolve_flash_callback_phone(phone)
     if not incoming_phone or not callback_phone:
@@ -1094,10 +1113,11 @@ async def direct_sabi_call(
     safe_attempt = max(1, attempt)
     safe_delay = max(0, delay_seconds)
     logger.info(
-        "Direct Sabi call requested for %s attempt=%s delay=%.1fs",
+        "Direct Sabi call requested for %s attempt=%s delay=%.1fs provider=%s",
         normalized_phone,
         safe_attempt,
         safe_delay,
+        SABI_SIP_PROVIDER,
     )
     asyncio.create_task(
         ami_originate(
@@ -1111,6 +1131,7 @@ async def direct_sabi_call(
         "phone": normalized_phone,
         "attempt": safe_attempt,
         "delay_seconds": safe_delay,
+        "provider": SABI_SIP_PROVIDER,
     })
 
 

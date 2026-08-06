@@ -57,9 +57,10 @@ sweets_prompt, sweets_course, sweets_label = build_gemini_curriculum_prompt(
 check("sweets turn is numeracy", sweets_course == "numeracy")
 check("sweets unit is preserved", sweets_label == "sweets" and "numeracy lesson in sweets" in sweets_prompt)
 check("answer prompt excludes name and introduction", "saying their name" not in sweets_prompt and "introducing themselves" not in sweets_prompt)
-check("universal prompt explicitly names Sabi", "name of the AI, Sabi" in sweets_prompt)
-check("universal prompt includes can't-hear complaint", "can't hear the agent" in sweets_prompt)
-check("universal prompt includes normal human phrase", "some other normal human phrase" in sweets_prompt)
+check("answer prompt requests literal audio only", "only the exact words audibly spoken" in sweets_prompt)
+check("answer prompt forbids inference and invention", "infer, complete, paraphrase, or invent words" in sweets_prompt)
+check("answer prompt does not suggest complaints", "complain" not in sweets_prompt.lower() and "can't hear" not in sweets_prompt.lower())
+check("answer prompt does not suggest Sabi's name", "name of the AI" not in sweets_prompt)
 check(
     "universal prompt never leaks operands",
     not re.search(r"\b(?:one|two)\b", sweets_prompt.lower()),
@@ -72,7 +73,7 @@ literacy_universal, literacy_course, literacy_label = build_gemini_curriculum_pr
 )
 check("literacy turn is literacy", literacy_course == "literacy")
 check("literacy topic is preserved", literacy_label == "beginning sounds")
-check("literacy prompt uses same human alternatives", "name of the AI, Sabi" in literacy_universal and "can't hear" in literacy_universal)
+check("literacy prompt uses the same literal instruction", "only the exact words audibly spoken" in literacy_universal)
 check("literacy prompt never leaks example word", "dog" not in literacy_universal.lower())
 check("literacy answer prompt excludes name priming", "saying their name" not in literacy_universal and "introducing themselves" not in literacy_universal)
 
@@ -130,12 +131,12 @@ try:
     check("audio part sent inline", "inlineData" in parts[0])
     check("curriculum prompt in payload", "walking through a numeracy lesson" in parts[1]["text"])
     check("ordinary answer payload excludes name priming", "saying their name" not in parts[1]["text"])
-    check("prompt keeps exact response instruction", "Reply with their response" in parts[1]["text"])
+    check("prompt keeps literal response instruction", "only the exact words audibly spoken" in parts[1]["text"])
     check(
-        "every prompt allows Sabi, complaints, can't-hear, and ordinary speech",
+        "prompt supplies no complaint or persona text to copy",
         all(
-            phrase in parts[1]["text"]
-            for phrase in ("name of the AI, Sabi", "quality of the call or lesson", "can't hear the agent", "normal human phrase")
+            phrase not in parts[1]["text"].lower()
+            for phrase in ("name of the ai", "complaint", "can't hear", "normal human phrase")
         ),
     )
     check(
@@ -193,7 +194,7 @@ try:
         mode="general",
     )
     check("naira context is explicit", "numeracy lesson in naira" in naira_prompt)
-    check("naira prompt keeps exact response instruction", "Reply with their response" in naira_prompt)
+    check("naira prompt keeps literal response instruction", "only the exact words audibly spoken" in naira_prompt)
     check("global noisy-phone prompt is on the naira turn", "noisy 8kHz phone call" in naira_prompt)
     check("naira tag does not leak operands", "five" not in naira_prompt and "three" not in naira_prompt)
     check("naira answer turn excludes name priming", "saying their name" not in naira_prompt)
@@ -202,7 +203,7 @@ try:
     check("global noisy-phone prompt is on the name turn", "noisy 8kHz phone call" in name_prompt)
     check("name turn keeps broad name context", "saying their name" in name_prompt)
     check("name turn keeps introduction context", "introducing themselves" in name_prompt)
-    check("name turn explicitly allows calling Sabi", "name of the AI, Sabi" in name_prompt)
+    check("name turn still forbids invented names", "infer, complete, paraphrase, or invent words" in name_prompt)
     greeting_name_prompt = sst._gemini_prompt(
         "Lesson metadata: course=numeracy; skill=market numeracy. "
         "Exact recent tutor prompt: Hello! I'm Sabi, your learning friend. What is your name?",

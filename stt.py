@@ -110,14 +110,14 @@ LITERACY_WORDS = {
 
 WHISPER_CLI_PROVIDERS = {"whisper_cli", "openai_whisper", "openai-whisper", "cli_whisper"}
 
-# Every Gemini turn uses the same broad human-conversation frame that recovered
-# both `Sabi` and `one sweet` from the Aug 5 2:47 PM call. The curriculum only
-# supplies a safe course/topic label; operands and expected answers never enter
-# the STT prompt.
+# Gemini receives only a safe course/topic label plus a literal-transcription
+# instruction. Enumerating possible complaints, names, or answers made the
+# generative audio model copy those suggestions onto short but audible clips.
+# The downstream tutor LLM—not STT—decides whether literal speech is an answer,
+# complaint, repeat request, or unrelated phrase.
 GEMINI_RESPONSE_CONTEXT = (
-    "This could also be the child calling the name of the AI, Sabi, a complaint about "
-    "the quality of the call or lesson, complaining they can't hear the agent, or some "
-    "other normal human phrase. Reply with their response"
+    "Reply with only the exact words audibly spoken in this recording. "
+    "Do not answer the lesson question, infer, complete, paraphrase, or invent words."
 )
 
 NUMERACY_CONTEXT_LABELS: tuple[tuple[tuple[str, ...], str], ...] = (

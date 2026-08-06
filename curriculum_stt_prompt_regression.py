@@ -13,11 +13,9 @@ from stt import _expects_name, build_gemini_curriculum_prompt
 
 REQUIRED = (
     "A Nigerian child on a noisy 8kHz phone call",
-    "name of the AI, Sabi",
-    "a complaint about the quality of the call or lesson",
-    "complaining they can't hear the agent",
-    "some other normal human phrase",
-    "Reply with their response",
+    "only the exact words audibly spoken",
+    "Do not answer the lesson question",
+    "infer, complete, paraphrase, or invent words",
 )
 
 LITERACY_SCAFFOLDS = {
@@ -41,6 +39,8 @@ def check_prompt(name: str, source: str, course: str) -> None:
     assert actual_course == course, f"{name}: expected {course}, got {actual_course}"
     assert f"walking through a {course} lesson" in prompt, f"{name}: missing course"
     assert all(required in prompt for required in REQUIRED), f"{name}: incomplete universal prompt"
+    assert "complain" not in prompt.lower(), f"{name}: complaint suggestion leaked into STT"
+    assert "name of the AI" not in prompt, f"{name}: Sabi-name suggestion leaked into STT"
     has_name_priming = "saying their name, introducing themselves" in prompt
     assert has_name_priming == _expects_name(context), f"{name}: incorrect name priming"
     # The curriculum row selects only a safe category. Its full question,

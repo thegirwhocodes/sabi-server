@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import hashlib
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 os.environ.setdefault("SABI_SHARED_AUDIO_DIR", tempfile.mkdtemp(prefix="sabi-original-regression-"))
 
 import voice_realtime
+from llm import SabiLLM
 from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, ORIGINAL_SABI_SYSTEM_PROMPT
 
 
@@ -31,6 +33,23 @@ def context_block(dialplan: str, name: str) -> str:
     start = dialplan.index(marker)
     next_context = dialplan.find("\n[", start + len(marker))
     return dialplan[start : next_context if next_context >= 0 else len(dialplan)]
+
+
+async def first_name_guard_check() -> tuple[bool, str]:
+    tutor = SabiLLM.__new__(SabiLLM)
+
+    async def fake_generate(system_prompt, messages):
+        return "Lovely to meet you, Amarachi!"
+
+    tutor._generate_from_system_prompt = fake_generate
+    response = await tutor.generate_with_system_prompt(
+        system_prompt=ORIGINAL_SABI_SYSTEM_PROMPT,
+        messages=[
+            {"role": "assistant", "content": ORIGINAL_SABI_FIRST_MESSAGE},
+            {"role": "user", "content": "My name is Amarachi."},
+        ],
+    )
+    return response == "Lovely to meet you, Amarachi!", response
 
 
 def main() -> int:
@@ -72,6 +91,27 @@ def main() -> int:
         "original_lane_keeps_raw_gemini_text",
         "normalized_text=raw_text" in original_source
         and "_normalize_transcript_for_lesson(" not in original_source,
+    )
+    first_name_ok, first_name_response = asyncio.run(first_name_guard_check())
+    ok &= check(
+        "original_lane_accepts_the_first_name_it_requested",
+        first_name_ok,
+        first_name_response,
+    )
+    ok &= check(
+        "first_name_exception_does_not_allow_full_names_or_addresses",
+        not SabiLLM._is_expected_first_name_response(
+            [
+                {"role": "assistant", "content": ORIGINAL_SABI_FIRST_MESSAGE},
+                {"role": "user", "content": "My full name is Amarachi Okafor."},
+            ]
+        )
+        and not SabiLLM._is_expected_first_name_response(
+            [
+                {"role": "assistant", "content": ORIGINAL_SABI_FIRST_MESSAGE},
+                {"role": "user", "content": "My address is 12 Lagos Road."},
+            ]
+        ),
     )
 
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")

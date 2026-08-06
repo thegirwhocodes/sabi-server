@@ -145,10 +145,6 @@ NUMERIC_AMBIGUITY_CONFIRMATION_TEXT = os.getenv(
     "SABI_NUMERIC_AMBIGUITY_CONFIRMATION_TEXT",
     "I may not have heard the full amount. Say the naira amount again slowly for me.",
 )
-NAME_CLARIFICATION_TEXT = os.getenv(
-    "SABI_NAME_CLARIFICATION_TEXT",
-    "Sorry, I didn't catch your name clearly. Please say just your name again.",
-).strip()
 KEYPAD_NUMERIC_TIMEOUT_SECONDS = int(os.getenv("SABI_KEYPAD_NUMERIC_TIMEOUT_SECONDS", "8"))
 KEYPAD_NUMERIC_MAX_DIGITS = int(os.getenv("SABI_KEYPAD_NUMERIC_MAX_DIGITS", "4"))
 KEYPAD_NUMERIC_INTERDIGIT_SECONDS = float(os.getenv("SABI_KEYPAD_NUMERIC_INTERDIGIT_SECONDS", "1.2"))
@@ -2043,7 +2039,6 @@ class RealtimeCall:
                 if keypad_text:
                     turn_is_answer = True
                     assessed_name = None
-                    name_unclear = False
                     assessment_output = "keypad"
                 else:
                     assessment = await self.llm.assess_turn(
@@ -2053,58 +2048,12 @@ class RealtimeCall:
                     )
                     turn_is_answer = assessment.is_answer
                     assessed_name = assessment.name
-                    name_unclear = assessment.name_unclear
                     assessment_output = assessment.model_output
                 assessment_latency = time.monotonic() - assessment_start
                 turn_flags.append("llm_turn_assessed")
                 turn_flags.append("answer" if turn_is_answer else "not_answer")
                 if not assessment_output:
                     turn_flags.append("turn_assessment_failed_closed")
-
-                if asked_for_name and name_unclear:
-                    turn_flags.extend(["name_unclear", "name_clarification", "not_graded"])
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": "[The learner tried to give a name, but the transcript was not a plausible name.]",
-                        }
-                    )
-                    messages.append({"role": "assistant", "content": NAME_CLARIFICATION_TEXT})
-                    tts_start = time.monotonic()
-                    clarification_pcm = await self.synthesize_pcm(
-                        NAME_CLARIFICATION_TEXT,
-                        "rt_name_clarification",
-                    )
-                    tts_latency = time.monotonic() - tts_start
-                    self.persist_turn_review(
-                        turn=turn,
-                        user_audio_path=user_audio_path,
-                        transcript=transcript,
-                        raw_text=raw_stt_text,
-                        normalized_text="[unclear learner name]",
-                        learning_state_before=learning_state_before_turn,
-                        learning_state_after=learning_state_before_turn,
-                        assistant_text=NAME_CLARIFICATION_TEXT,
-                        assistant_pcm=clarification_pcm,
-                        flags=turn_flags,
-                        timings={
-                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
-                            "turn_assessment_seconds": round(assessment_latency, 3),
-                            "tts_seconds": round(tts_latency, 3),
-                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
-                        },
-                    )
-                    logger.info(
-                        "Realtime turn %s: implausible name %r clarified without storage or grading",
-                        turn,
-                        text,
-                    )
-                    interrupted = await self.play_pcm_with_barge(
-                        clarification_pcm,
-                        speech_threshold=speech_threshold,
-                        end_silence_frames=end_silence_frames,
-                    )
-                    continue
 
                 if asked_for_name and turn_is_answer and assessed_name:
                     text_for_lesson = f"My name is {assessed_name}"
@@ -2174,7 +2123,10 @@ class RealtimeCall:
                                 "Do not grade it, lower the learner's level, increase scaffolding, or advance "
                                 "the lesson as though it were wrong. Respond naturally to what they said. "
                                 "If they could not hear or asked for repetition, repeat the current question "
-                                f"clearly. Exact caller transcript: {text!r}."
+                                "clearly. If the current question asks for the learner's name and this is not "
+                                "a plausible name, ask them to say their name again; if it is a complaint, "
+                                "address it briefly and then repeat the name question. "
+                                f"Exact caller transcript: {text!r}."
                             ),
                         }
                     )

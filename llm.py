@@ -359,19 +359,12 @@ class SabiLLM:
                 )
             except Exception as exc:
                 self._disable_provider_if_terminal("cerebras", exc)
-                logger.warning("Cerebras turn assessment failed (%s), falling back to Claude", exc)
+                logger.warning("Cerebras turn assessment failed (%s), falling back to Groq", exc)
 
-        if not raw and ANTHROPIC_API_KEY:
-            try:
-                raw = await self._generate_claude(
-                    TURN_ASSESSMENT_PROMPT,
-                    messages,
-                    max_tokens=80,
-                    temperature=0,
-                )
-            except Exception as exc:
-                logger.warning("Claude turn assessment failed (%s), falling back to Groq", exc)
-
+        # This gate runs before every graded turn, so use the fastest proven
+        # production provider before the full-response model. Groq classifies
+        # the real Sabi cases in roughly 0.1-0.2s; Claude remains the safety
+        # fallback if Groq is unavailable.
         if not raw and GROQ_API_KEY:
             try:
                 raw = await self._generate_openai_compat(
@@ -385,7 +378,18 @@ class SabiLLM:
                     temperature=0,
                 )
             except Exception as exc:
-                logger.warning("Groq turn assessment failed (%s), failing closed", exc)
+                logger.warning("Groq turn assessment failed (%s), falling back to Claude", exc)
+
+        if not raw and ANTHROPIC_API_KEY:
+            try:
+                raw = await self._generate_claude(
+                    TURN_ASSESSMENT_PROMPT,
+                    messages,
+                    max_tokens=80,
+                    temperature=0,
+                )
+            except Exception as exc:
+                logger.warning("Claude turn assessment failed (%s), failing closed", exc)
 
         if not raw and self.primary == "ollama":
             raw = await self._generate_ollama(

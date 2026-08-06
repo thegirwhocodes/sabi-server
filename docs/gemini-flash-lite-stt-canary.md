@@ -1,8 +1,8 @@
 # Gemini 3.5 Flash-Lite STT canary
 
-The isolated Sabi phone lane sends every completed caller turn to Gemini 3.5
-Flash-Lite. The production phone lane remains unchanged while the canary is
-evaluated.
+The live Sabi phone lane sends every completed caller turn to Gemini 3.5
+Flash-Lite. The previous listener remains available as a rollback lane while
+the Gemini route is evaluated.
 
 ## Per-turn prompt policy
 
@@ -32,6 +32,11 @@ direct attempt to answer the current question or not? Complaints, repeat
 requests, calling Sabi, and unrelated conversation do not reach the
 deterministic grader and cannot lower the learner's level. The old repeat
 regex and short-barge grading shortcuts are not used.
+
+This binary gate is not a second STT model and does not rewrite Gemini's
+transcript. It uses the fast Groq text model first (about 0.1-0.2 seconds in
+the production-shaped check), then Claude only as a fallback. If neither can
+return valid JSON, the turn fails closed as not graded.
 
 When Sabi asks for a learner's name, that same LLM gate accepts only a
 plausible human name. An implausible STT fragment is not stored; Sabi asks the

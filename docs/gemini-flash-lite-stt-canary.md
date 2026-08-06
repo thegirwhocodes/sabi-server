@@ -19,7 +19,7 @@ turn so prompt behavior remains auditable.
 Gemini `generateContent` calls are stateless, so the shared context and turn
 tag are attached to every audio request. A single persistent HTTP client reuses
 connections across turns. Thinking is set to `minimal`, and the canary timeout
-is 3.5 seconds.
+is 5.5 seconds.
 
 ## Failure and control behavior
 
@@ -27,13 +27,21 @@ is 3.5 seconds.
 becomes an unclear-audio retry; Sabi does not silently substitute Whisper or
 Groq. `gemini_fallback` is the only setting that authorizes that substitution.
 
-Repeat requests such as "I didn't hear the question" are treated as control
-turns: Sabi repeats the latest question, does not grade the child, and does not
-lower the learning level.
+After transcription, the tutor LLM makes one pre-grading decision: is this a
+direct attempt to answer the current question or not? Complaints, repeat
+requests, calling Sabi, and unrelated conversation do not reach the
+deterministic grader and cannot lower the learner's level. The old repeat
+regex and short-barge grading shortcuts are not used.
 
-During every numeric answer window, callers may speak or type digits. Keypad
-digits submit with `#`, after the short inter-digit pause, or at the configured
-maximum length.
+When Sabi asks for a learner's name, that same LLM gate accepts only a
+plausible human name. An implausible STT fragment is not stored; Sabi asks the
+learner to say the name again.
+
+Only when the current tutor question has a computable numeric answer may the
+caller speak or type digits. Keypad input and the keypad announcement remain
+off for literacy, names, complaints, and ordinary conversation. Digits submit
+with `#`, after the short inter-digit pause, or at the configured maximum
+length.
 
 ## Configuration
 

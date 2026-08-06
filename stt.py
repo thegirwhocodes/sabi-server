@@ -12,6 +12,7 @@ Optimizations for Nigerian English:
 import io
 import logging
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile

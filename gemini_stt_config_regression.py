@@ -7,6 +7,7 @@ present so the local model is skipped).
 """
 
 import os
+import re
 import tempfile
 import wave
 
@@ -59,7 +60,10 @@ check("universal prompt includes name and introduction", "saying their name, int
 check("universal prompt explicitly names Sabi", "name of the AI, Sabi" in sweets_prompt)
 check("universal prompt includes can't-hear complaint", "can't hear the agent" in sweets_prompt)
 check("universal prompt includes normal human phrase", "some other normal human phrase" in sweets_prompt)
-check("universal prompt never leaks operands", "two" not in sweets_prompt and "one" not in sweets_prompt)
+check(
+    "universal prompt never leaks operands",
+    not re.search(r"\b(?:one|two)\b", sweets_prompt.lower()),
+)
 
 literacy_universal, literacy_course, literacy_label = build_gemini_curriculum_prompt(
     "Lesson metadata: course=literacy; lesson_title=Beginning Sounds. "

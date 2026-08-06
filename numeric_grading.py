@@ -313,6 +313,16 @@ The child's latest answer included {check.child_numbers}, so it appears incorrec
 Do not say "wrong." Acknowledge the attempt, then follow the learner-state bump-down ladder if present; otherwise use smaller numbers, a simpler market story, or a concrete counting step before trying a fresh similar problem."""
 
 
+def question_expects_numeric_answer(question: str) -> bool:
+    """Return true only when the current tutor question has a computable number.
+
+    This is intentionally stricter than broad market/numeracy context. It is
+    used for keypad availability, where merely mentioning a number—or asking a
+    literacy question containing "how"—must never enable numeric entry.
+    """
+    return _infer_expected_number(str(question or "")) is not None
+
+
 def analyze_latest_numeric_turn(messages: list[dict]) -> NumericTurnCheck:
     user_index = None
     for index in range(len(messages) - 1, -1, -1):

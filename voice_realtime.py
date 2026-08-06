@@ -28,9 +28,8 @@ from call_admin import append_call_turn_review, call_turn_audio_path, write_call
 from curriculum_path import resolve_literacy_lesson, resolve_numeracy_lesson
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session
-from numeric_grading import analyze_latest_numeric_turn
+from numeric_grading import analyze_latest_numeric_turn, question_expects_numeric_answer
 from transcript_normalizer import (
-    has_numeric_lesson_context,
     is_likely_stt_hallucination_transcript,
     is_phone_system_transcript,
     normalize_lesson_transcript,
@@ -80,16 +79,6 @@ INITIAL_GREETING_BARGE_GRACE_MS = max(
     BARGE_GRACE_MS,
     int(os.getenv("SABI_INITIAL_GREETING_BARGE_GRACE_MS", "3000")),
 )
-SHORT_BARGE_REPROMPT_MAX_SECONDS = float(
-    os.getenv("SABI_SHORT_BARGE_REPROMPT_MAX_SECONDS", "1.1")
-)
-LONG_BARGE_SPARSE_MIN_SECONDS = float(
-    os.getenv("SABI_LONG_BARGE_SPARSE_MIN_SECONDS", "2.0")
-)
-SHORT_BARGE_REPROMPT_TEXT = os.getenv(
-    "SABI_SHORT_BARGE_REPROMPT_TEXT",
-    "I heard you while I was still speaking, and I may have misheard. Please say that again now.",
-).strip()
 FILLER_WORDS = {
     "um", "umm", "uh", "uhh", "erm", "hmm", "mm", "mmm",
     "um...", "uh...", "hmm...", "mm-hmm", "mhm",
@@ -156,6 +145,10 @@ NUMERIC_AMBIGUITY_CONFIRMATION_TEXT = os.getenv(
     "SABI_NUMERIC_AMBIGUITY_CONFIRMATION_TEXT",
     "I may not have heard the full amount. Say the naira amount again slowly for me.",
 )
+NAME_CLARIFICATION_TEXT = os.getenv(
+    "SABI_NAME_CLARIFICATION_TEXT",
+    "Sorry, I didn't catch your name clearly. Please say just your name again.",
+).strip()
 KEYPAD_NUMERIC_TIMEOUT_SECONDS = int(os.getenv("SABI_KEYPAD_NUMERIC_TIMEOUT_SECONDS", "8"))
 KEYPAD_NUMERIC_MAX_DIGITS = int(os.getenv("SABI_KEYPAD_NUMERIC_MAX_DIGITS", "4"))
 KEYPAD_NUMERIC_INTERDIGIT_SECONDS = float(os.getenv("SABI_KEYPAD_NUMERIC_INTERDIGIT_SECONDS", "1.2"))
@@ -435,77 +428,6 @@ def _retry_text_for_unclear_audio(retry_streak: int) -> str:
     return UNCLEAR_AUDIO_RETRY_TEXT
 
 
-REPEAT_REQUEST_PATTERNS = (
-    re.compile(r"\b(?:i\s+)?(?:did(?:n['’]?t|\s+not)|could(?:n['’]?t|\s+not)|can(?:not|'t))\s+hear\b", re.I),
-    re.compile(r"\b(?:please\s+)?repeat(?:\s+(?:it|that|the\s+question|yourself))?\b", re.I),
-    re.compile(r"\b(?:can|could|will|would)\s+you\s+(?:please\s+)?(?:repeat|say\s+(?:it|that)\s+again)\b", re.I),
-    re.compile(r"\b(?:say|ask)\s+(?:it|that|the\s+question)\s+again\b", re.I),
-    re.compile(r"\bwhat\s+(?:did\s+you\s+say|was\s+the\s+question)\b", re.I),
-    re.compile(r"\bcome\s+again\b", re.I),
-    re.compile(r"^\s*(?:pardon|sorry,?\s+what)\s*[?.!]*\s*$", re.I),
-)
-
-
-def _looks_like_repeat_request(text: str) -> bool:
-    """Recognize a listening/control request before lesson grading runs."""
-    normalized = " ".join(str(text or "").split())
-    return bool(normalized) and any(pattern.search(normalized) for pattern in REPEAT_REQUEST_PATTERNS)
-
-
-def _should_reprompt_short_numeric_barge(
-    *,
-    utterance_seconds: float,
-    utterance_from_barge: bool,
-    numeric_stt_context: bool,
-    keypad_text: str | None,
-    text: str,
-    already_reprompted: bool,
-) -> bool:
-    """Do not grade a prompt-shaped transcript from a suspicious interruption.
-
-    The Aug 5 live call produced `20` from a 0.92-second clip where the caller
-    actually said `Sabi`. A longer control request also sometimes collapsed to
-    one invented token (`4` or `Oun`). A single repeat is safer than changing
-    the learner's level from either duration/text mismatch. The immediate
-    follow-up is allowed through so a naturally short answer cannot loop.
-    """
-    normalized_words = str(text or "").strip(" .,!?:;").split()
-    suspicious_duration_shape = (
-        0 < utterance_seconds <= SHORT_BARGE_REPROMPT_MAX_SECONDS
-        and _looks_like_numeric_answer(text)
-    ) or (
-        utterance_seconds >= LONG_BARGE_SPARSE_MIN_SECONDS
-        and len(normalized_words) <= 1
-    )
-    return (
-        not already_reprompted
-        and utterance_from_barge
-        and numeric_stt_context
-        and not keypad_text
-        and bool(normalized_words)
-        and suspicious_duration_shape
-    )
-
-
-def _last_question_for_repeat(messages: list[dict[str, str]]) -> str:
-    """Return the most recent tutor question without inventing a new scaffold."""
-    for message in reversed(messages):
-        if message.get("role") != "assistant":
-            continue
-        content = " ".join(str(message.get("content") or "").split())
-        if not content:
-            continue
-        questions = [
-            sentence.strip()
-            for sentence in re.split(r"(?<=[.!?])\s+", content)
-            if sentence.strip().endswith("?")
-        ]
-        if questions:
-            return questions[-1].strip()
-        return content
-    return "Please say your answer again."
-
-
 def _is_literacy_state(state: dict | None) -> bool:
     state = state or {}
     literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
@@ -534,9 +456,35 @@ def _stt_mode_for_state(state: dict | None) -> str:
 
 
 def _stt_mode_for_turn(state: dict | None, messages: list[dict[str, str]]) -> str:
-    if has_numeric_lesson_context(messages):
+    if _current_question_expects_numeric(messages):
         return "general"
     return _stt_mode_for_state(state)
+
+
+def _latest_assistant_turn(messages: list[dict[str, str]]) -> str:
+    return next(
+        (
+            str(message.get("content") or "")
+            for message in reversed(messages)
+            if message.get("role") == "assistant"
+        ),
+        "",
+    )
+
+
+def _current_question_expects_numeric(messages: list[dict[str, str]]) -> bool:
+    """Keypad/STT numeric gate based only on the question being answered now."""
+    return question_expects_numeric_answer(_latest_assistant_turn(messages))
+
+
+def _current_question_asks_for_name(messages: list[dict[str, str]]) -> bool:
+    current = _latest_assistant_turn(messages).lower()
+    return bool(
+        re.search(
+            r"\b(?:what(?:'s| is) your name|tell me your name|say your name|who am i speaking (?:to|with))\b",
+            current,
+        )
+    )
 
 
 def _recent_assistant_stt_context(
@@ -553,17 +501,8 @@ def _recent_assistant_stt_context(
     # The outgoing tutor turn alone defines the response expected now. Older
     # maths wording must not turn a new literacy question into a numeric STT
     # prompt (a failure observed in the Aug 6 callback).
-    recent_tutor = next(
-        (
-            str(message.get("content") or "")
-            for message in reversed(messages)
-            if message.get("role") == "assistant"
-        ),
-        "",
-    )
-    numeric_context = has_numeric_lesson_context(
-        [{"role": "assistant", "content": recent_tutor}]
-    )
+    recent_tutor = _latest_assistant_turn(messages)
+    numeric_context = question_expects_numeric_answer(recent_tutor)
     course = "numeracy" if numeric_context else str(state.get("course") or "numeracy")
     if _is_literacy_state(state) and not numeric_context:
         course = "literacy"
@@ -1759,7 +1698,6 @@ class RealtimeCall:
         student_id: Optional[str] = None
         effective_state: dict | None = None
         starting_learning_state: dict | None = None
-        short_barge_reprompt_pending = False
 
         try:
             student = await self.memory.find_or_create_student(self.phone)
@@ -1821,7 +1759,7 @@ class RealtimeCall:
                     )
                     break
 
-                numeric_stt_context = has_numeric_lesson_context(messages)
+                numeric_stt_context = _current_question_expects_numeric(messages)
                 stt_mode = _stt_mode_for_turn(effective_state, messages)
                 stt_context = _recent_assistant_stt_context(messages, effective_state)
                 speech_threshold = _speech_threshold_for_state(effective_state)
@@ -1860,15 +1798,7 @@ class RealtimeCall:
                         self.set_end_reason("no_utterance")
                     break
 
-                already_reprompted_short_barge = short_barge_reprompt_pending
-                short_barge_reprompt_pending = False
-
                 turn_start = time.monotonic()
-                utterance_seconds = (
-                    len(utterance) / (SAMPLE_RATE * SAMPLE_WIDTH)
-                    if utterance and not keypad_text
-                    else 0.0
-                )
                 user_audio_path = None
                 if keypad_text:
                     transcript = {
@@ -1927,33 +1857,6 @@ class RealtimeCall:
                     await self.request_callback_retry(text)
                     self.set_end_reason("carrier_or_voicemail_audio")
                     break
-                if _looks_like_repeat_request(text):
-                    repeat_response = f"Of course. {_last_question_for_repeat(messages)}"
-                    repeat_pcm = await self.synthesize_pcm(repeat_response, "rt_repeat_question")
-                    self.persist_turn_review(
-                        turn=turn,
-                        user_audio_path=user_audio_path,
-                        transcript=transcript,
-                        raw_text=raw_stt_text,
-                        normalized_text=text,
-                        learning_state_before=learning_state_before_turn,
-                        learning_state_after=learning_state_before_turn,
-                        assistant_text=repeat_response,
-                        assistant_pcm=repeat_pcm,
-                        flags=[*turn_flags, "control_request", "repeat_question", "not_graded"],
-                        timings={
-                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
-                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
-                        },
-                    )
-                    logger.info("Realtime turn %s: repeating question without grading text=%r", turn, text)
-                    retry_streak = 0
-                    interrupted = await self.play_pcm_with_barge(
-                        repeat_pcm,
-                        speech_threshold=speech_threshold,
-                        end_silence_frames=end_silence_frames,
-                    )
-                    continue
                 if normalized_text in FILLER_WORDS:
                     logger.info("Realtime turn %s: ignoring filler '%s'", turn, text)
                     self.persist_turn_review(
@@ -1969,53 +1872,6 @@ class RealtimeCall:
                             "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
                             "turn_total_seconds": round(time.monotonic() - turn_start, 3),
                         },
-                    )
-                    continue
-                if _should_reprompt_short_numeric_barge(
-                    utterance_seconds=utterance_seconds,
-                    utterance_from_barge=utterance_from_barge,
-                    numeric_stt_context=numeric_stt_context,
-                    keypad_text=keypad_text,
-                    text=text,
-                    already_reprompted=already_reprompted_short_barge,
-                ):
-                    reprompt_pcm = await self.synthesize_pcm(
-                        SHORT_BARGE_REPROMPT_TEXT,
-                        "rt_short_barge_reprompt",
-                    )
-                    self.persist_turn_review(
-                        turn=turn,
-                        user_audio_path=user_audio_path,
-                        transcript=transcript,
-                        raw_text=raw_stt_text,
-                        normalized_text=text,
-                        learning_state_before=learning_state_before_turn,
-                        learning_state_after=learning_state_before_turn,
-                        assistant_text=SHORT_BARGE_REPROMPT_TEXT,
-                        assistant_pcm=reprompt_pcm,
-                        flags=[
-                            *turn_flags,
-                            "short_barge_reprompt",
-                            "possible_stt_mishear",
-                            "not_graded",
-                        ],
-                        timings={
-                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
-                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
-                        },
-                    )
-                    logger.info(
-                        "Realtime turn %s: suspicious numeric-context barge %.2fs reprompted without grading text=%r",
-                        turn,
-                        utterance_seconds,
-                        text,
-                    )
-                    short_barge_reprompt_pending = True
-                    retry_streak = 0
-                    interrupted = await self.play_pcm_with_barge(
-                        reprompt_pcm,
-                        speech_threshold=speech_threshold,
-                        end_silence_frames=end_silence_frames,
                     )
                     continue
                 if not text or _looks_like_stt_hallucination(text):
@@ -2181,11 +2037,88 @@ class RealtimeCall:
                     turn_flags.append("low_confidence")
 
                 retry_streak = 0
-                text_for_lesson = _normalize_transcript_for_lesson(text, messages)
+                asked_for_name = _current_question_asks_for_name(messages)
+                latest_question = _latest_assistant_turn(messages)
+                assessment_start = time.monotonic()
+                if keypad_text:
+                    turn_is_answer = True
+                    assessed_name = None
+                    name_unclear = False
+                    assessment_output = "keypad"
+                else:
+                    assessment = await self.llm.assess_turn(
+                        latest_question=latest_question,
+                        transcript=text,
+                        asked_for_name=asked_for_name,
+                    )
+                    turn_is_answer = assessment.is_answer
+                    assessed_name = assessment.name
+                    name_unclear = assessment.name_unclear
+                    assessment_output = assessment.model_output
+                assessment_latency = time.monotonic() - assessment_start
+                turn_flags.append("llm_turn_assessed")
+                turn_flags.append("answer" if turn_is_answer else "not_answer")
+                if not assessment_output:
+                    turn_flags.append("turn_assessment_failed_closed")
+
+                if asked_for_name and name_unclear:
+                    turn_flags.extend(["name_unclear", "name_clarification", "not_graded"])
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "[The learner tried to give a name, but the transcript was not a plausible name.]",
+                        }
+                    )
+                    messages.append({"role": "assistant", "content": NAME_CLARIFICATION_TEXT})
+                    tts_start = time.monotonic()
+                    clarification_pcm = await self.synthesize_pcm(
+                        NAME_CLARIFICATION_TEXT,
+                        "rt_name_clarification",
+                    )
+                    tts_latency = time.monotonic() - tts_start
+                    self.persist_turn_review(
+                        turn=turn,
+                        user_audio_path=user_audio_path,
+                        transcript=transcript,
+                        raw_text=raw_stt_text,
+                        normalized_text="[unclear learner name]",
+                        learning_state_before=learning_state_before_turn,
+                        learning_state_after=learning_state_before_turn,
+                        assistant_text=NAME_CLARIFICATION_TEXT,
+                        assistant_pcm=clarification_pcm,
+                        flags=turn_flags,
+                        timings={
+                            "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                            "turn_assessment_seconds": round(assessment_latency, 3),
+                            "tts_seconds": round(tts_latency, 3),
+                            "turn_total_seconds": round(time.monotonic() - turn_start, 3),
+                        },
+                    )
+                    logger.info(
+                        "Realtime turn %s: implausible name %r clarified without storage or grading",
+                        turn,
+                        text,
+                    )
+                    interrupted = await self.play_pcm_with_barge(
+                        clarification_pcm,
+                        speech_threshold=speech_threshold,
+                        end_silence_frames=end_silence_frames,
+                    )
+                    continue
+
+                if asked_for_name and turn_is_answer and assessed_name:
+                    text_for_lesson = f"My name is {assessed_name}"
+                    turn_flags.append("name_validated_by_llm")
+                elif asked_for_name and not turn_is_answer:
+                    # Preserve the raw STT in the call-review record, but keep
+                    # non-name speech out of deterministic name extraction.
+                    text_for_lesson = "[The caller did not answer the name question.]"
+                else:
+                    text_for_lesson = _normalize_transcript_for_lesson(text, messages)
                 if text_for_lesson != text:
                     turn_flags.append("transcript_normalized")
                 messages.append({"role": "user", "content": text_for_lesson})
-                if not identity_confirmed:
+                if turn_is_answer and not identity_confirmed:
                     resolved_student = await self.memory.resolve_student_for_spoken_identity(
                         student,
                         self.phone,
@@ -2206,34 +2139,51 @@ class RealtimeCall:
                             resolved_student.get("spoken_child_name") or resolved_student.get("name"),
                             module,
                         )
-                try:
-                    turn_stats = analyze_session(
-                        {**student, "learning_state": effective_state, "current_module": module},
-                        messages,
-                    )
-                    effective_state = turn_stats.learning_state
-                    module = int(effective_state.get("current_module") or module or 0)
-                    logger.info(
-                        "Realtime turn %s route module=%s phase=%s diagnostic=%s next=%s",
-                        turn,
-                        module,
-                        effective_state.get("phase"),
-                        effective_state.get("diagnostic_status"),
-                        effective_state.get("next_step"),
-                    )
-                except Exception as exc:
-                    logger.debug("Could not update in-call learning state: %s", exc)
+                if turn_is_answer:
+                    try:
+                        turn_stats = analyze_session(
+                            {**student, "learning_state": effective_state, "current_module": module},
+                            messages,
+                        )
+                        effective_state = turn_stats.learning_state
+                        module = int(effective_state.get("current_module") or module or 0)
+                        logger.info(
+                            "Realtime turn %s route module=%s phase=%s diagnostic=%s next=%s",
+                            turn,
+                            module,
+                            effective_state.get("phase"),
+                            effective_state.get("diagnostic_status"),
+                            effective_state.get("next_step"),
+                        )
+                    except Exception as exc:
+                        logger.debug("Could not update in-call learning state: %s", exc)
+                else:
+                    turn_flags.append("not_graded")
                 user_turns = sum(1 for message in messages if message["role"] == "user")
                 elapsed_seconds = time.monotonic() - call_started_at
                 llm_messages = [
                     *messages,
                     *build_call_control_messages(user_turns, elapsed_seconds, MAX_CALL_SECONDS),
                 ]
+                if not turn_is_answer:
+                    llm_messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "The latest caller turn is not a direct answer to your current question. "
+                                "Do not grade it, lower the learner's level, increase scaffolding, or advance "
+                                "the lesson as though it were wrong. Respond naturally to what they said. "
+                                "If they could not hear or asked for repetition, repeat the current question "
+                                f"clearly. Exact caller transcript: {text!r}."
+                            ),
+                        }
+                    )
 
                 llm_start = time.monotonic()
-                latest_numeric_check = analyze_latest_numeric_turn(messages)
+                latest_numeric_check = analyze_latest_numeric_turn(messages) if turn_is_answer else None
                 numeric_ambiguous = (
-                    latest_numeric_check.expected is not None
+                    latest_numeric_check is not None
+                    and latest_numeric_check.expected is not None
                     and bool(latest_numeric_check.child_numbers)
                     and latest_numeric_check.is_correct is None
                 )
@@ -2262,7 +2212,7 @@ class RealtimeCall:
                         user_turns,
                     )
                     repair_messages = [
-                        *messages,
+                        *llm_messages,
                         {
                             "role": "system",
                             "content": (
@@ -2288,7 +2238,7 @@ class RealtimeCall:
                     KEYPAD_NUMERIC_FALLBACK_ENABLED
                     and not keypad_option_announced
                     and KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT
-                    and has_numeric_lesson_context([*messages, {"role": "assistant", "content": response}])
+                    and question_expects_numeric_answer(response)
                 ):
                     response = f"{response} {KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT}"
                     keypad_option_announced = True
@@ -2309,6 +2259,7 @@ class RealtimeCall:
                     assistant_pcm=response_pcm,
                     timings={
                         "stt_seconds": round(float(transcript.get("stt_latency_seconds") or 0), 3),
+                        "turn_assessment_seconds": round(assessment_latency, 3),
                         "llm_seconds": round(llm_latency, 3),
                         "tts_seconds": round(tts_latency, 3),
                         "turn_total_seconds": round(time.monotonic() - turn_start, 3),

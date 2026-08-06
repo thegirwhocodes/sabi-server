@@ -45,7 +45,8 @@ def check_prompt(name: str, source: str, course: str) -> None:
     # The curriculum row selects only a safe category. Its full question,
     # numbers, examples, and expected answer must never be copied into Gemini.
     assert source not in prompt, f"{name}: leaked full curriculum source"
-    assert not re.search(r"\b\d+\b", prompt), f"{name}: leaked a numeric operand"
+    numeric_tokens = re.findall(r"\b\d+\b", prompt)
+    assert not numeric_tokens, f"{name}: leaked a numeric operand: {numeric_tokens}"
 
 
 def main() -> int:

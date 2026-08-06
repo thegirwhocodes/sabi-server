@@ -6,7 +6,10 @@ Cerebras and Groq use OpenAI-compatible APIs.
 
 import os
 import asyncio
+import json
 import logging
+import re
+from dataclasses import dataclass
 from typing import Optional, AsyncIterator
 
 import httpx
@@ -23,6 +26,75 @@ from guardrails import (
 from secret_loader import get_secret
 
 logger = logging.getLogger("sabi.llm")
+
+
+@dataclass(frozen=True)
+class TurnAssessment:
+    """The single pre-grading decision Sabi needs for a caller turn."""
+
+    is_answer: bool
+    name: str | None = None
+    model_output: str = ""
+
+
+TURN_ASSESSMENT_PROMPT = """You are the turn gate for a Nigerian child's phone lesson.
+
+Decide only whether the caller's exact transcript is a direct attempt to answer Sabi's latest question. Do not judge whether the academic answer is correct. A wrong maths or literacy attempt is still an answer. A complaint, request to repeat, statement that the caller cannot hear, calling Sabi's name, feedback about the call or lesson, and unrelated conversation are not answers.
+
+When ASKED_FOR_NAME is true, also validate the name:
+- Set is_answer true only when the transcript contains a plausible human name.
+- Copy only the name the caller actually said. Never invent, repair, or guess a name.
+- Ordinary phrases or transcription fragments such as "Learning To", "Not Available", or "The Network" are not plausible names.
+- If the name is implausible or unclear, set is_answer false and name null. Sabi will ask for clarification.
+
+Return exactly one JSON object and nothing else:
+{"is_answer": true or false, "name": "exact plausible name" or null}
+"""
+
+
+def _clean_assessed_name(value: object) -> str | None:
+    raw = str(value or "").strip()
+    raw = re.sub(r"^(?:my name is|i am|i'm)\s+", "", raw, flags=re.I)
+    cleaned = re.sub(r"[^A-Za-z' -]", "", raw).strip(" .,'-")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned or len(cleaned) > 40 or len(cleaned.split()) > 2:
+        return None
+    return " ".join(word.capitalize() for word in cleaned.split())
+
+
+def parse_turn_assessment(raw: str, *, asked_for_name: bool) -> TurnAssessment:
+    """Parse the model's private JSON and fail closed without grading."""
+    text = str(raw or "").strip()
+    try:
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        payload = json.loads(text[start:end])
+        is_answer = payload.get("is_answer") is True
+        name = _clean_assessed_name(payload.get("name")) if asked_for_name else None
+    except (ValueError, TypeError, json.JSONDecodeError, AttributeError):
+        return TurnAssessment(
+            is_answer=False,
+            name=None,
+            model_output=text,
+        )
+
+    if not asked_for_name:
+        return TurnAssessment(
+            is_answer=is_answer,
+            name=None,
+            model_output=text,
+        )
+    if not name:
+        return TurnAssessment(
+            is_answer=False,
+            name=None,
+            model_output=text,
+        )
+    return TurnAssessment(
+        is_answer=is_answer,
+        name=name if is_answer else None,
+        model_output=text,
+    )
 
 # LLM configuration
 ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY")
@@ -49,7 +121,7 @@ SABI_CORE_PROMPT = """You are Sabi (pronounced "SAH-bee", meaning "to know" in N
 - One idea per turn. Every turn should teach something new, check understanding, or build on the last answer.
 - Sound like the hackathon Sabi: alive, playful, curious, and fully present with the child.
 - NEVER repeat the same question. Once answered, move on.
-- If you do not know the child's name, ask once at most, then keep teaching.
+- If a name response is unclear, ask the child to say just their name again. Never invent a learner name.
 - Never get stuck apologizing about audio. If a transcript seems unclear, ask one very short repair question or move to an easier question.
 
 ## CRITICAL DESIGN PRINCIPLE: NAIRA-FIRST, ABSTRACT-SECOND
@@ -130,7 +202,7 @@ Never skip straight from the child's name into a math question on a first call.
 - If the number is correct, accept it even if a nearby object word sounds strange.
 - In market questions, "five bugs" or "five bucks" may mean "five bags" if you asked about bags.
 - Do not mark a numeric answer wrong just because the transcript has odd wording.
-- Names may be misspelled or oddly transcribed. Accept the closest likely name and keep going.
+- Never guess or repair a learner's name from an implausible transcript. Ask for the name again.
 - If the user message says the transcript was unclear, do not say "I can't hear you"; ask a tiny concrete question.
 
 ## IMPORTANT
@@ -248,6 +320,89 @@ class SabiLLM:
         if guarded.blocked:
             logger.warning("Sabi output guard blocked model text: %s", guarded.reason)
         return guarded.text
+
+    async def assess_turn(
+        self,
+        *,
+        latest_question: str,
+        transcript: str,
+        asked_for_name: bool = False,
+    ) -> TurnAssessment:
+        """Use the tutor LLM to decide whether this turn may reach grading.
+
+        This deliberately asks one binary question. The optional name fields
+        exist only for the onboarding question so an implausible STT fragment
+        is never stored as a learner identity.
+        """
+        payload = json.dumps(
+            {
+                "LATEST_SABI_QUESTION": str(latest_question or ""),
+                "CALLER_TRANSCRIPT": str(transcript or ""),
+                "ASKED_FOR_NAME": bool(asked_for_name),
+            },
+            ensure_ascii=False,
+        )
+        messages = [{"role": "user", "content": payload}]
+        raw = ""
+
+        if self.primary == "cerebras" and CEREBRAS_API_KEY and "cerebras" not in self.disabled_providers:
+            try:
+                raw = await self._generate_openai_compat(
+                    TURN_ASSESSMENT_PROMPT,
+                    messages,
+                    base_url="https://api.cerebras.ai/v1",
+                    api_key=CEREBRAS_API_KEY,
+                    model=CEREBRAS_MODEL,
+                    provider="Cerebras turn assessment",
+                    max_tokens=80,
+                    temperature=0,
+                )
+            except Exception as exc:
+                self._disable_provider_if_terminal("cerebras", exc)
+                logger.warning("Cerebras turn assessment failed (%s), falling back to Claude", exc)
+
+        if not raw and ANTHROPIC_API_KEY:
+            try:
+                raw = await self._generate_claude(
+                    TURN_ASSESSMENT_PROMPT,
+                    messages,
+                    max_tokens=80,
+                    temperature=0,
+                )
+            except Exception as exc:
+                logger.warning("Claude turn assessment failed (%s), falling back to Groq", exc)
+
+        if not raw and GROQ_API_KEY:
+            try:
+                raw = await self._generate_openai_compat(
+                    TURN_ASSESSMENT_PROMPT,
+                    messages,
+                    base_url="https://api.groq.com/openai/v1",
+                    api_key=GROQ_API_KEY,
+                    model=GROQ_MODEL,
+                    provider="Groq turn assessment",
+                    max_tokens=80,
+                    temperature=0,
+                )
+            except Exception as exc:
+                logger.warning("Groq turn assessment failed (%s), failing closed", exc)
+
+        if not raw and self.primary == "ollama":
+            raw = await self._generate_ollama(
+                TURN_ASSESSMENT_PROMPT,
+                messages,
+                max_tokens=80,
+                temperature=0,
+            )
+
+        assessment = parse_turn_assessment(raw, asked_for_name=asked_for_name)
+        logger.info(
+            "Turn assessment answer=%s asked_name=%s name=%r",
+            assessment.is_answer,
+            asked_for_name,
+            assessment.name,
+        )
+        return assessment
 
     async def generate(
         self,
@@ -384,22 +539,27 @@ class SabiLLM:
         api_key: str,
         model: str,
         provider: str = "API",
+        max_tokens: int = 200,
+        temperature: float | None = None,
     ) -> str:
         """Generate using any OpenAI-compatible API (Cerebras, Groq)."""
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                *messages,
+            ],
+        }
+        if temperature is not None:
+            request_body["temperature"] = temperature
         response = await self.client.post(
             f"{base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": model,
-                "max_tokens": 200,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    *messages,
-                ],
-            },
+            json=request_body,
         )
         response.raise_for_status()
         data = response.json()
@@ -476,8 +636,22 @@ class SabiLLM:
         if buffer.strip():
             yield buffer.strip()
 
-    async def _generate_claude(self, system_prompt: str, messages: list[dict]) -> str:
+    async def _generate_claude(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        max_tokens: int = 200,
+        temperature: float | None = None,
+    ) -> str:
         """Generate response using Claude Haiku API."""
+        request_body = {
+            "model": ANTHROPIC_MODEL,
+            "max_tokens": max_tokens,
+            "system": system_prompt,
+            "messages": messages,
+        }
+        if temperature is not None:
+            request_body["temperature"] = temperature
         response = await self.client.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -485,12 +659,7 @@ class SabiLLM:
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
-            json={
-                "model": ANTHROPIC_MODEL,
-                "max_tokens": 200,
-                "system": system_prompt,
-                "messages": messages,
-            },
+            json=request_body,
         )
         response.raise_for_status()
         data = response.json()
@@ -499,7 +668,13 @@ class SabiLLM:
             return content[0]["text"]
         return "Hello! I'm Sabi. Let's learn together!"
 
-    async def _generate_ollama(self, system_prompt: str, messages: list[dict]) -> str:
+    async def _generate_ollama(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        max_tokens: int = 200,
+        temperature: float = 0.7,
+    ) -> str:
         """Generate response using Ollama (Llama 3.1 8B)."""
         try:
             response = await self.client.post(
@@ -512,8 +687,8 @@ class SabiLLM:
                     ],
                     "stream": False,
                     "options": {
-                        "num_predict": 200,
-                        "temperature": 0.7,
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
                         "top_p": 0.9,
                         "repeat_penalty": 1.2,
                     },

@@ -176,81 +176,29 @@ def main() -> int:
         and "hash" in voice_realtime.KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT.lower(),
         voice_realtime.KEYPAD_NUMERIC_ANNOUNCEMENT_TEXT,
     )
-    repeat_variants = [
-        "I didn't hear the question, repeat it",
-        "I did not hear you, Sabi.",
-        "Can you say that again?",
-        "Please repeat the question.",
-        "What was the question?",
-        "Come again.",
-    ]
     ok &= check(
-        "repeat_control_phrases_detected",
-        all(voice_realtime._looks_like_repeat_request(text) for text in repeat_variants),
-        repeat_variants,
-    )
-    ok &= check(
-        "real_number_answers_are_not_repeat_requests",
-        not any(voice_realtime._looks_like_repeat_request(text) for text in ["2", "twenty", "four mangoes"]),
-    )
-    short_barge = dict(
-        utterance_seconds=0.92,
-        utterance_from_barge=True,
-        numeric_stt_context=True,
-        keypad_text=None,
-        text="20",
-        already_reprompted=False,
-    )
-    ok &= check(
-        "short_numeric_barge_is_reprompted_without_grading",
-        voice_realtime._should_reprompt_short_numeric_barge(**short_barge),
-        short_barge,
-    )
-    ok &= check(
-        "short_barge_followup_cannot_loop_forever",
-        not voice_realtime._should_reprompt_short_numeric_barge(
-            **{**short_barge, "already_reprompted": True}
+        "numeric_question_enables_keypad",
+        voice_realtime._current_question_expects_numeric(
+            [{"role": "assistant", "content": "You have five sweets and eat two. How many are left?"}]
         ),
     )
     ok &= check(
-        "normal_length_numeric_barge_can_be_graded",
-        not voice_realtime._should_reprompt_short_numeric_barge(
-            **{**short_barge, "utterance_seconds": 1.5}
+        "literacy_question_never_enables_numeric_keypad",
+        not voice_realtime._current_question_expects_numeric(
+            [{"role": "assistant", "content": "How many syllables do you hear in banana?"}]
         ),
     )
     ok &= check(
-        "long_repeat_request_collapsed_to_number_is_not_graded",
-        voice_realtime._should_reprompt_short_numeric_barge(
-            **{**short_barge, "utterance_seconds": 2.42, "text": "4"}
+        "name_question_never_enables_numeric_keypad",
+        not voice_realtime._current_question_expects_numeric(
+            [{"role": "assistant", "content": "Hello! What is your name?"}]
         ),
     )
     ok &= check(
-        "long_repeat_request_collapsed_to_unknown_token_is_not_graded",
-        voice_realtime._should_reprompt_short_numeric_barge(
-            **{**short_barge, "utterance_seconds": 2.42, "text": "Oun"}
+        "name_question_is_detected_for_llm_validation",
+        voice_realtime._current_question_asks_for_name(
+            [{"role": "assistant", "content": "Hello! What is your name?"}]
         ),
-    )
-    ok &= check(
-        "recognized_long_repeat_request_bypasses_sparse_guard",
-        not voice_realtime._should_reprompt_short_numeric_barge(
-            **{
-                **short_barge,
-                "utterance_seconds": 2.42,
-                "text": "I didn't hear your question",
-            }
-        ),
-    )
-    ok &= check(
-        "keypad_number_bypasses_short_audio_guard",
-        not voice_realtime._should_reprompt_short_numeric_barge(
-            **{**short_barge, "keypad_text": "40"}
-        ),
-    )
-    ok &= check(
-        "repeat_replays_latest_question_only",
-        voice_realtime._last_question_for_repeat(
-            [{"role": "assistant", "content": "Good try. You have six groundnuts. How many are left?"}]
-        ) == "How many are left?",
     )
     switched_context = voice_realtime._recent_assistant_stt_context(
         [

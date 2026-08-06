@@ -64,13 +64,6 @@ services:
     volumes:
       - ./audio_cache:/app/audio_cache
       - shared_audio:/shared/audio
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     depends_on:
       - ollama
     restart: unless-stopped

@@ -40,6 +40,7 @@ def main() -> int:
     from_at = _section(dialplan, "from-at")
     sabi_inbound = _section(dialplan, "sabi-inbound")
     sabi_flash = _section(dialplan, "sabi-flash")
+    sabi_callback = _section(dialplan, "sabi-callback-run")
 
     ok = True
     ok &= _check(
@@ -74,7 +75,13 @@ def main() -> int:
     )
     ok &= _check(
         "inbound_uses_production_audiosocket",
-        "AudioSocket(${AS_UUID},sabi:9019)" in sabi_inbound,
+        "AudioSocket(${AS_UUID},sabi:9020)" in sabi_inbound,
+    )
+    ok &= _check(
+        "callback_restores_post_answer_media_settle_wait",
+        sabi_callback.index("Answer()")
+        < sabi_callback.index("Wait(1)")
+        < sabi_callback.index("AudioSocket(${AS_UUID},sabi:9020)"),
     )
     ok &= _check(
         "main_uses_shared_phone_normalizer",

@@ -615,7 +615,7 @@ class SpeechToText:
                 "Content-Type": "application/json",
                 "x-goog-api-key": self._gemini_key,
             },
-            timeout=float(os.getenv("SABI_GEMINI_STT_TIMEOUT", "3.5")),
+            timeout=float(os.getenv("SABI_GEMINI_STT_TIMEOUT", "5.5")),
         )
         provider_latency_seconds = time.monotonic() - started
         response.raise_for_status()

@@ -119,7 +119,7 @@ try:
     check("model in request url", "gemini-3.5-flash-lite:generateContent" in captured["url"])
     check("API key absent from URL", "test-gemini-key" not in captured["url"])
     check("API key sent in header", captured["headers"].get("x-goog-api-key") == "test-gemini-key")
-    check("default timeout capped", captured["timeout"] == 3.5)
+    check("default timeout allows Flash-Lite to finish", captured["timeout"] == 5.5)
     parts = captured["payload"]["contents"][0]["parts"]
     check("audio part sent inline", "inlineData" in parts[0])
     check("number tag in prompt", "responding to a numeracy question" in parts[1]["text"])

@@ -73,6 +73,8 @@ services:
       - ELEVENLABS_API_KEY
       - ELEVENLABS_VOICE_ID
       - TWILIO_AUTH_TOKEN
+      - INTRON_API_KEY
+      - GEMINI_API_KEY
     volumes:
       - ./audio_cache:/app/audio_cache
       - shared_audio:/shared/audio
@@ -99,6 +101,10 @@ secrets:
     file: ./secrets/ELEVENLABS_VOICE_ID
   TWILIO_AUTH_TOKEN:
     file: ./secrets/TWILIO_AUTH_TOKEN
+  INTRON_API_KEY:
+    file: ./secrets/INTRON_API_KEY
+  GEMINI_API_KEY:
+    file: ./secrets/GEMINI_API_KEY
 
 volumes:
   ollama_data:

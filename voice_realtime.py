@@ -78,7 +78,7 @@ BARGE_GRACE_MS = int(os.getenv("SABI_BARGE_GRACE_MS", "650"))
 # carrier can use the realtime lesson/STT lane without turning those sounds
 # into learner answers.  When disabled, caller audio is still drained during
 # playback and listening begins only after Sabi finishes speaking.
-BARGE_IN_ENABLED = os.getenv("SABI_BARGE_IN_ENABLED", "1").strip().lower() in {
+BARGE_IN_ENABLED = os.getenv("SABI_BARGE_IN_ENABLED", "0").strip().lower() in {
     "1", "true", "yes", "on",
 }
 # Outbound PSTN legs can deliver a short answer/ringback click or dial tone just

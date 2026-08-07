@@ -72,6 +72,15 @@ PRE_ROLL_FRAMES = int(os.getenv("SABI_UTTERANCE_PREROLL_FRAMES", "10"))
 COLLECT_TIMEOUT_MS = int(os.getenv("SABI_COLLECT_TIMEOUT_MS", "80"))
 SABI_INTERNAL_URL = os.getenv("SABI_INTERNAL_URL", "http://127.0.0.1:8000")
 BARGE_GRACE_MS = int(os.getenv("SABI_BARGE_GRACE_MS", "650"))
+# The home-grown energy gate cannot distinguish intentional speech from a
+# breath, cough, handset movement, or acoustic playback leakage as reliably as
+# a managed conversational turn detector.  Keep a production kill switch so a
+# carrier can use the realtime lesson/STT lane without turning those sounds
+# into learner answers.  When disabled, caller audio is still drained during
+# playback and listening begins only after Sabi finishes speaking.
+BARGE_IN_ENABLED = os.getenv("SABI_BARGE_IN_ENABLED", "1").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 # Outbound PSTN legs can deliver a short answer/ringback click or dial tone just
 # after Asterisk answers.  Do not let that carrier audio interrupt the opening
 # greeting and become turn 0.  Later greeting speech and all normal lesson
@@ -871,9 +880,10 @@ class RealtimeCall:
         threshold = speech_threshold or SPEECH_RMS_THRESHOLD
         effective_barge_grace_ms = BARGE_GRACE_MS if barge_grace_ms is None else max(0, barge_grace_ms)
         logger.info(
-            "Playback start uuid=%s duration=%.2fs barge_grace_ms=%s speech_threshold=%s",
+            "Playback start uuid=%s duration=%.2fs barge_in_enabled=%s barge_grace_ms=%s speech_threshold=%s",
             self.call_uuid,
             len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH),
+            BARGE_IN_ENABLED,
             effective_barge_grace_ms,
             threshold,
         )
@@ -895,7 +905,10 @@ class RealtimeCall:
 
             drained_frames = 0
             peak_rms = 0
-            barge_allowed = (time.monotonic() - playback_start) >= (effective_barge_grace_ms / 1000)
+            barge_allowed = (
+                BARGE_IN_ENABLED
+                and (time.monotonic() - playback_start) >= (effective_barge_grace_ms / 1000)
+            )
             while True:
                 try:
                     inbound = self.audio_queue.get_nowait()
@@ -939,6 +952,11 @@ class RealtimeCall:
             elapsed = time.monotonic() - frame_start
             await asyncio.sleep(max(0, FRAME_MS / 1000 - elapsed))
 
+        if not BARGE_IN_ENABLED:
+            # Close the race between the final playback frame and the next
+            # wait_for_utterance() call.  Nothing heard while Sabi was talking
+            # should be promoted into a learner turn when barge-in is disabled.
+            self.drain_audio()
         logger.info("Playback complete uuid=%s elapsed=%.2fs", self.call_uuid, time.monotonic() - playback_start)
         return None
 

@@ -150,6 +150,14 @@ def main() -> int:
             inspect.signature(voice_realtime.RealtimeCall.play_pcm_with_barge),
         ),
         check(
+            "barge_in_has_production_kill_switch",
+            isinstance(voice_realtime.BARGE_IN_ENABLED, bool)
+            and "BARGE_IN_ENABLED" in inspect.getsource(
+                voice_realtime.RealtimeCall.play_pcm_with_barge
+            ),
+            voice_realtime.BARGE_IN_ENABLED,
+        ),
+        check(
             "opening_greeting_ignores_initial_carrier_audio",
             voice_realtime.INITIAL_GREETING_BARGE_GRACE_MS >= 2500
             and voice_realtime.INITIAL_GREETING_BARGE_GRACE_MS > voice_realtime.BARGE_GRACE_MS,

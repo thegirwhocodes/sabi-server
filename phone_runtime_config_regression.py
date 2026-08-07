@@ -27,6 +27,7 @@ os.environ.setdefault("SABI_SHARED_AUDIO_DIR", str(Path(os.getenv("TMPDIR", "/tm
 
 import voice_asterisk
 import voice_realtime
+import turn_taking
 
 
 def check(name: str, ok: bool, detail: object) -> bool:
@@ -47,6 +48,13 @@ async def natural_pause_survives_endpointing() -> tuple[bool, dict]:
         None,
         None,
         None,
+    )
+    # This regression targets the fixed 360 ms fallback window.  The separate
+    # turn_taking_regression.py runs the real ONNX endpoint model in-container.
+    call.turn_detector = types.SimpleNamespace(
+        endpoint_complete=lambda _pcm: turn_taking.EndpointDecision(
+            False, None, None, "isolated_silence_regression"
+        )
     )
     first_speech = struct.pack(
         "<" + "h" * (voice_realtime.FRAME_BYTES // 2),
@@ -156,6 +164,44 @@ def main() -> int:
                 voice_realtime.RealtimeCall.play_pcm_with_barge
             ),
             voice_realtime.BARGE_IN_ENABLED,
+        ),
+        check(
+            "barge_in_requires_learned_turn_gate",
+            "evaluate_interruption" in inspect.getsource(
+                voice_realtime.RealtimeCall.play_pcm_with_barge
+            )
+            and turn_taking.TURN_GATE_ENABLED,
+            {
+                "turn_gate_enabled": turn_taking.TURN_GATE_ENABLED,
+                "vad_onset": turn_taking.INTERRUPTION_VAD_ONSET,
+                "min_speech_ms": turn_taking.INTERRUPTION_MIN_SPEECH_MS,
+                "echo_threshold": turn_taking.INTERRUPTION_ECHO_THRESHOLD,
+            },
+        ),
+        check(
+            "captured_audio_is_gated_before_stt",
+            "listening_speech" in inspect.getsource(
+                voice_realtime.RealtimeCall._listening_pcm_is_speech
+            )
+            and "_listening_pcm_is_speech" in inspect.getsource(
+                voice_realtime.RealtimeCall.wait_for_utterance
+            ),
+            {
+                "vad_onset": turn_taking.LISTENING_VAD_ONSET,
+                "min_speech_ms": turn_taking.LISTENING_MIN_SPEECH_MS,
+            },
+        ),
+        check(
+            "semantic_endpointing_precedes_final_turn",
+            "endpoint_complete" in inspect.getsource(
+                voice_realtime.RealtimeCall.collect_utterance
+            )
+            and turn_taking.SMART_TURN_ENABLED,
+            {
+                "smart_turn_enabled": turn_taking.SMART_TURN_ENABLED,
+                "complete_threshold": turn_taking.SMART_TURN_COMPLETE_THRESHOLD,
+                "max_extension_ms": turn_taking.SMART_TURN_MAX_EXTENSION_MS,
+            },
         ),
         check(
             "opening_greeting_ignores_initial_carrier_audio",

@@ -35,6 +35,15 @@ from transcript_normalizer import (
     is_phone_system_transcript,
     normalize_lesson_transcript,
 )
+from turn_taking import (
+    INTERRUPTION_CANDIDATE_RESET_MS,
+    INTERRUPTION_EVAL_INTERVAL_MS,
+    INTERRUPTION_MIN_AUDIO_MS,
+    INTERRUPTION_PREFILTER_RMS,
+    SMART_TURN_MAX_EXTENSION_MS,
+    TURN_GATE_ENABLED,
+    get_managed_turn_detector,
+)
 from voice_asterisk import (
     CONFIDENCE_THRESHOLD,
     MAX_TURNS,
@@ -738,6 +747,11 @@ class RealtimeCall:
         # Set True once any feedback note has been captured, so the end-of-call
         # offer does not ask a second time.
         self.feedback_captured = False
+        # Shared lazy ONNX runtimes.  The strict gate is used while Sabi talks;
+        # the permissive gate and Smart Turn endpoint model are used after the
+        # prompt.  Keeping this separate from STT prevents noise from becoming
+        # a Gemini request in the first place.
+        self.turn_detector = get_managed_turn_detector()
 
     def set_end_reason(self, reason: str) -> None:
         if self.end_reason == "unknown":
@@ -829,6 +843,32 @@ class RealtimeCall:
                 self.hungup = True
                 return
 
+    async def _listening_pcm_is_speech(self, pcm: bytes) -> bool:
+        """Validate a captured post-prompt turn before it reaches Gemini.
+
+        This gate is intentionally much more permissive than interruption
+        detection because literacy answers can be a single phoneme.  Detector
+        failures fail open here; a broken optional guard must never erase a
+        real child's response.
+        """
+        if not TURN_GATE_ENABLED:
+            return True
+        loop = asyncio.get_running_loop()
+        evidence = await loop.run_in_executor(None, self.turn_detector.listening_speech, pcm)
+        logger.info(
+            "Listening speech gate uuid=%s accepted=%s reason=%s duration_ms=%s max_prob=%.3f longest_ms=%s ratio=%.3f",
+            self.call_uuid,
+            evidence.accepted,
+            evidence.reason,
+            evidence.duration_ms,
+            evidence.max_probability,
+            evidence.longest_speech_ms,
+            evidence.speech_ratio,
+        )
+        if evidence.reason.startswith("detector_error:"):
+            return True
+        return evidence.accepted
+
     async def synthesize_pcm(self, text: str, label: str) -> bytes:
         start = time.monotonic()
         path_without_ext, provider = await tts_and_convert(
@@ -873,8 +913,11 @@ class RealtimeCall:
             self.set_end_reason("channel_closed_before_playback")
             return None
 
-        speech_frames = 0
-        utterance_frames: list[bytes] = []
+        interruption_frames: list[bytes] = []
+        interruption_silent_frames = 0
+        last_evaluated_frame_count = 0
+        last_interruption_decision = None
+        outbound_reference: deque[bytes] = deque(maxlen=max(1, int(3000 / FRAME_MS)))
         frame_count = max(1, len(pcm) // FRAME_BYTES)
         playback_start = time.monotonic()
         threshold = speech_threshold or SPEECH_RMS_THRESHOLD
@@ -901,7 +944,9 @@ class RealtimeCall:
                 return None
 
             frame_start = time.monotonic()
-            await _send_packet(self.writer, AUDIO_TYPE_PCM_8K, pcm[offset:offset + FRAME_BYTES])
+            outbound_frame = pcm[offset:offset + FRAME_BYTES]
+            await _send_packet(self.writer, AUDIO_TYPE_PCM_8K, outbound_frame)
+            outbound_reference.append(outbound_frame)
 
             drained_frames = 0
             peak_rms = 0
@@ -929,25 +974,78 @@ class RealtimeCall:
 
                 rms = _rms(inbound)
                 peak_rms = max(peak_rms, rms)
-                if rms >= threshold:
-                    speech_frames += 1
-                    if not utterance_frames:
-                        utterance_frames.extend(self.pre_roll)
-                    utterance_frames.append(inbound)
+                if not interruption_frames:
+                    # Energy is only a cheap candidate prefilter now.  It can
+                    # never interrupt playback on its own.
+                    if rms < INTERRUPTION_PREFILTER_RMS:
+                        continue
+                    interruption_frames.extend(self.pre_roll)
+                    interruption_frames.append(inbound)
+                    interruption_silent_frames = 0
                 else:
-                    speech_frames = 0
+                    interruption_frames.append(inbound)
+                    if rms >= INTERRUPTION_PREFILTER_RMS:
+                        interruption_silent_frames = 0
+                    else:
+                        interruption_silent_frames += 1
 
-                if speech_frames >= START_SPEECH_FRAMES:
+                candidate_ms = len(interruption_frames) * FRAME_MS
+                since_last_eval_ms = (
+                    len(interruption_frames) - last_evaluated_frame_count
+                ) * FRAME_MS
+                if (
+                    candidate_ms >= INTERRUPTION_MIN_AUDIO_MS
+                    and since_last_eval_ms >= INTERRUPTION_EVAL_INTERVAL_MS
+                ):
+                    last_evaluated_frame_count = len(interruption_frames)
+                    candidate_pcm = b"".join(interruption_frames)
+                    reference_pcm = b"".join(outbound_reference)
+                    loop = asyncio.get_running_loop()
+                    last_interruption_decision = await loop.run_in_executor(
+                        None,
+                        self.turn_detector.evaluate_interruption,
+                        candidate_pcm,
+                        reference_pcm,
+                    )
+                    decision = last_interruption_decision
                     logger.info(
-                        "Barge-in detected uuid=%s peak_rms=%d drained=%d frame=%d/%d elapsed=%.2fs",
-                        self.call_uuid, peak_rms, drained_frames, offset // FRAME_BYTES,
-                        frame_count, time.monotonic() - playback_start,
+                        "Interruption gate uuid=%s accepted=%s reason=%s duration_ms=%s max_prob=%.3f longest_ms=%s echo=%.3f",
+                        self.call_uuid,
+                        decision.accepted,
+                        decision.reason,
+                        decision.speech.duration_ms,
+                        decision.speech.max_probability,
+                        decision.speech.longest_speech_ms,
+                        decision.echo_similarity,
                     )
-                    return await self.collect_utterance(
-                        utterance_frames,
-                        end_silence_frames=end_silence_frames,
-                        speech_threshold=threshold,
+                    if decision.accepted:
+                        logger.info(
+                            "Learned barge-in accepted uuid=%s peak_rms=%d drained=%d frame=%d/%d elapsed=%.2fs",
+                            self.call_uuid,
+                            peak_rms,
+                            drained_frames,
+                            offset // FRAME_BYTES,
+                            frame_count,
+                            time.monotonic() - playback_start,
+                        )
+                        return await self.collect_utterance(
+                            interruption_frames,
+                            end_silence_frames=end_silence_frames,
+                            speech_threshold=threshold,
+                        )
+
+                if interruption_silent_frames * FRAME_MS >= INTERRUPTION_CANDIDATE_RESET_MS:
+                    logger.info(
+                        "Interruption candidate rejected uuid=%s reason=%s duration_ms=%s peak_rms=%s",
+                        self.call_uuid,
+                        getattr(last_interruption_decision, "reason", "energy_only"),
+                        candidate_ms,
+                        peak_rms,
                     )
+                    interruption_frames.clear()
+                    interruption_silent_frames = 0
+                    last_evaluated_frame_count = 0
+                    last_interruption_decision = None
 
             elapsed = time.monotonic() - frame_start
             await asyncio.sleep(max(0, FRAME_MS / 1000 - elapsed))
@@ -982,12 +1080,20 @@ class RealtimeCall:
                 if speech_frames >= START_SPEECH_FRAMES:
                     frames = list(self.pre_roll)
                     frames.append(inbound)
-                    return await self.collect_utterance(
+                    pcm = await self.collect_utterance(
                         frames,
                         max_frames=max_frames,
                         end_silence_frames=end_silence_frames,
                         speech_threshold=threshold,
                     )
+                    if await self._listening_pcm_is_speech(pcm):
+                        return pcm
+                    logger.info(
+                        "Rejected non-speech listening candidate uuid=%s duration=%.2fs",
+                        self.call_uuid,
+                        len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH),
+                    )
+                    speech_frames = 0
             else:
                 speech_frames = 0
         return None
@@ -1071,15 +1177,23 @@ class RealtimeCall:
                 frames_above_threshold += 1
                 if speech_frames >= START_SPEECH_FRAMES:
                     time_to_speech_ms = int((time.monotonic() - wait_started_at) * 1000)
-                    _record_metrics("speech_captured", time_to_speech_ms)
                     frames = list(self.pre_roll)
                     frames.append(inbound)
-                    return await self.collect_utterance(
+                    pcm = await self.collect_utterance(
                         frames,
                         max_frames=max_frames,
                         end_silence_frames=end_silence_frames,
                         speech_threshold=threshold,
                     )
+                    if await self._listening_pcm_is_speech(pcm):
+                        _record_metrics("speech_captured", time_to_speech_ms)
+                        return pcm
+                    logger.info(
+                        "Rejected non-speech optional candidate uuid=%s duration=%.2fs",
+                        self.call_uuid,
+                        len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH),
+                    )
+                    speech_frames = 0
             else:
                 speech_frames = 0
         _record_metrics("channel_closed", None)
@@ -1225,13 +1339,49 @@ class RealtimeCall:
         max_frame_count = max_frames or MAX_UTTERANCE_FRAMES
         silence_limit = end_silence_frames or END_SILENCE_FRAMES
         threshold = speech_threshold or SPEECH_RMS_THRESHOLD
+        endpoint_extension_deadline: float | None = None
+
+        async def pause_is_endpoint() -> bool:
+            """Use prosody/linguistic audio cues before treating silence as final."""
+            nonlocal endpoint_extension_deadline
+            candidate_pcm = b"".join(frames)
+            loop = asyncio.get_running_loop()
+            decision = await loop.run_in_executor(
+                None,
+                self.turn_detector.endpoint_complete,
+                candidate_pcm,
+            )
+            logger.info(
+                "Smart Turn endpoint uuid=%s available=%s complete=%s probability=%s reason=%s",
+                self.call_uuid,
+                decision.available,
+                decision.complete,
+                decision.probability,
+                decision.reason,
+            )
+            if not decision.available or decision.complete is not False:
+                return True
+            now = time.monotonic()
+            if endpoint_extension_deadline is None:
+                endpoint_extension_deadline = now + (SMART_TURN_MAX_EXTENSION_MS / 1000)
+            if now >= endpoint_extension_deadline:
+                logger.info(
+                    "Smart Turn extension exhausted uuid=%s extension_ms=%s",
+                    self.call_uuid,
+                    SMART_TURN_MAX_EXTENSION_MS,
+                )
+                return True
+            return False
+
         while len(frames) < max_frame_count and not self.hungup:
             try:
                 inbound = await asyncio.wait_for(self.audio_queue.get(), timeout=COLLECT_TIMEOUT_MS / 1000)
             except asyncio.TimeoutError:
                 silent_frames += max(1, int(COLLECT_TIMEOUT_MS / FRAME_MS))
                 if silent_frames >= silence_limit:
-                    break
+                    if await pause_is_endpoint():
+                        break
+                    silent_frames = 0
                 continue
 
             if inbound is None:
@@ -1245,7 +1395,9 @@ class RealtimeCall:
             else:
                 silent_frames += 1
                 if silent_frames >= silence_limit:
-                    break
+                    if await pause_is_endpoint():
+                        break
+                    silent_frames = 0
 
         pcm = b"".join(frames)
         logger.info(

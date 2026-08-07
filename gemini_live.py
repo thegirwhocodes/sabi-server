@@ -130,6 +130,57 @@ def build_gemini_live_base_prompt(
     return "\n".join(parts)
 
 
+def build_gemini_live_learner_context(
+    student: dict[str, Any] | None,
+    learning_state: dict[str, Any] | None,
+) -> str:
+    """Expose only teaching-relevant memory, excluding research/admin payloads."""
+    student = student or {}
+    state = learning_state or {}
+    name = " ".join(str(student.get("name") or "Learner").split())
+    mastery = (
+        ((state.get("grading_evidence") or {}).get("skills") or {}).get(
+            str(state.get("active_skill") or "multiplication")
+        )
+        or {}
+    )
+    scaffold = state.get("scaffold_ladder") if isinstance(state.get("scaffold_ladder"), dict) else {}
+    lines = [
+        "\n## LIVE LEARNER CONTEXT",
+        f"- Name: {name}",
+        f"- Returning sessions: {int(student.get('total_sessions') or 0)}",
+        (
+            f"- Lesson position: Module {int(state.get('current_module') or 0)}, "
+            f"Week {int(state.get('current_week') or 1)}, "
+            f"Lesson {int(state.get('current_lesson') or 1)}"
+        ),
+        f"- Active skill: {state.get('active_skill') or 'multiplication'}",
+        f"- Current support depth: {int(state.get('scaffold_depth') or 0)}",
+        f"- Next teaching step: {state.get('next_step') or 'Continue the saved lesson.'}",
+        f"- Deterministic mastery status: {mastery.get('status') or 'not_started'}",
+    ]
+    if scaffold.get("teacher_move"):
+        lines.append(f"- Suggested teacher move: {scaffold['teacher_move']}")
+    return "\n".join(lines)
+
+
+def compact_live_learning_state(learning_state: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep prompt state small and omit research records and raw evidence history."""
+    state = learning_state or {}
+    mastery = dict((state.get("grading_evidence") or {}).get("skills") or {})
+    return {
+        "course": state.get("course"),
+        "phase": state.get("phase"),
+        "current_module": state.get("current_module"),
+        "current_week": state.get("current_week"),
+        "current_lesson": state.get("current_lesson"),
+        "active_skill": state.get("active_skill"),
+        "scaffold_depth": state.get("scaffold_depth"),
+        "next_step": state.get("next_step"),
+        "mastery": mastery,
+    }
+
+
 class GeminiLiveSetupError(RuntimeError):
     """Raised only before AudioSocket reading starts, so the old loop can run."""
 
@@ -326,6 +377,21 @@ class GeminiLiveNumeracyTools:
                 "is_correct": None,
                 "learner_answer": answer,
                 "instruction": "Call get_next_numeracy_problem before asking or grading maths.",
+            }
+            self.grade_history.append(result)
+            return result
+        if self.current_problem_resolved:
+            result = {
+                "status": "problem_already_resolved",
+                "is_correct": None,
+                "problem_id": problem.id,
+                "learner_answer": answer,
+                "audio_scorability": NOT_SCORABLE,
+                "academic_correctness": INDETERMINATE,
+                "instruction": (
+                    "Do not judge this answer against the old item. Call "
+                    "get_next_numeracy_problem, ask that registered question, and wait."
+                ),
             }
             self.grade_history.append(result)
             return result
@@ -576,7 +642,12 @@ def build_live_setup(system_prompt: str) -> dict[str, Any]:
 
 
 def build_live_call_constraints(opening_turn: str, learning_state: dict | None) -> str:
-    state_json = json.dumps(learning_state or {}, ensure_ascii=False, sort_keys=True, default=str)
+    state_json = json.dumps(
+        compact_live_learning_state(learning_state),
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
     return f"""
 
 ## GEMINI LIVE PHONE SESSION — AUTHORITATIVE RULES
@@ -724,7 +795,10 @@ class GeminiLiveCallRunner:
         # Gemini Live gets a compact native prompt.  The legacy text pipeline's
         # full RAG prompt duplicated the curriculum block and included turn-
         # based instructions that conflict with a continuous session.
-        memory_context = await self.call.memory.get_student_context(self.student_id)
+        memory_context = build_gemini_live_learner_context(
+            self.student,
+            self.effective_state,
+        )
         curriculum_context = build_curriculum_path_prompt(
             self.effective_state,
             self.module,
@@ -893,6 +967,11 @@ class GeminiLiveCallRunner:
             and is_early_wrap_text(assistant, elapsed_seconds)
             and self.early_wrap_repairs < 3
         )
+        if early_wrap_blocked:
+            # Turn completion can arrive while unplayed native audio is still
+            # queued.  Drop the unheard remainder of the premature farewell.
+            _drain_queue(self.playback_queue)
+            self.output_packet_buffer.clear()
         async with self.buffer_lock:
             user_pcm = bytes(self.input_pcm)
             assistant_pcm = bytes(self.played_pcm)

@@ -89,6 +89,32 @@ def main() -> int:
         and len(compact_prompt) < 12000,
         len(compact_prompt),
     )
+    learner_context = gemini_live.build_gemini_live_learner_context(
+        {"name": "Naomi", "total_sessions": 42, "total_correct": 16, "total_wrong": 72},
+        {
+            "current_module": 4,
+            "current_week": 12,
+            "current_lesson": 1,
+            "active_skill": "multiplication",
+            "research": {"large_private_protocol": "must not enter live prompt"},
+        },
+    )
+    ok &= check(
+        "live_learner_context_excludes_stale_scores_and_research_payload",
+        "Name: Naomi" in learner_context
+        and "16" not in learner_context
+        and "72" not in learner_context
+        and "large_private_protocol" not in learner_context,
+        learner_context,
+    )
+    compact_state = gemini_live.compact_live_learning_state(
+        {"course": "numeracy", "current_module": 4, "research": {"huge": "payload"}}
+    )
+    ok &= check(
+        "live_state_excludes_research_and_raw_event_history",
+        compact_state.get("current_module") == 4 and "research" not in compact_state,
+        compact_state,
+    )
 
     source = inspect.getsource(voice_realtime.handle_audiosocket_call)
     ok &= check(
@@ -157,6 +183,22 @@ def main() -> int:
     ok &= check(
         "correct_problem_must_resolve_before_deck_advances",
         tools.next_problem().get("problem_id") != "object_noun_regression",
+    )
+
+    resolved_tools = gemini_live.GeminiLiveNumeracyTools("resolved-regression")
+    resolved_tools.current_problem = gemini_live.NumeracyProblem(
+        "resolved_item",
+        "Two bags have four each. How many altogether?",
+        8,
+    )
+    resolved_tools.current_problem_resolved = True
+    stale_grade = resolved_tools.grade_answer("eighteen")
+    ok &= check(
+        "invented_question_answer_cannot_be_graded_against_resolved_item",
+        stale_grade.get("status") == "problem_already_resolved"
+        and stale_grade.get("is_correct") is None
+        and not resolved_tools.call_events,
+        stale_grade,
     )
 
     tools.current_problem = gemini_live.NumeracyProblem(

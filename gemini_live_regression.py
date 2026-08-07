@@ -83,7 +83,7 @@ def main() -> int:
     )
     ok &= check(
         "live_prompt_is_compact_and_contains_one_curriculum_block",
-        "five-to-seven-minute" in compact_prompt
+        "five to seven minutes" in compact_prompt
         and compact_prompt.count("## CURRENT NUMERACY CURRICULUM PATH") == 1
         and "do not merely quiz" in compact_prompt
         and len(compact_prompt) < 12000,
@@ -154,8 +154,59 @@ def main() -> int:
     products = [problem.expected for problem in gemini_live.MULTIPLICATION_PROBLEMS]
     ok &= check(
         "multiplication_deck_does_not_repeat_products",
-        len(products) == len(set(products)) and products.count(12) == 0,
+        len(products) == len(set(products)),
         products,
+    )
+    beginner_problems = [
+        problem
+        for problem in gemini_live.MULTIPLICATION_PROBLEMS
+        if problem.difficulty_tier == 1
+    ]
+    ok &= check(
+        "beginner_deck_uses_only_tiny_equal_groups",
+        beginner_problems
+        and all(problem.expected <= 10 for problem in beginner_problems)
+        and all(
+            max(problem.groups, problem.per_group) <= 5
+            for problem in beginner_problems
+        )
+        and not any(
+            problem.groups == 3 and problem.per_group == 7
+            for problem in beginner_problems
+        ),
+        [(problem.id, problem.groups, problem.per_group) for problem in beginner_problems],
+    )
+    fresh_openings = [
+        gemini_live.GeminiLiveNumeracyTools(f"fresh-call-{index}").next_problem()
+        for index in range(20)
+    ]
+    ok &= check(
+        "fresh_beginner_calls_never_hash_into_a_hard_opening",
+        all(item.get("difficulty_tier") == 1 for item in fresh_openings)
+        and all((item.get("factors") or [99, 99]) == [2, 2] for item in fresh_openings)
+        and all(item.get("teaching_intro") for item in fresh_openings),
+        fresh_openings,
+    )
+    secure_beginner = gemini_live.GeminiLiveNumeracyTools(
+        "secure-beginner",
+        {
+            "grading_evidence": {
+                "skills": {
+                    gemini_live.MULTIPLICATION_MASTERY_SKILL: {"status": "secure"}
+                }
+            }
+        },
+    )
+    explicit_tier_two = gemini_live.GeminiLiveNumeracyTools(
+        "explicit-tier-two",
+        {"multiplication_difficulty_tier": 2},
+    )
+    ok &= check(
+        "mastery_does_not_silently_raise_difficulty",
+        secure_beginner.difficulty_tier == 1
+        and explicit_tier_two.difficulty_tier == 2
+        and explicit_tier_two.next_problem().get("difficulty_tier") == 2,
+        [secure_beginner.difficulty_tier, explicit_tier_two.difficulty_tier],
     )
     tools = gemini_live.GeminiLiveNumeracyTools("regression-call")
     questions = [tools.next_problem() for _ in range(4)]
@@ -302,6 +353,42 @@ def main() -> int:
         [first_wrong, supported_correct],
     )
 
+    help_tools = gemini_live.GeminiLiveNumeracyTools("help-regression")
+    help_tools.current_problem = gemini_live.NumeracyProblem(
+        "help_item",
+        "Two bags have three oranges each. How many altogether?",
+        6,
+        conceptual_hint="One bag has three. Count three more: four, five—what comes next?",
+    )
+    help_request = help_tools.grade_answer("I don't know. Help me.")
+    helped_answer = help_tools.grade_answer("six")
+    help_score = help_tools.authoritative_session_score()
+    ok &= check(
+        "clear_help_request_teaches_without_becoming_a_wrong_answer",
+        help_request.get("status") == "help_requested"
+        and help_request.get("is_correct") is None
+        and help_request.get("academic_correctness") == "indeterminate"
+        and "One bag has three" in str(help_request.get("instruction") or "")
+        and helped_answer.get("is_correct") is True
+        and helped_answer.get("independence") == "scaffolded"
+        and help_score.get("wrong_count") == 0
+        and help_score.get("supported_correct") == 1,
+        [help_request, helped_answer, help_score],
+    )
+    unsure_tools = gemini_live.GeminiLiveNumeracyTools("unsure-number-regression")
+    unsure_tools.current_problem = gemini_live.NumeracyProblem(
+        "unsure_item",
+        "Two bags have three oranges each. How many altogether?",
+        6,
+    )
+    unsure_number = unsure_tools.grade_answer("I'm not sure, is it six?")
+    ok &= check(
+        "numeric_candidate_is_graded_even_when_learner_sounds_unsure",
+        unsure_number.get("status") == "correct"
+        and unsure_number.get("is_correct") is True,
+        unsure_number,
+    )
+
     mastery_events = []
     specs = [
         ("call-a", "item-1", "equal_groups", "correct"),
@@ -360,11 +447,33 @@ def main() -> int:
         "session_context_is_injected_once_with_tool_requirements",
         "one continuous" in constraints
         and "Call get_next_numeracy_problem at lesson opening" in constraints
-        and "grade_numeric_answer BEFORE" in constraints
-        and "atomically registers the following item" in constraints
-        and "Object words never change the grade" in constraints
+        and "I don't know/help me" in constraints
+        and "Do not invent" in constraints
+        and "object words do not" in constraints
         and "five to seven minutes" in constraints
         and "get_lesson_progress BEFORE" in constraints,
+    )
+    tool_declarations = (
+        ((live_setup.get("tools") or [{}])[0]).get("functionDeclarations") or []
+    )
+    grading_declaration = next(
+        (
+            declaration
+            for declaration in tool_declarations
+            if declaration.get("name") == "grade_numeric_answer"
+        ),
+        {},
+    )
+    ok &= check(
+        "help_gate_is_described_in_the_grading_tool_contract",
+        "clear request" in str(grading_declaration.get("description") or "")
+        and "complete reply" in str(
+            (((grading_declaration.get("parameters") or {}).get("properties") or {})
+             .get("learner_answer", {}))
+            .get("description")
+            or ""
+        ),
+        grading_declaration,
     )
     ok &= check(
         "lesson_clock_blocks_early_wrap_and_opens_after_five_minutes",

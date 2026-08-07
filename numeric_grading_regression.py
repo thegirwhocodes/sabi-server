@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
-from numeric_grading import analyze_latest_numeric_turn, build_numeric_grading_hint
+from numeric_grading import (
+    analyze_latest_numeric_turn,
+    build_numeric_grading_hint,
+    response_accepts_verified_number,
+    verified_numeric_control_message,
+)
 
 
 def check(name: str, condition: bool, detail: object = "") -> bool:
@@ -94,6 +99,32 @@ def main() -> int:
         "fine_stt_mishear_accepts_five_in_numeric_context",
         fine_for_five.expected == 5 and fine_for_five.child_numbers == [5] and fine_for_five.is_correct is True,
         fine_for_five,
+    )
+
+    object_word_noise = _turn(
+        "You have three mangoes and eat one. How many mangoes are left?",
+        "two fries",
+    )
+    ok &= check(
+        "numeric_value_is_correct_despite_wrong_object_noun",
+        object_word_noise.expected == 2
+        and object_word_noise.child_numbers == [2]
+        and object_word_noise.is_correct is True,
+        object_word_noise,
+    )
+    control = verified_numeric_control_message(object_word_noise)
+    ok &= check(
+        "verified_correct_control_makes_number_authoritative",
+        "VERIFIED CORRECT: 2" in control and "Ignore object nouns" in control,
+        control,
+    )
+    ok &= check(
+        "correct_opening_is_accepted",
+        response_accepts_verified_number("Yes, two is correct! Now try another one."),
+    )
+    ok &= check(
+        "quiet_regrade_opening_is_rejected",
+        not response_accepts_verified_number("Good try! Let me help you count that again."),
     )
 
     total_spend_with_budget = _turn(
@@ -201,7 +232,9 @@ def main() -> int:
     )
     ok &= check(
         "grading_hint_for_correct_unit_price_change",
-        "Treat that answer as correct" in hint and "80" in hint,
+        "Treat that answer as correct" in hint
+        and "80" in hint
+        and "Ignore every object noun" in hint,
         hint,
     )
 

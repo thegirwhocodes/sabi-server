@@ -59,6 +59,10 @@ services:
       # Re-enable retries deliberately after carrier answer detection is proven.
       - FLASH_CALLBACK_RETRY_ENABLED=0
       - FLASH_CALLBACK_MAX_ATTEMPTS=1
+      # The Sabi container currently has no usable CUDA device. The parallel
+      # consensus lane therefore runs its independent faster-whisper vote on
+      # CPU instead of failing over a stale CUDA default.
+      - SABI_LOCAL_WHISPER_DEVICE=${SABI_LOCAL_WHISPER_DEVICE:-cpu}
     secrets:
       - ANTHROPIC_API_KEY
       - GROQ_API_KEY

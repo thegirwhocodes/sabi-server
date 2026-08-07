@@ -28,7 +28,12 @@ from call_admin import append_call_turn_review, call_turn_audio_path, write_call
 from curriculum_path import resolve_literacy_lesson, resolve_numeracy_lesson
 from diagnostic_flow import build_opening_turn
 from learning_state import analyze_session, force_numeracy_course
-from numeric_grading import analyze_latest_numeric_turn, question_expects_numeric_answer
+from numeric_grading import (
+    analyze_latest_numeric_turn,
+    question_expects_numeric_answer,
+    response_accepts_verified_number,
+    verified_numeric_control_message,
+)
 from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, original_sabi_prompt_for_phone
 from phone_utils import phone_is_numeracy_only
 from transcript_normalizer import (
@@ -1835,6 +1840,19 @@ class RealtimeCall:
                 stt_prompt=str(transcript.get("gemini_prompt") or ""),
                 stt_prompt_mode=str(transcript.get("gemini_prompt_mode") or ""),
                 stt_prompt_label=str(transcript.get("gemini_prompt_label") or ""),
+                stt_details={
+                    key: transcript.get(key)
+                    for key in (
+                        "consensus",
+                        "consensus_key",
+                        "consensus_numeric_value",
+                        "selection_reason",
+                        "ensemble_results",
+                        "ensemble_latency_seconds",
+                        "provider_error",
+                    )
+                    if transcript.get(key) is not None
+                },
                 tts_provider=self.last_tts_provider if assistant_text else "",
             )
         except Exception as exc:
@@ -2546,6 +2564,14 @@ class RealtimeCall:
                     and bool(latest_numeric_check.child_numbers)
                     and latest_numeric_check.is_correct is None
                 )
+                verified_numeric_control = (
+                    verified_numeric_control_message(latest_numeric_check)
+                    if latest_numeric_check is not None
+                    else ""
+                )
+                if verified_numeric_control:
+                    llm_messages.append({"role": "system", "content": verified_numeric_control})
+                    turn_flags.append("deterministic_numeric_correct")
                 if numeric_ambiguous:
                     response = NUMERIC_AMBIGUITY_CONFIRMATION_TEXT
                     turn_flags.append("numeric_ambiguous_confirmation")
@@ -2591,6 +2617,47 @@ class RealtimeCall:
                         call_id=self.call_id,
                         channel="asterisk_audiosocket",
                     )
+                if (
+                    verified_numeric_control
+                    and latest_numeric_check is not None
+                    and not response_accepts_verified_number(response)
+                ):
+                    logger.warning(
+                        "Realtime turn %s failed to accept verified numeric answer=%s; repairing",
+                        turn,
+                        latest_numeric_check.expected,
+                    )
+                    numeric_repair_messages = [
+                        *llm_messages,
+                        {
+                            "role": "system",
+                            "content": (
+                                "Your previous draft failed the verified numeric-answer rule. "
+                                f"Rewrite it now. The learner's answer {latest_numeric_check.expected} "
+                                "is correct regardless of the object noun in the transcript. The first "
+                                "sentence must explicitly say it is correct. Then ask a genuinely new "
+                                "question; do not recount or repeat the solved problem."
+                            ),
+                        },
+                    ]
+                    response = await self.llm.generate(
+                        messages=numeric_repair_messages,
+                        student_id=student_id,
+                        current_module=module,
+                        memory=self.memory,
+                        course=str(effective_state.get("course") or "numeracy"),
+                        learning_state=effective_state,
+                        call_id=self.call_id,
+                        channel="asterisk_audiosocket_numeric_repair",
+                    )
+                    turn_flags.append("numeric_correct_response_repaired")
+                    if not response_accepts_verified_number(response):
+                        expected = latest_numeric_check.expected
+                        response = (
+                            f"Yes, {expected} is correct! Well done. "
+                            f"Now, what is {expected} plus one?"
+                        )
+                        turn_flags.append("numeric_correct_response_forced")
                 logger.info("Realtime turn %s llm=%.2fs response=%s", turn, time.monotonic() - llm_start, response)
                 llm_latency = time.monotonic() - llm_start
                 if (

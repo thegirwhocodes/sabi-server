@@ -289,7 +289,8 @@ def build_numeric_grading_hint(messages: list[dict]) -> str:
 
 ## LATEST NUMERIC ANSWER CHECK
 For the latest Sabi question, a deterministic math check gives {check.expected} as the expected answer.
-The child's latest answer includes {check.expected}. Treat that answer as correct, acknowledge it, and move on. Do not say it is wrong or almost."""
+The child's latest answer includes {check.expected}. Treat that answer as correct, acknowledge it, and move on. Do not say it is wrong or almost.
+The numeric value is authoritative. Ignore every object noun in the phone transcript when grading: for example, if the answer is {check.expected}, then "{check.expected} mangoes", "{check.expected} apples", or "{check.expected} fries" are equally correct. Do not recount the same problem or ask for the same answer again."""
 
     if not check.child_numbers:
         return f"""
@@ -311,6 +312,35 @@ The child's latest answer included {check.child_numbers}, but this may be a phon
 For the latest Sabi question, a deterministic math check gives {check.expected} as the expected answer.
 The child's latest answer included {check.child_numbers}, so it appears incorrect.
 Do not say "wrong." Acknowledge the attempt, then follow the learner-state bump-down ladder if present; otherwise use smaller numbers, a simpler market story, or a concrete counting step before trying a fresh similar problem."""
+
+
+def verified_numeric_control_message(check: NumericTurnCheck) -> str:
+    """Return a hard live-call constraint for a deterministically correct turn."""
+    if check.expected is None or check.is_correct is not True:
+        return ""
+    return (
+        f"The latest numeric answer is deterministically VERIFIED CORRECT: {check.expected}. "
+        "This is authoritative and not a suggestion. Ignore object nouns after the number; "
+        "they may be phone-transcription noise. Start your reply by clearly accepting the "
+        "answer as correct, then move to a genuinely new question. Never recount, repair, "
+        "question, or ask the child to repeat this solved problem."
+    )
+
+
+def response_accepts_verified_number(response: str) -> bool:
+    """Check that the opening sentence accepts rather than quietly re-grades."""
+    opening = re.split(r"[.!?\n]", str(response or "").lower(), maxsplit=1)[0]
+    if not opening.strip():
+        return False
+    rejection = re.search(
+        r"\b(good try|nice try|almost|close|wrong|incorrect|not quite|tricky|let me help|let us count|let's count)\b",
+        opening,
+    )
+    acceptance = re.search(
+        r"\b(correct|right|yes|well done|exactly|you got it|that's it|that is it)\b",
+        opening,
+    )
+    return bool(acceptance and not rejection)
 
 
 def question_expects_numeric_answer(question: str) -> bool:

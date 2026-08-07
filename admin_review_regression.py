@@ -127,6 +127,13 @@ def main() -> int:
         and "Groq Whisper" in html
         and "Intron" in html,
     )
+    ok &= check(
+        "shows_parallel_stt_votes_and_decision",
+        "Parallel STT votes" in html
+        and "user.stt_details" in html
+        and "consensus_numeric_value" in html
+        and "Groq + Local Whisper consensus" in html,
+    )
 
     # Learner rows + progress map
     ok &= check("renders_learners_as_rows", "<table>" in html and "User</th>" in html and "Progress Map</th>" in html)

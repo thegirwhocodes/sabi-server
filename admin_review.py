@@ -1220,6 +1220,9 @@ def render_admin_review_page() -> str:
         intron: "Intron",
         local_whisper: "Local Whisper",
         local_literacy_salvage: "Literacy salvage",
+        groq_local_whisper_consensus: "Groq + Local Whisper consensus",
+        gemini_tiebreak: "Gemini tie-break",
+        parallel_consensus_unresolved: "Parallel STT unresolved",
       };
       const key = String(value || "").trim();
       return labels[key] || (key ? key.replaceAll("_", " ") : "");
@@ -3477,6 +3480,7 @@ def render_admin_review_page() -> str:
             <div class="timeline-text">${escapeHtml(childText)}</div>
             <div class="timeline-note">This is what Sabi transcribed from the clip above.${escapeHtml(confidence)}</div>
             ${lessonText && lessonText !== childText ? `<div class="timeline-note">Lesson text after cleanup: ${escapeHtml(lessonText)}</div>` : ""}
+            ${sttConsensusBox(user)}
             ${sttPromptBox(user)}
             ${user.has_audio ? `<button class="stt-compare-btn" data-stt-compare="${escapeHtml(turn.turn_index)}">Compare Groq vs Intron on this clip</button><div id="stt-compare-${escapeHtml(turn.turn_index)}"></div>` : ""}
             ${user.has_audio ? `<div class="stt-correction-box" data-correction-box="${escapeHtml(turn.turn_index)}">
@@ -3500,8 +3504,26 @@ def render_admin_review_page() -> str:
         </div>
       </div>`;
     }
+    function sttConsensusBox(user) {
+      const details = user.stt_details || {};
+      const results = details.ensemble_results || {};
+      const rows = Object.entries(results);
+      if (!rows.length) return "";
+      const rendered = rows.map(([name, item]) => {
+        const payload = item || {};
+        const heard = payload.text ? `“${payload.text}”` : (payload.error || payload.status || "no result");
+        const latency = Number(payload.latency_seconds || 0) > 0 ? ` · ${fmtSeconds(payload.latency_seconds)}` : "";
+        return `<div class="timeline-note"><strong>${escapeHtml(providerLabel(name))}:</strong> ${escapeHtml(heard)}${latency}</div>`;
+      }).join("");
+      const decision = details.selection_reason ? String(details.selection_reason).replaceAll("_", " ") : "";
+      return `<div class="stt-prompt-box">
+        <div class="stt-prompt-head"><span class="mini-label">Parallel STT votes</span>${details.consensus_numeric_value !== undefined && details.consensus_numeric_value !== null ? `<span class="timeline-note">agreed number: ${escapeHtml(details.consensus_numeric_value)}</span>` : ""}</div>
+        ${rendered}
+        ${decision ? `<div class="timeline-note">Decision: ${escapeHtml(decision)}</div>` : ""}
+      </div>`;
+    }
     function sttPromptBox(user) {
-      if (String(user.stt_provider || "").toLowerCase() !== "gemini") return "";
+      if (!String(user.stt_provider || "").toLowerCase().includes("gemini")) return "";
       const prompt = String(user.stt_prompt || "").trim();
       const mode = String(user.stt_prompt_mode || "").trim();
       const label = String(user.stt_prompt_label || "").trim();
@@ -3534,6 +3556,7 @@ def render_admin_review_page() -> str:
               <div class="quote">Transcribed: ${escapeHtml(user.stt_transcript || "")}</div>
               <div class="quote">Lesson text: ${escapeHtml(user.normalized_transcript || "")}</div>
               <div class="small">Confidence ${escapeHtml(user.stt_confidence ?? "")} · ${fmtSeconds(user.audio_seconds)}${user.stt_provider ? ` · heard by ${escapeHtml(providerLabel(user.stt_provider))}` : ""}</div>
+              ${sttConsensusBox(user)}
               ${sttPromptBox(user)}
             </div>
             <div class="section">

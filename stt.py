@@ -10,12 +10,14 @@ Optimizations for Nigerian English:
 """
 
 import io
+from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 import os
 import re
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import time
 import wave
 
@@ -109,6 +111,11 @@ LITERACY_WORDS = {
 }
 
 WHISPER_CLI_PROVIDERS = {"whisper_cli", "openai_whisper", "openai-whisper", "cli_whisper"}
+PARALLEL_CONSENSUS_PROVIDERS = {
+    "parallel_consensus",
+    "groq_whisper_consensus",
+    "consensus",
+}
 
 # Gemini receives only a safe course/topic label plus a literal-transcription
 # instruction. Enumerating possible complaints, names, or answers made the
@@ -294,6 +301,47 @@ def _plain_text(text: str) -> str:
     return " ".join(str(text or "").lower().replace("-", " ").strip(" .,!?:;").split())
 
 
+def _consensus_key(text: str, *, numeric_context: bool) -> tuple[str, int | None]:
+    """Return a conservative agreement key for two independent transcripts.
+
+    On a numeric-answer turn the spoken number is the semantic answer. Object
+    nouns are deliberately excluded from agreement, so ``two mangoes`` and
+    ``two apples`` agree on the value two without teaching the STT system the
+    expected answer. On every other turn both engines must return the same
+    normalized words.
+    """
+    normalized = _plain_text(text)
+    if not normalized:
+        return "", None
+    if numeric_context:
+        try:
+            from answer_matcher import extract_number
+
+            number = extract_number(normalized)
+        except Exception:
+            number = None
+        if number is not None:
+            return f"number:{int(number)}", int(number)
+    return f"text:{normalized}", None
+
+
+def _ensemble_result_summary(result: dict | None, error: Exception | None = None) -> dict:
+    """Persist useful comparison evidence without leaking request payloads."""
+    if error is not None:
+        return {
+            "status": "error",
+            "error": f"{error.__class__.__name__}: {_safe_error_text(error)}",
+        }
+    payload = dict(result or {})
+    return {
+        "status": "ok" if str(payload.get("text") or "").strip() else "empty",
+        "text": str(payload.get("text") or ""),
+        "confidence": round(float(payload.get("confidence") or 0), 3),
+        "provider": str(payload.get("provider") or ""),
+        "latency_seconds": round(float(payload.get("ensemble_latency_seconds") or 0), 3),
+    }
+
+
 def _expects_literacy_word_answer(context: str) -> bool:
     normalized = _plain_text(context)
     return any(cue in normalized for cue in WORD_ANSWER_CUES)
@@ -386,6 +434,15 @@ class SpeechToText:
         self._model_size = os.getenv("SABI_LOCAL_WHISPER_MODEL_SIZE", model_size).strip() or model_size
         self._device = os.getenv("SABI_LOCAL_WHISPER_DEVICE", device).strip() or device
         self._audio_cleaner = AudioCleaner.from_env()
+        self._model_load_lock = threading.Lock()
+        self._local_inference_lock = threading.Lock()
+        # Reused across turns. When Groq and local Whisper agree, the caller
+        # returns immediately; an already-running Gemini tie-break request may
+        # finish harmlessly in the background instead of delaying the lesson.
+        self._ensemble_executor = ThreadPoolExecutor(
+            max_workers=max(3, int(os.getenv("SABI_STT_CONSENSUS_WORKERS", "3"))),
+            thread_name_prefix="sabi-stt-consensus",
+        )
 
         if self._groq_key and self._provider != "local":
             self._use_groq = True
@@ -410,7 +467,13 @@ class SpeechToText:
             "intron_first",
             *WHISPER_CLI_PROVIDERS,
         }
-        if (
+        consensus_configured = not configured_providers.isdisjoint(PARALLEL_CONSENSUS_PROVIDERS)
+        consensus_eager_load = os.getenv(
+            "SABI_STT_CONSENSUS_EAGER_LOAD", "1"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if consensus_configured and consensus_eager_load:
+            self._load_local_model(model_size, self._device)
+        elif (
             not self._use_groq
             and configured_providers.isdisjoint(providers_without_eager_local_fallback)
         ):
@@ -419,20 +482,23 @@ class SpeechToText:
     def _load_local_model(self, model_size: str | None = None, device: str | None = None) -> None:
         if hasattr(self, "_model"):
             return
-        model_size = model_size or self._model_size
-        device = device or self._device
-        try:
-            logger.info(f"STT: Loading local Whisper {model_size} on {device}...")
-            from faster_whisper import WhisperModel
-            self._model = WhisperModel(
-                model_size,
-                device=device,
-                compute_type="float16" if device == "cuda" else "int8",
-            )
-            logger.info(f"STT: Local Whisper {model_size} loaded.")
-        except Exception:
-            logger.exception("STT: Failed to load local Whisper fallback")
-            raise
+        with self._model_load_lock:
+            if hasattr(self, "_model"):
+                return
+            model_size = model_size or self._model_size
+            device = device or self._device
+            try:
+                logger.info(f"STT: Loading local Whisper {model_size} on {device}...")
+                from faster_whisper import WhisperModel
+                self._model = WhisperModel(
+                    model_size,
+                    device=device,
+                    compute_type="float16" if device == "cuda" else "int8",
+                )
+                logger.info(f"STT: Local Whisper {model_size} loaded.")
+            except Exception:
+                logger.exception("STT: Failed to load local Whisper fallback")
+                raise
 
     def _has_speech(self, audio_path: str) -> bool:
         """Silero VAD pre-gate.
@@ -488,8 +554,9 @@ class SpeechToText:
         provider = self._provider_for_mode(mode)
         primary_error: Exception | None = None
         gemini_provider = provider in {"gemini", "gemini_first", "gemini_fallback"}
+        consensus_provider = provider in PARALLEL_CONSENSUS_PROVIDERS
         gemini_bypasses_vad = (
-            gemini_provider
+            (gemini_provider or consensus_provider)
             and os.getenv("SABI_GEMINI_STT_BYPASS_VAD", "1").strip().lower()
             in {"1", "true", "yes", "on"}
         )
@@ -512,6 +579,10 @@ class SpeechToText:
                 "no_speech": True,
                 "vad_gated": True,
             }
+        if consensus_provider:
+            result = self._transcribe_parallel_consensus(audio_path, mode=mode, context=context)
+            result["vad_bypassed_for_gemini"] = gemini_bypasses_vad
+            return result
         if gemini_provider:
             if self._gemini_key:
                 try:
@@ -588,6 +659,154 @@ class SpeechToText:
                     f"fallback local={fallback_error.__class__.__name__}: {_safe_error_text(fallback_error)}"
                 ) from fallback_error
             raise
+
+    @staticmethod
+    def _timed_provider_call(callable_, *args, **kwargs) -> dict:
+        started = time.monotonic()
+        result = dict(callable_(*args, **kwargs) or {})
+        result["ensemble_latency_seconds"] = round(time.monotonic() - started, 3)
+        return result
+
+    @staticmethod
+    def _future_result(future: Future | None) -> tuple[dict | None, Exception | None]:
+        if future is None:
+            return None, RuntimeError("provider is not configured")
+        try:
+            return dict(future.result() or {}), None
+        except Exception as exc:
+            return None, exc
+
+    def _transcribe_parallel_consensus(
+        self,
+        audio_path: str,
+        mode: str = "general",
+        context: str = "",
+    ) -> dict:
+        """Race Groq and local Whisper, using Gemini only as the tie-breaker.
+
+        Groq and local faster-whisper start at the same instant. If their
+        literal words agree—or their numeric values agree on a numeric-answer
+        turn—the consensus is authoritative and returns without waiting for
+        Gemini. If they disagree, the already-running Gemini request decides.
+        A failed tie-break fails closed into the existing repeat prompt.
+        """
+        started = time.monotonic()
+        numeric_context = _expects_number(context)
+        futures: dict[str, Future | None] = {
+            "groq": None,
+            "local_whisper": self._ensemble_executor.submit(
+                self._timed_provider_call,
+                self._transcribe_local,
+                audio_path,
+                mode,
+                context,
+            ),
+            "gemini": None,
+        }
+        if self._groq_key:
+            futures["groq"] = self._ensemble_executor.submit(
+                self._timed_provider_call,
+                self._transcribe_groq,
+                audio_path,
+                mode,
+                context,
+                False,
+                False,
+            )
+        if self._gemini_key:
+            futures["gemini"] = self._ensemble_executor.submit(
+                self._timed_provider_call,
+                self._transcribe_gemini,
+                audio_path,
+                mode,
+                context,
+            )
+
+        groq, groq_error = self._future_result(futures["groq"])
+        local, local_error = self._future_result(futures["local_whisper"])
+        groq_key, groq_number = _consensus_key(
+            str((groq or {}).get("text") or ""),
+            numeric_context=numeric_context,
+        )
+        local_key, local_number = _consensus_key(
+            str((local or {}).get("text") or ""),
+            numeric_context=numeric_context,
+        )
+        alternatives = {
+            "groq": _ensemble_result_summary(groq, groq_error),
+            "local_whisper": _ensemble_result_summary(local, local_error),
+        }
+
+        if groq_key and groq_key == local_key:
+            selected = dict(groq or local or {})
+            selected.update({
+                "provider": "groq_local_whisper_consensus",
+                "confidence": max(
+                    0.95,
+                    float((groq or {}).get("confidence") or 0),
+                    float((local or {}).get("confidence") or 0),
+                ),
+                "consensus": True,
+                "consensus_key": groq_key,
+                "consensus_numeric_value": groq_number if groq_number is not None else local_number,
+                "selection_reason": "groq_and_local_whisper_agreed",
+                "ensemble_results": alternatives,
+                "ensemble_latency_seconds": round(time.monotonic() - started, 3),
+            })
+            gemini_future = futures.get("gemini")
+            if gemini_future is not None and not gemini_future.done():
+                gemini_future.cancel()
+                alternatives["gemini"] = {"status": "not_needed"}
+            elif gemini_future is not None:
+                gemini, gemini_error = self._future_result(gemini_future)
+                alternatives["gemini"] = _ensemble_result_summary(gemini, gemini_error)
+            logger.info(
+                "STT consensus selected key=%s groq=%r local=%r latency=%.2fs",
+                groq_key,
+                (groq or {}).get("text"),
+                (local or {}).get("text"),
+                time.monotonic() - started,
+            )
+            return selected
+
+        gemini, gemini_error = self._future_result(futures.get("gemini"))
+        alternatives["gemini"] = _ensemble_result_summary(gemini, gemini_error)
+        if gemini and str(gemini.get("text") or "").strip():
+            selected = dict(gemini)
+            selected.update({
+                "provider": "gemini_tiebreak",
+                "consensus": False,
+                "selection_reason": "groq_and_local_whisper_disagreed",
+                "ensemble_results": alternatives,
+                "ensemble_latency_seconds": round(time.monotonic() - started, 3),
+            })
+            logger.info(
+                "STT Gemini tie-break selected groq=%r local=%r gemini=%r latency=%.2fs",
+                (groq or {}).get("text"),
+                (local or {}).get("text"),
+                gemini.get("text"),
+                time.monotonic() - started,
+            )
+            return selected
+
+        logger.warning(
+            "STT consensus unresolved groq=%r local=%r gemini_error=%s",
+            (groq or {}).get("text"),
+            (local or {}).get("text"),
+            alternatives["gemini"].get("error") or alternatives["gemini"].get("status"),
+        )
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "language": "en",
+            "duration_seconds": _audio_duration_seconds(audio_path),
+            "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
+            "provider": "parallel_consensus_unresolved",
+            "consensus": False,
+            "selection_reason": "no_two_engine_agreement_and_gemini_unavailable",
+            "ensemble_results": alternatives,
+            "ensemble_latency_seconds": round(time.monotonic() - started, 3),
+        }
 
     def _provider_for_mode(self, mode: str) -> str:
         if str(mode or "").lower() == "literacy":
@@ -784,7 +1003,14 @@ class SpeechToText:
             time.sleep(max(0.2, INTRON_ASYNC_POLL_INTERVAL_SECONDS))
         raise RuntimeError(f"Intron async timed out file_id={file_id}: {_safe_json_excerpt(last_data)}")
 
-    def _transcribe_groq(self, audio_path: str, mode: str = "general", context: str = "") -> dict:
+    def _transcribe_groq(
+        self,
+        audio_path: str,
+        mode: str = "general",
+        context: str = "",
+        allow_local_fallback: bool = True,
+        allow_local_salvage: bool = True,
+    ) -> dict:
         """Transcribe via Groq Whisper API (~200ms, free tier: 28,800 sec/day)."""
         try:
             with open(audio_path, "rb") as f:
@@ -823,7 +1049,11 @@ class SpeechToText:
                 "mode": "literacy" if str(mode or "").lower() == "literacy" else "general",
                 "provider": "groq",
             }
-            if str(mode or "").lower() == "literacy" and _is_suspect_literacy_feedback(text, context):
+            if (
+                allow_local_salvage
+                and str(mode or "").lower() == "literacy"
+                and _is_suspect_literacy_feedback(text, context)
+            ):
                 try:
                     alt = self._transcribe_local(audio_path, mode=mode, context=context)
                     alt_text = alt.get("text", "")
@@ -837,7 +1067,7 @@ class SpeechToText:
             # is expected but Groq didn't hear one, retry on local Whisper with
             # number-word hotwords (validated to recover "thirty"/"fifteen" that
             # Groq renders as "Thank you"/"She's thin").
-            if _expects_number(context) and not _looks_number_like(text):
+            if allow_local_salvage and _expects_number(context) and not _looks_number_like(text):
                 try:
                     alt = self._transcribe_local(audio_path, mode=mode, context=context)
                     alt_text = alt.get("text", "")
@@ -850,6 +1080,8 @@ class SpeechToText:
             return result
 
         except httpx.HTTPStatusError as e:
+            if not allow_local_fallback:
+                raise
             logger.warning(
                 "Groq STT failed (%s %s: %s), falling back to local Whisper",
                 e.response.status_code,
@@ -860,6 +1092,8 @@ class SpeechToText:
                 self._load_local_model("large-v3", "cuda")
             return self._transcribe_local(audio_path, mode=mode, context=context)
         except Exception as e:
+            if not allow_local_fallback:
+                raise
             logger.warning(f"Groq STT failed ({e}), falling back to local Whisper")
             # Lazy-load local model if not already loaded
             if not hasattr(self, "_model"):
@@ -873,28 +1107,29 @@ class SpeechToText:
         # On numeric-answer turns, bias with number-word hotwords and DROP the
         # verbose prompt: hotwords alone reliably recovers "thirty"/"fifteen",
         # while keeping the prompt makes short clips echo it back verbatim.
-        segments, info = self._model.transcribe(
-            audio_path,
-            language="en",
-            beam_size=5,
-            initial_prompt=None if numeric else self._prompt_for_mode(mode, context=context),
-            hotwords=NUMBER_HOTWORDS if numeric else None,
-            vad_filter=True,
-            vad_parameters={
-                "min_silence_duration_ms": 650 if str(mode or "").lower() == "literacy" else 500,
-                "speech_pad_ms": 320 if str(mode or "").lower() == "literacy" else 200,
-            },
-        )
+        with self._local_inference_lock:
+            segments, info = self._model.transcribe(
+                audio_path,
+                language="en",
+                beam_size=5,
+                initial_prompt=None if numeric else self._prompt_for_mode(mode, context=context),
+                hotwords=NUMBER_HOTWORDS if numeric else None,
+                vad_filter=True,
+                vad_parameters={
+                    "min_silence_duration_ms": 650 if str(mode or "").lower() == "literacy" else 500,
+                    "speech_pad_ms": 320 if str(mode or "").lower() == "literacy" else 200,
+                },
+            )
 
-        full_text = ""
-        total_confidence = 0.0
-        segment_count = 0
+            full_text = ""
+            total_confidence = 0.0
+            segment_count = 0
 
-        for segment in segments:
-            full_text += segment.text
-            confidence = min(1.0, max(0.0, 1.0 + segment.avg_logprob))
-            total_confidence += confidence
-            segment_count += 1
+            for segment in segments:
+                full_text += segment.text
+                confidence = min(1.0, max(0.0, 1.0 + segment.avg_logprob))
+                total_confidence += confidence
+                segment_count += 1
 
         avg_confidence = total_confidence / max(segment_count, 1)
 

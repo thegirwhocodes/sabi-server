@@ -668,11 +668,22 @@ class SpeechToText:
         return result
 
     @staticmethod
-    def _future_result(future: Future | None) -> tuple[dict | None, Exception | None]:
+    def _future_result(
+        future: Future | None,
+        *,
+        timeout: float | None = None,
+        timeout_label: str = "provider",
+    ) -> tuple[dict | None, Exception | None]:
         if future is None:
             return None, RuntimeError("provider is not configured")
         try:
-            return dict(future.result() or {}), None
+            return dict(future.result(timeout=timeout) or {}), None
+        except TimeoutError as exc:
+            if timeout is not None and not future.done():
+                return None, TimeoutError(
+                    f"{timeout_label} exceeded the {timeout:g}s vote deadline"
+                )
+            return None, exc
         except Exception as exc:
             return None, exc
 
@@ -723,7 +734,15 @@ class SpeechToText:
             )
 
         groq, groq_error = self._future_result(futures["groq"])
-        local, local_error = self._future_result(futures["local_whisper"])
+        local_vote_timeout = max(
+            0.1,
+            float(os.getenv("SABI_STT_LOCAL_VOTE_TIMEOUT", "5.0")),
+        )
+        local, local_error = self._future_result(
+            futures["local_whisper"],
+            timeout=local_vote_timeout,
+            timeout_label="local Whisper",
+        )
         groq_key, groq_number = _consensus_key(
             str((groq or {}).get("text") or ""),
             numeric_context=numeric_context,

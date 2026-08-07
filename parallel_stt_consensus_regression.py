@@ -99,6 +99,34 @@ try:
     check("Gemini resolves disagreement", tie_break["provider"] == "gemini_tiebreak", tie_break)
     check("Gemini literal transcript is preserved", tie_break["text"] == "three mangoes", tie_break)
 
+    # A slow local vote must not hold the phone turn open indefinitely. Gemini
+    # is already running and becomes the tie-break once the vote deadline hits.
+    os.environ["SABI_STT_LOCAL_VOTE_TIMEOUT"] = "0.05"
+    bounded = engine()
+    bounded._transcribe_groq = lambda *_args, **_kwargs: {
+        "text": "twelve pages", "confidence": 0.82, "provider": "groq"
+    }
+    bounded._transcribe_local = lambda *_args, **_kwargs: (
+        time.sleep(0.4)
+        or {"text": "twelve pages", "confidence": 0.72, "provider": "local_whisper"}
+    )
+    bounded._transcribe_gemini = lambda *_args, **_kwargs: {
+        "text": "twelve pages", "confidence": 0.9, "provider": "gemini"
+    }
+    bounded_started = time.monotonic()
+    bounded_result = bounded._transcribe_parallel_consensus(
+        path,
+        context="Three books have four pages each. How many pages altogether?",
+    )
+    check("slow local vote is time-bounded", time.monotonic() - bounded_started < 0.25, bounded_result)
+    check("Gemini handles a late local vote", bounded_result["provider"] == "gemini_tiebreak", bounded_result)
+    check(
+        "late vote reason remains auditable",
+        "vote deadline" in bounded_result["ensemble_results"]["local_whisper"].get("error", ""),
+        bounded_result,
+    )
+    os.environ.pop("SABI_STT_LOCAL_VOTE_TIMEOUT", None)
+
     # A missing/failed tie-break must not guess which disagreeing engine won.
     third = engine()
     third._transcribe_groq = second._transcribe_groq

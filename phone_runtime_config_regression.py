@@ -161,9 +161,19 @@ def main() -> int:
             "barge_in_has_production_kill_switch",
             isinstance(voice_realtime.BARGE_IN_ENABLED, bool)
             and "BARGE_IN_ENABLED" in inspect.getsource(
-                voice_realtime.RealtimeCall.play_pcm_with_barge
+                voice_realtime.RealtimeCall.__init__
             ),
             voice_realtime.BARGE_IN_ENABLED,
+        ),
+        check(
+            "barge_in_can_be_isolated_per_listener",
+            "barge_in_enabled" in inspect.signature(
+                voice_realtime.start_audiosocket_server
+            ).parameters
+            and "self.barge_in_enabled" in inspect.getsource(
+                voice_realtime.RealtimeCall.play_pcm_with_barge
+            ),
+            inspect.signature(voice_realtime.start_audiosocket_server),
         ),
         check(
             "barge_in_requires_learned_turn_gate",
@@ -190,6 +200,25 @@ def main() -> int:
                 "vad_onset": turn_taking.LISTENING_VAD_ONSET,
                 "min_speech_ms": turn_taking.LISTENING_MIN_SPEECH_MS,
             },
+        ),
+        check(
+            "post_prompt_gate_rejects_sub_phoneme_noise",
+            turn_taking.LISTENING_MIN_SPEECH_MS >= 192,
+            turn_taking.LISTENING_MIN_SPEECH_MS,
+        ),
+        check(
+            "name_turns_keep_general_stt_in_literacy_calls",
+            voice_realtime._stt_mode_for_turn(
+                {"course": "literacy"},
+                [{"role": "assistant", "content": "What is your name?"}],
+            )
+            == "general"
+            and voice_realtime._stt_mode_for_turn(
+                {"course": "literacy"},
+                [{"role": "assistant", "content": "What sound starts milk?"}],
+            )
+            == "literacy",
+            "general for names; literacy for phonemes",
         ),
         check(
             "semantic_endpointing_precedes_final_turn",

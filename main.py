@@ -151,6 +151,10 @@ async def lifespan(app: FastAPI):
         # The isolated lane can also canary a different TTS provider
         # (e.g. chatterbox) without touching the production chain on 9019.
         tts_primary=os.getenv("SABI_TTS_TEST_PRIMARY", ""),
+        # Learned interruption can be canaried on the Twilio route without
+        # enabling it for the separate production/Africa's Talking listener.
+        barge_in_enabled=os.getenv("SABI_TEST_BARGE_IN_ENABLED", "0").strip().lower()
+        in {"1", "true", "yes", "on"},
     )
     original_audiosocket_server = await start_audiosocket_server(
         # The comparison lane uses the same lesson-aware Gemini STT instance

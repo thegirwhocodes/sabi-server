@@ -43,7 +43,9 @@ transcripts.
    acoustic echo.
 4. **Phase-sensitive sensitivity:** while Sabi speaks, the strict gate favors
    false-rejection over false-interruption. After the prompt, a permissive
-   64 ms Silero gate retains one-phoneme literacy answers.
+   192 ms Silero gate retains sustained one-phoneme literacy answers while
+   rejecting the short sound that became the empty first turn in the August 7
+   live test.
 5. **Learned endpointing:** after 360 ms of silence, Pipecat Smart Turn v3.2
    reads up to eight seconds of the current turn's PCM audio. If its prosodic
    and linguistic classifier says the thought is incomplete, Sabi waits for
@@ -59,10 +61,10 @@ The model and training code use the BSD 2-Clause license.
 
 ## Safety and rollout
 
-`SABI_BARGE_IN_ENABLED=0` remains the public default. This lets the learned
-post-prompt speech gate and endpointing run while guaranteeing that no
-interruption can stop Sabi. Enable barge-in only after the private recorded-call
-regressions and a live test pass.
+`SABI_BARGE_IN_ENABLED=0` remains the public 9019 default. Twilio's isolated
+9020 listener can set `SABI_TEST_BARGE_IN_ENABLED=1`, letting the learned gate
+be tested without changing the separate Africa's Talking lane. The test lane
+also uses Gemini for names/numeracy and fast Groq Whisper for literacy sounds.
 
 Run in the deployed container:
 
@@ -73,6 +75,8 @@ python /app/phone_runtime_config_regression.py
 ```
 
 The August 7 false-barge replay currently rejects all seven contaminated clips.
+The follow-up live call regression also rejects the weak first post-prompt clip
+before it can reach Gemini or Whisper.
 
 ## Primary references
 

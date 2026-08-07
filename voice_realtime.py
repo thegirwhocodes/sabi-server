@@ -471,6 +471,13 @@ def _stt_mode_for_state(state: dict | None) -> str:
 
 
 def _stt_mode_for_turn(state: dict | None, messages: list[dict[str, str]]) -> str:
+    # The test lane deliberately keeps Gemini for names and numeracy, where it
+    # won the real-call bake-off. Foundational literacy sounds use the much
+    # faster Whisper/Groq lane instead. A returning learner can already be in a
+    # literacy state while Sabi is still asking their name, so question intent
+    # must take precedence over the saved course here.
+    if _current_question_asks_for_name(messages):
+        return "general"
     if _current_question_expects_numeric(messages):
         return "general"
     return _stt_mode_for_state(state)
@@ -714,7 +721,8 @@ async def _send_packet(writer: asyncio.StreamWriter, packet_type: int, payload: 
 
 class RealtimeCall:
     def __init__(self, call_uuid: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                 stt, llm, tts, memory, tts_primary: str = "", conversation_style: str = "current"):
+                 stt, llm, tts, memory, tts_primary: str = "", conversation_style: str = "current",
+                 barge_in_enabled: bool | None = None):
         self.call_uuid = call_uuid
         self.reader = reader
         self.writer = writer
@@ -723,6 +731,12 @@ class RealtimeCall:
         self.tts = tts
         self.memory = memory
         self.conversation_style = (conversation_style or "current").strip().lower()
+        # Each listener can canary learned barge-in independently. The public
+        # 9019 lane inherits the conservative global default; Twilio's 9020
+        # test lane may opt in without changing Africa's Talking traffic.
+        self.barge_in_enabled = (
+            BARGE_IN_ENABLED if barge_in_enabled is None else bool(barge_in_enabled)
+        )
         # Per-lane TTS provider override. Empty = global SABI_TTS_PRIMARY.
         # The isolated test lane (port 9020) sets this from
         # SABI_TTS_TEST_PRIMARY so Chatterbox can be canaried without touching
@@ -926,7 +940,7 @@ class RealtimeCall:
             "Playback start uuid=%s duration=%.2fs barge_in_enabled=%s barge_grace_ms=%s speech_threshold=%s",
             self.call_uuid,
             len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH),
-            BARGE_IN_ENABLED,
+            self.barge_in_enabled,
             effective_barge_grace_ms,
             threshold,
         )
@@ -951,7 +965,7 @@ class RealtimeCall:
             drained_frames = 0
             peak_rms = 0
             barge_allowed = (
-                BARGE_IN_ENABLED
+                self.barge_in_enabled
                 and (time.monotonic() - playback_start) >= (effective_barge_grace_ms / 1000)
             )
             while True:
@@ -1050,7 +1064,7 @@ class RealtimeCall:
             elapsed = time.monotonic() - frame_start
             await asyncio.sleep(max(0, FRAME_MS / 1000 - elapsed))
 
-        if not BARGE_IN_ENABLED:
+        if not self.barge_in_enabled:
             # Close the race between the final playback frame and the next
             # wait_for_utterance() call.  Nothing heard while Sabi was talking
             # should be promoted into a learner turn when barge-in is disabled.
@@ -2685,7 +2699,8 @@ class RealtimeCall:
 
 async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                                   stt, llm, tts, memory, tts_primary: str = "",
-                                  conversation_style: str = "current") -> None:
+                                  conversation_style: str = "current",
+                                  barge_in_enabled: bool | None = None) -> None:
     peer_info = writer.get_extra_info("peername")
     try:
         packet_type, payload = await _read_packet(reader)
@@ -2704,6 +2719,7 @@ async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.
             memory,
             tts_primary=tts_primary,
             conversation_style=conversation_style,
+            barge_in_enabled=barge_in_enabled,
         )
         if call.conversation_style == "original":
             await call.run_original_sabi()
@@ -2715,7 +2731,8 @@ async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.
 
 
 async def start_audiosocket_server(stt, llm, tts, memory, host: str = "0.0.0.0", port: int = 9019,
-                                   tts_primary: str = "", conversation_style: str = "current"):
+                                   tts_primary: str = "", conversation_style: str = "current",
+                                   barge_in_enabled: bool | None = None):
     async def client_handler(reader, writer):
         await handle_audiosocket_call(
             reader,
@@ -2726,11 +2743,16 @@ async def start_audiosocket_server(stt, llm, tts, memory, host: str = "0.0.0.0",
             memory,
             tts_primary=tts_primary,
             conversation_style=conversation_style,
+            barge_in_enabled=barge_in_enabled,
         )
 
     server = await asyncio.start_server(client_handler, host, port)
     logger.info(
-        "AudioSocket realtime server listening on %s:%s tts_primary=%s conversation_style=%s",
-        host, port, tts_primary or "(global)", conversation_style,
+        "AudioSocket realtime server listening on %s:%s tts_primary=%s conversation_style=%s barge_in_enabled=%s",
+        host,
+        port,
+        tts_primary or "(global)",
+        conversation_style,
+        BARGE_IN_ENABLED if barge_in_enabled is None else bool(barge_in_enabled),
     )
     return server

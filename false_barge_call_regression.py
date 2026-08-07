@@ -23,12 +23,14 @@ from turn_taking import (
 
 
 DEFAULT_CALL_ID = "01eadbaf-883f-417e-b84c-1c438cfedc65"
+DEFAULT_POST_PROMPT_CALL_ID = "2458d516-0334-4648-9662-993b9492743d"
 DEFAULT_AUDIO_ROOT = Path("/shared/audio/call_turns")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--call-id", default=DEFAULT_CALL_ID)
+    parser.add_argument("--post-prompt-call-id", default=DEFAULT_POST_PROMPT_CALL_ID)
     parser.add_argument("--audio-root", type=Path, default=DEFAULT_AUDIO_ROOT)
     args = parser.parse_args()
 
@@ -65,6 +67,35 @@ def main() -> int:
         print(f"FAIL false_barge_incident_blocked - accepted={accepted}")
         return 1
     print(f"PASS false_barge_incident_blocked - rejected={len(clips)} clips")
+
+    # The first candidate in the Aug 7 post-deploy call contained only 160 ms
+    # of learned speech evidence. Gemini correctly returned an empty string,
+    # but a literal Whisper model can invent text for the same weak audio. The
+    # post-prompt gate must therefore reject it before any recognizer runs.
+    listening_clip = (
+        args.audio_root / args.post_prompt_call_id / "user_turn_00.wav"
+    )
+    if not listening_clip.is_file():
+        print(f"FAIL missing post-prompt noise fixture - {listening_clip}")
+        return 1
+    with wave.open(str(listening_clip), "rb") as wav:
+        listening_pcm = wav.readframes(wav.getnframes())
+    listening = detector.listening_speech(listening_pcm)
+    print(
+        json.dumps(
+            {
+                "clip": listening_clip.name,
+                "call_id": args.post_prompt_call_id,
+                "would_reach_stt": listening.accepted,
+                **listening.log_fields(),
+            },
+            sort_keys=True,
+        )
+    )
+    if listening.accepted:
+        print("FAIL post_prompt_noise_blocked")
+        return 1
+    print("PASS post_prompt_noise_blocked")
     return 0
 
 

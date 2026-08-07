@@ -27,9 +27,10 @@ from call_admin import merge_call_hangup_event, write_call_review_record
 from call_admin import append_call_turn_review, call_turn_audio_path, write_call_learning_summary
 from curriculum_path import resolve_literacy_lesson, resolve_numeracy_lesson
 from diagnostic_flow import build_opening_turn
-from learning_state import analyze_session
+from learning_state import analyze_session, force_numeracy_course
 from numeric_grading import analyze_latest_numeric_turn, question_expects_numeric_answer
 from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, original_sabi_prompt_for_phone
+from phone_utils import phone_is_numeracy_only
 from transcript_normalizer import (
     is_likely_stt_hallucination_transcript,
     is_phone_system_transcript,
@@ -468,6 +469,12 @@ def _is_literacy_state(state: dict | None) -> bool:
 
 def _stt_mode_for_state(state: dict | None) -> str:
     return "literacy" if _is_literacy_state(state) else "general"
+
+
+def _course_state_for_phone(phone: str, state: dict | None) -> dict:
+    """Apply reversible, caller-scoped course experiments to runtime state."""
+    effective = dict(state or {})
+    return force_numeracy_course(effective) if phone_is_numeracy_only(phone) else effective
 
 
 def _stt_mode_for_turn(state: dict | None, messages: list[dict[str, str]]) -> str:
@@ -2089,6 +2096,15 @@ class RealtimeCall:
             student = await self.memory.find_or_create_student(self.phone)
             student_id = student["id"]
             effective_state = await self.memory.get_effective_learning_state(student)
+            if phone_is_numeracy_only(self.phone):
+                previous_course = str(effective_state.get("course") or "numeracy")
+                effective_state = _course_state_for_phone(self.phone, effective_state)
+                logger.info(
+                    "Phone-scoped numeracy-only route uuid=%s phone=%s previous_course=%s",
+                    self.call_uuid,
+                    self.phone,
+                    previous_course,
+                )
             starting_learning_state = dict(effective_state)
             identity_confirmed = not student.get("needs_identity_confirmation")
             module = int(effective_state.get("current_module") or student.get("current_module") or 0)
@@ -2468,6 +2484,7 @@ class RealtimeCall:
                         student = resolved_student
                         student_id = resolved_student.get("id") or student_id
                         effective_state = await self.memory.get_effective_learning_state(student)
+                        effective_state = _course_state_for_phone(self.phone, effective_state)
                         starting_learning_state = dict(effective_state)
                         module = int(effective_state.get("current_module") or student.get("current_module") or module or 0)
                         identity_confirmed = True

@@ -445,6 +445,39 @@ def route_next_course_after_session(
     return routed
 
 
+def force_numeracy_course(state: dict[str, Any] | None) -> dict[str, Any]:
+    """Expose the saved numeracy path without deleting literacy progress.
+
+    This is used only for explicitly configured phone numbers. The nested
+    literacy state is preserved so the experiment can be removed later, while
+    every active top-level teaching field is made unambiguously numeracy.
+    """
+    routed = dict(state or default_learning_state())
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        module = max(0, int(routed.get("current_module") or 0))
+    except (TypeError, ValueError):
+        module = 0
+    numeracy_started = routed.get("diagnostic_status") == "done" and module > 0
+    rotation = dict(routed.get("course_rotation") or {})
+    rotation.update({"next_course": "numeracy", "updated_at": now})
+    routed.update(
+        {
+            "course": "numeracy",
+            "phase": "recall" if numeracy_started else "diagnostic",
+            "active_skill": MODULE_SKILLS.get(module, "diagnostic"),
+            "next_step": (
+                "Continue the saved numeracy lesson and do not switch to literacy."
+                if numeracy_started
+                else "Run the numeracy diagnostic game and do not switch to literacy."
+            ),
+            "course_rotation": rotation,
+            "updated_at": now,
+        }
+    )
+    return routed
+
+
 def scaffold_ladder_for(active_skill: str, scaffold_depth: int, wrong_streak: int) -> dict[str, Any] | None:
     level = _scaffold_level(scaffold_depth, wrong_streak)
     if level <= 0:

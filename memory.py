@@ -30,6 +30,7 @@ from learning_state import (
     default_learning_state,
     extract_child_name,
     merge_learning_state,
+    force_numeracy_course,
     route_next_course_after_session,
 )
 from mastery_probe import probe_capture_payload, session_probe_score
@@ -39,7 +40,7 @@ from pilot_research_design import (
     research_capture_payload,
 )
 from teacher_notes import generate_teacher_note
-from phone_utils import normalize_phone_number, phone_lookup_variants
+from phone_utils import normalize_phone_number, phone_is_numeracy_only, phone_lookup_variants
 from secret_loader import get_secret
 from transcript_normalizer import is_phone_system_transcript
 
@@ -260,11 +261,14 @@ class StudentMemory:
                 or stats.wrong_count > 0
                 or bool(stats.should_advance)
             )
-            persisted_learning_state = route_next_course_after_session(
-                persisted_learning_state,
-                user_turns=user_turns,
-                has_learning_evidence=has_learning_evidence,
-            )
+            if phone_is_numeracy_only(normalized_phone):
+                persisted_learning_state = force_numeracy_course(persisted_learning_state)
+            else:
+                persisted_learning_state = route_next_course_after_session(
+                    persisted_learning_state,
+                    user_turns=user_turns,
+                    has_learning_evidence=has_learning_evidence,
+                )
             next_course = str(persisted_learning_state.get("course") or "numeracy")
             if next_course != previous_course:
                 summary = f"{summary} Next call will continue with {next_course}."

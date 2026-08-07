@@ -28,6 +28,11 @@ os.environ.setdefault("SABI_SHARED_AUDIO_DIR", str(Path(os.getenv("TMPDIR", "/tm
 import voice_asterisk
 import voice_realtime
 import turn_taking
+from learning_state import force_numeracy_course
+from phone_utils import phone_is_numeracy_only
+
+
+MEMORY_SOURCE = (Path(__file__).resolve().parent / "memory.py").read_text()
 
 
 def check(name: str, ok: bool, detail: object) -> bool:
@@ -97,6 +102,16 @@ async def natural_pause_survives_endpointing() -> tuple[bool, dict]:
 
 def main() -> int:
     natural_pause_ok, natural_pause_detail = asyncio.run(natural_pause_survives_endpointing())
+    literacy_state = {
+        "course": "literacy",
+        "phase": "diagnostic",
+        "diagnostic_status": "done",
+        "current_module": 4,
+        "active_skill": "phonemic_awareness_beginning",
+        "literacy": {"current_module": 1, "active_skill": "phonemic_awareness_beginning"},
+        "course_rotation": {"next_course": "literacy"},
+    }
+    forced_numeracy = force_numeracy_course(literacy_state)
     results = [
         check(
             "max_call_window_allows_full_lesson",
@@ -219,6 +234,38 @@ def main() -> int:
             )
             == "literacy",
             "general for names; literacy for phonemes",
+        ),
+        check(
+            "numeracy_only_allowlist_normalizes_caller_id",
+            phone_is_numeracy_only(
+                "+1 (860) 436-7048",
+                "+18604367048,+2348000000000",
+            )
+            and not phone_is_numeracy_only(
+                "+18605550199",
+                "+18604367048,+2348000000000",
+            ),
+            "target caller only",
+        ),
+        check(
+            "numeracy_only_route_preserves_literacy_progress",
+            forced_numeracy.get("course") == "numeracy"
+            and forced_numeracy.get("active_skill") == "multiplication"
+            and forced_numeracy.get("course_rotation", {}).get("next_course") == "numeracy"
+            and forced_numeracy.get("literacy") == literacy_state.get("literacy"),
+            forced_numeracy,
+        ),
+        check(
+            "numeracy_only_is_enforced_at_call_start_and_persistence",
+            "phone_is_numeracy_only(self.phone)" in inspect.getsource(
+                voice_realtime.RealtimeCall.run
+            )
+            and inspect.getsource(voice_realtime.RealtimeCall.run).count(
+                "_course_state_for_phone(self.phone, effective_state)"
+            )
+            >= 2
+            and "phone_is_numeracy_only(normalized_phone)" in MEMORY_SOURCE,
+            "call start, shared-phone switch, and saved next-call state",
         ),
         check(
             "semantic_endpointing_precedes_final_turn",

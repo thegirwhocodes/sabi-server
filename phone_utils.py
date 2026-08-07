@@ -7,6 +7,7 @@ those into one stable key so a learner continues from the same profile.
 
 from __future__ import annotations
 
+import os
 import re
 
 
@@ -62,3 +63,25 @@ def phone_lookup_variants(raw: str | None) -> list[str]:
                 variants.append(value)
 
     return variants
+
+
+def phone_is_numeracy_only(
+    raw: str | None,
+    configured: str | None = None,
+) -> bool:
+    """Return whether this caller is in the numeracy-only experiment.
+
+    The switch is deliberately phone-scoped: literacy remains available for
+    every learner not listed in ``SABI_NUMERACY_ONLY_PHONES``. Values are
+    normalized before comparison so Twilio punctuation cannot bypass it.
+    """
+    if configured is None:
+        configured = os.getenv("SABI_NUMERACY_ONLY_PHONES", "")
+    target = normalize_phone_number(raw)
+    if target == "unknown":
+        return False
+    return target in {
+        normalize_phone_number(value)
+        for value in re.split(r"[,;\n]+", configured or "")
+        if value.strip()
+    }

@@ -733,14 +733,22 @@ class SpeechToText:
                 context,
             )
 
-        groq, groq_error = self._future_result(futures["groq"])
-        local_vote_timeout = max(
+        vote_timeout = max(
             0.1,
             float(os.getenv("SABI_STT_LOCAL_VOTE_TIMEOUT", "5.0")),
         )
+        groq, groq_error = self._future_result(
+            futures["groq"],
+            timeout=vote_timeout,
+            timeout_label="Groq",
+        )
+        remaining_vote_seconds = max(
+            0.1,
+            vote_timeout - (time.monotonic() - started),
+        )
         local, local_error = self._future_result(
             futures["local_whisper"],
-            timeout=local_vote_timeout,
+            timeout=remaining_vote_seconds,
             timeout_label="local Whisper",
         )
         groq_key, groq_number = _consensus_key(

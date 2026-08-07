@@ -24,6 +24,7 @@ INCORRECT = "incorrect"
 INDETERMINATE = "indeterminate"
 INDEPENDENT = "independent"
 SCAFFOLDED = "scaffolded"
+MODELLED = "modelled"
 
 
 def make_evidence_event(

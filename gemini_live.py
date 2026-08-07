@@ -40,6 +40,7 @@ from gemini_grading import (
     INDETERMINATE,
     INCORRECT,
     INDEPENDENT,
+    MODELLED,
     NOT_SCORABLE,
     SCORABLE,
     SCAFFOLDED,
@@ -71,6 +72,7 @@ GEMINI_LIVE_MIN_LESSON_SECONDS = int(
 GEMINI_LIVE_TARGET_WRAP_SECONDS = int(
     os.getenv("SABI_GEMINI_LIVE_TARGET_WRAP_SECONDS", "420")
 )
+MULTIPLICATION_MASTERY_SKILL = "multiplication_equal_groups"
 
 INPUT_SAMPLE_RATE = 8000
 OUTPUT_SAMPLE_RATE = 24000
@@ -97,19 +99,45 @@ your intuition—decides when wrapping is allowed.
 
 ## VOICE
 - Use warm, natural Nigerian English, not caricatured Pidgin.
-- Keep each ordinary turn under twelve spoken words when possible.
+- Use one or two short spoken sentences. A real teaching turn may use up to
+  about twenty-eight words; never shorten away the actual explanation.
 - Ask only one question, then wait.
 - Use plain spoken language: no markdown, lists, stage directions, or tool talk.
-- Vary encouragement and celebrate effort as well as success.
+- React to what the learner just said before moving on.
+
+## SABI'S TEACHING PRESENCE
+- Sound like a warm, clever older sister who enjoys learning with the child,
+  while remaining honest that you are their AI tutor.
+- Most teaching turns have three beats: one human acknowledgement, one tiny
+  teaching move, and one clear invitation to try.
+- Fun must support the lesson. Use a brief playful image, gentle joke, curious
+  connection, or lively reaction after success or during a transition.
+- Natural expressions such as "Oya", "Yeees", "No wahala", and "Well done oh"
+  are welcome sparingly. Vary them; never perform exaggerated Pidgin.
+- Do not run a grade-praise-next-question treadmill. Name what the learner did
+  or make the story feel alive before the next exact registered question.
 
 ## PEDAGOGY
 - Begin concrete: equal groups, market items, school items, or naira; then name
   the mathematical idea.
+- For a multiplication beginner, start only with very small equal groups.
+  Teach groups and repeated addition before times-table language.
 - A first attempt is independent. If it is incorrect, give one short conceptual
   scaffold and let the learner retry the same registered item.
+- "I don't know", "help me", and "show me" mean teach me. Reassure the learner,
+  make one concrete step visible, then ask one tiny intermediate question.
 - A technical repeat for unclear audio is not a hint and is never marked wrong.
 - Do not turn supported success into a claim of independent mastery.
 - Stay on the saved lesson. Do not jump modules during the call.
+
+## RESPONSE SHAPES TO IMITATE — ADAPT, NEVER RECITE
+- Help request: "No wahala, we'll do it together. Picture three oranges here
+  and three there; count the second group after three—what number do you reach?"
+- Incorrect five when the answer is six: "Good try—you counted most of them.
+  Keep your five, then count one more orange; what number comes next?"
+- Supported success: "Yeees, six! You found it by counting both groups."
+- Transition: add one tiny story bridge, then speak the exact registered next
+  question without changing or paraphrasing its maths.
 
 ## PHONE BEHAVIOR
 - Ignore silence, breaths, clicks, coughs, line noise, and random non-speech.
@@ -139,10 +167,14 @@ def build_gemini_live_learner_context(
     student = student or {}
     state = learning_state or {}
     name = " ".join(str(student.get("name") or "Learner").split())
+    active_skill = str(state.get("active_skill") or "multiplication")
+    mastery_skill = (
+        MULTIPLICATION_MASTERY_SKILL
+        if active_skill == "multiplication"
+        else active_skill
+    )
     mastery = (
-        ((state.get("grading_evidence") or {}).get("skills") or {}).get(
-            str(state.get("active_skill") or "multiplication")
-        )
+        ((state.get("grading_evidence") or {}).get("skills") or {}).get(mastery_skill)
         or {}
     )
     scaffold = state.get("scaffold_ladder") if isinstance(state.get("scaffold_ladder"), dict) else {}
@@ -191,67 +223,233 @@ class NumeracyProblem:
     id: str
     question: str
     expected: int
-    skill: str = "multiplication"
-    item_form: str = "equal_groups"
+    skill: str = MULTIPLICATION_MASTERY_SKILL
+    item_form: str = "equal_groups_story"
+    difficulty_tier: int = 1
+    groups: int = 2
+    per_group: int = 2
+    conceptual_hint: str = ""
+    answer_model: str = ""
 
 
-# Products and factor pairs are deliberately varied.  This prevents the old
-# failure where several consecutive multiplication prompts all happened to
-# equal twelve.
+# The current saved lesson introduces multiplication as equal groups. Problems
+# are tiered before any call-specific rotation so a beginner can never open on
+# 7x3, 8x4, a rate problem, or another later-times-table item.
 MULTIPLICATION_PROBLEMS: tuple[NumeracyProblem, ...] = (
     NumeracyProblem(
-        "mul_2x4_oranges",
-        "Two bags have four oranges each. How many oranges are there altogether?",
+        "eqg_a_2x2_eggs",
+        "Two plates have two eggs each. How many eggs are there altogether?",
+        4,
+        conceptual_hint=(
+            "One plate has two eggs. The other has two more. Count two, three—what comes next?"
+        ),
+        answer_model="Let's count: one, two, three, four. There are four eggs. Say four.",
+    ),
+    NumeracyProblem(
+        "eqg_a_2x3_oranges",
+        "Two bags have three oranges each. How many oranges are there altogether?",
+        6,
+        groups=2,
+        per_group=3,
+        conceptual_hint=(
+            "One bag has three oranges. Add the other three: four, five—what comes next?"
+        ),
+        answer_model="Let's count: one, two, three, four, five, six. There are six. Say six.",
+    ),
+    NumeracyProblem(
+        "repadd_a_3x1_biscuits",
+        (
+            "Three plates have one biscuit each. That is one plus one plus one. "
+            "How many biscuits are there?"
+        ),
+        3,
+        item_form="repeated_addition",
+        groups=3,
+        per_group=1,
+        conceptual_hint="Count the plates: one biscuit, two biscuits—what comes next?",
+        answer_model="One plus one plus one makes three. There are three biscuits. Say three.",
+    ),
+    NumeracyProblem(
+        "eqg_a_2x4_mangoes",
+        "Two baskets have four mangoes each. How many mangoes are there altogether?",
         8,
+        groups=2,
+        per_group=4,
+        conceptual_hint=(
+            "One basket has four. Add four more: five, six, seven—what comes next?"
+        ),
+        answer_model="Four and four make eight. There are eight mangoes. Say eight.",
     ),
     NumeracyProblem(
-        "mul_3x5_biscuits",
-        "Three children get five biscuits each. How many biscuits do they get altogether?",
+        "eqg_a_3x3_groundnuts",
+        "Three cups have three groundnuts each. How many groundnuts are there altogether?",
+        9,
+        groups=3,
+        per_group=3,
+        conceptual_hint=(
+            "Two cups make six groundnuts. Add the last three: seven, eight—what comes next?"
+        ),
+        answer_model="Three plus three plus three makes nine. There are nine. Say nine.",
+    ),
+    NumeracyProblem(
+        "eqg_a_2x5_fingers",
+        "Two hands have five fingers each. How many fingers are there altogether?",
+        10,
+        groups=2,
+        per_group=5,
+        conceptual_hint="One hand has five. Count five more: six, seven, eight, nine—what comes next?",
+        answer_model="Five and five make ten. Two hands have ten fingers. Say ten.",
+    ),
+    NumeracyProblem(
+        "eqg_b_3x4_eggs",
+        "Three baskets have four eggs each. How many eggs are there altogether?",
+        12,
+        difficulty_tier=2,
+        groups=3,
+        per_group=4,
+        conceptual_hint="Two baskets make eight eggs. Add four more to eight. What do you get?",
+        answer_model="Four plus four plus four makes twelve. There are twelve eggs. Say twelve.",
+    ),
+    NumeracyProblem(
+        "eqg_b_3x5_biscuits",
+        "Three children get five biscuits each. How many biscuits are there altogether?",
         15,
+        difficulty_tier=2,
+        groups=3,
+        per_group=5,
+        conceptual_hint="Two groups of five make ten. Add the last five. What is ten plus five?",
+        answer_model="Five plus five plus five makes fifteen. Say fifteen.",
     ),
     NumeracyProblem(
-        "mul_4x4_notebooks",
+        "array_b_4x4_notebooks",
         "Four rows have four notebooks in each row. How many notebooks are there?",
         16,
         item_form="array",
+        difficulty_tier=2,
+        groups=4,
+        per_group=4,
+        conceptual_hint="Three rows make twelve notebooks. Add the last four. What is twelve plus four?",
+        answer_model="Four rows of four make sixteen notebooks. Say sixteen.",
     ),
     NumeracyProblem(
-        "mul_2x7_mangoes",
-        "Two trays have seven mangoes each. How many mangoes are there altogether?",
-        14,
+        "eqg_b_4x5_water",
+        "Four bags hold five sachets of pure water each. How many sachets are there?",
+        20,
+        difficulty_tier=2,
+        groups=4,
+        per_group=5,
+        conceptual_hint="Three bags make fifteen sachets. Add five more. What is fifteen plus five?",
+        answer_model="Five plus five plus five plus five makes twenty. Say twenty.",
     ),
     NumeracyProblem(
-        "mul_5x6_groundnuts",
+        "eqg_b_3x7_eggs",
+        "Three baskets have seven eggs each. How many eggs are there altogether?",
+        21,
+        difficulty_tier=2,
+        groups=3,
+        per_group=7,
+        conceptual_hint="Two baskets make fourteen eggs. Add seven more. What is fourteen plus seven?",
+        answer_model="Seven plus seven plus seven makes twenty-one. Say twenty-one.",
+    ),
+    NumeracyProblem(
+        "eqg_b_4x6_pencils",
+        "Four pupils have six pencils each. How many pencils do they have altogether?",
+        24,
+        difficulty_tier=2,
+        groups=4,
+        per_group=6,
+        conceptual_hint="Three groups of six make eighteen. Add the last six. What do you get?",
+        answer_model="Six added four times makes twenty-four. Say twenty-four.",
+    ),
+    NumeracyProblem(
+        "rate_c_5x6_naira",
         "Five small bags cost six naira each. How much do they cost altogether?",
         30,
         item_form="rate",
+        difficulty_tier=3,
+        groups=5,
+        per_group=6,
+        conceptual_hint="Four bags cost twenty-four naira. Add the last six naira. What do you get?",
+        answer_model="Six naira five times makes thirty naira. Say thirty.",
     ),
     NumeracyProblem(
-        "mul_3x7_eggs",
-        "Three baskets have seven eggs each. How many eggs are there?",
-        21,
-    ),
-    NumeracyProblem(
-        "mul_4x6_pencils",
-        "Four pupils have six pencils each. How many pencils do they have altogether?",
-        24,
-    ),
-    NumeracyProblem(
-        "mul_6x6_sweets",
-        "Six packets have six sweets each. How many sweets are there?",
-        36,
-    ),
-    NumeracyProblem(
-        "mul_7x5_water",
-        "Seven bags hold five sachets of pure water each. How many sachets are there?",
-        35,
-    ),
-    NumeracyProblem(
-        "mul_8x4_chinchin",
+        "eqg_c_8x4_chinchin",
         "Eight children get four pieces of chin-chin each. How many pieces is that?",
         32,
+        difficulty_tier=3,
+        groups=8,
+        per_group=4,
+        conceptual_hint="Seven groups make twenty-eight pieces. Add four more. What do you get?",
+        answer_model="Four added eight times makes thirty-two. Say thirty-two.",
+    ),
+    NumeracyProblem(
+        "eqg_c_7x5_water",
+        "Seven bags hold five sachets of pure water each. How many sachets are there?",
+        35,
+        difficulty_tier=3,
+        groups=7,
+        per_group=5,
+        conceptual_hint="Six bags make thirty sachets. Add five more. What do you get?",
+        answer_model="Five added seven times makes thirty-five. Say thirty-five.",
+    ),
+    NumeracyProblem(
+        "array_c_6x6_sweets",
+        "Six packets have six sweets each. How many sweets are there?",
+        36,
+        item_form="array",
+        difficulty_tier=3,
+        groups=6,
+        per_group=6,
+        conceptual_hint="Five groups make thirty sweets. Add the last six. What do you get?",
+        answer_model="Six groups of six make thirty-six. Say thirty-six.",
+    ),
+    NumeracyProblem(
+        "eqg_c_7x6_oranges",
+        "Seven trays have six oranges each. How many oranges are there altogether?",
+        42,
+        difficulty_tier=3,
+        groups=7,
+        per_group=6,
+        conceptual_hint="Six trays make thirty-six oranges. Add the last six. What do you get?",
+        answer_model="Six added seven times makes forty-two. Say forty-two.",
+    ),
+    NumeracyProblem(
+        "eqg_c_8x6_mangoes",
+        "Eight baskets have six mangoes each. How many mangoes are there altogether?",
+        48,
+        difficulty_tier=3,
+        groups=8,
+        per_group=6,
+        conceptual_hint="Seven baskets make forty-two mangoes. Add the last six. What do you get?",
+        answer_model="Six added eight times makes forty-eight. Say forty-eight.",
     ),
 )
+
+
+BEGINNER_EQUAL_GROUPS_INTRO = (
+    "Equal groups means every plate gets the same amount. "
+    "One plate with one egg and another plate with one egg makes two eggs."
+)
+
+
+def learner_requested_math_help(text: str) -> bool:
+    """Distinguish a clear request for teaching from unclear/no-number audio."""
+    normalized = " ".join(re.sub(r"[^a-z0-9']+", " ", str(text or "").lower()).split())
+    return any(
+        phrase in normalized
+        for phrase in (
+            "i don't know",
+            "i dont know",
+            "i do not know",
+            "i no know",
+            "help me",
+            "abeg help",
+            "show me",
+            "not sure",
+            "i can't do it",
+            "i cant do it",
+        )
+    )
 
 
 def merge_stream_text(existing: str, incoming: str) -> str:
@@ -307,8 +505,37 @@ class GeminiLiveNumeracyTools:
         self.call_uuid = str(call_uuid)
         self.call_started_at = time.monotonic()
         self.learning_state = force_numeracy_course(dict(learning_state or {}))
+        grading = self.learning_state.get("grading_evidence") or {}
+        prior_events = [
+            dict(event)
+            for event in grading.get("events") or []
+            if isinstance(event, dict)
+            and event.get("skill") == MULTIPLICATION_MASTERY_SKILL
+        ]
+        mastery = dict(
+            ((grading.get("skills") or {}).get(MULTIPLICATION_MASTERY_SKILL)) or {}
+        )
+        mastery_status = str(mastery.get("status") or "not_started")
+        self.difficulty_tier = (
+            3
+            if mastery_status in {"secure", "retained"}
+            else 2
+            if mastery_status == "developing"
+            else 1
+        )
+        self._eligible_problems = tuple(
+            problem
+            for problem in MULTIPLICATION_PROBLEMS
+            if problem.difficulty_tier == self.difficulty_tier
+        )
         digest = hashlib.sha256(str(call_uuid).encode("utf-8")).digest()
-        self._index = int.from_bytes(digest[:2], "big") % len(MULTIPLICATION_PROBLEMS)
+        self._index = (
+            int.from_bytes(digest[:2], "big") % len(self._eligible_problems)
+            if prior_events
+            else 0
+        )
+        self._intro_pending = not prior_events and self.difficulty_tier == 1
+        self.current_problem_has_intro = False
         self.current_problem: NumeracyProblem | None = None
         self.current_problem_resolved = False
         self.current_prompt_level = "none"
@@ -316,26 +543,26 @@ class GeminiLiveNumeracyTools:
         self.problem_history: list[str] = []
         self.grade_history: list[dict[str, Any]] = []
         self.call_events: list[dict[str, Any]] = []
-        self._starting_mastery = dict(
-            ((self.learning_state.get("grading_evidence") or {}).get("skills") or {}).get(
-                "multiplication"
-            )
-            or {}
-        )
+        self._starting_mastery = mastery
 
     def next_problem(self) -> dict[str, Any]:
         if self.current_problem is not None and not self.current_problem_resolved:
             problem = self.current_problem
-            return {
+            result = {
                 "status": "active_problem",
                 "problem_id": problem.id,
                 "skill": problem.skill,
                 "item_form": problem.item_form,
+                "difficulty_tier": problem.difficulty_tier,
+                "factors": [problem.groups, problem.per_group],
                 "question": problem.question,
                 "instruction": (
                     "Do not ask a different maths question. Continue or repeat this exact problem."
                 ),
             }
+            if self.current_problem_has_intro:
+                result["teaching_intro"] = BEGINNER_EQUAL_GROUPS_INTRO
+            return result
 
         prior_events = list(
             ((self.learning_state.get("grading_evidence") or {}).get("events") or [])
@@ -345,9 +572,9 @@ class GeminiLiveNumeracyTools:
             for event in prior_events[-5:]
             if isinstance(event, dict) and event.get("item_id")
         }
-        problem = MULTIPLICATION_PROBLEMS[self._index % len(MULTIPLICATION_PROBLEMS)]
-        for _ in range(len(MULTIPLICATION_PROBLEMS)):
-            candidate = MULTIPLICATION_PROBLEMS[self._index % len(MULTIPLICATION_PROBLEMS)]
+        problem = self._eligible_problems[self._index % len(self._eligible_problems)]
+        for _ in range(len(self._eligible_problems)):
+            candidate = self._eligible_problems[self._index % len(self._eligible_problems)]
             self._index += 1
             if candidate.id not in recent_ids and candidate.id not in self.problem_history[-5:]:
                 problem = candidate
@@ -357,17 +584,24 @@ class GeminiLiveNumeracyTools:
         self.current_prompt_level = "none"
         self.current_attempt = 0
         self.problem_history.append(problem.id)
-        return {
+        self.current_problem_has_intro = self._intro_pending
+        self._intro_pending = False
+        result = {
             "status": "ready",
             "problem_id": problem.id,
             "skill": problem.skill,
             "item_form": problem.item_form,
+            "difficulty_tier": problem.difficulty_tier,
+            "factors": [problem.groups, problem.per_group],
             "question": problem.question,
             "instruction": (
-                "Ask the question exactly once. The answer key remains inside Sabi. "
-                "Wait for the learner to answer."
+                "If teaching_intro is present, explain that idea first in your natural voice. "
+                "Then ask the exact question once and wait."
             ),
         }
+        if self.current_problem_has_intro:
+            result["teaching_intro"] = BEGINNER_EQUAL_GROUPS_INTRO
+        return result
 
     def grade_answer(self, learner_answer: str) -> dict[str, Any]:
         answer = " ".join(str(learner_answer or "").split())
@@ -402,7 +636,11 @@ class GeminiLiveNumeracyTools:
         self.current_attempt += 1
         prompt_level = self.current_prompt_level
         independence = (
-            SCAFFOLDED if prompt_level in {"conceptual", "answer_model"} else INDEPENDENT
+            MODELLED
+            if prompt_level == "answer_model"
+            else SCAFFOLDED
+            if prompt_level == "conceptual"
+            else INDEPENDENT
         )
         if problem.expected in unique_numbers and len(unique_numbers) == 1:
             status = "correct"
@@ -415,6 +653,17 @@ class GeminiLiveNumeracyTools:
                 "that exact question and never invent or substitute a different one."
             )
             self.current_problem_resolved = True
+        elif not unique_numbers and learner_requested_math_help(answer):
+            status = "help_requested"
+            is_correct = None
+            audio_scorability = SCORABLE
+            academic_correctness = INDETERMINATE
+            instruction = (
+                "The learner clearly asked for help. Reassure them and teach one small step "
+                f"for the SAME problem using this idea: {problem.conceptual_hint} "
+                "Phrase it naturally, then wait for their answer."
+            )
+            self.current_prompt_level = "conceptual"
         elif not unique_numbers:
             status = "not_scorable"
             is_correct = None
@@ -439,8 +688,8 @@ class GeminiLiveNumeracyTools:
             audio_scorability = SCORABLE
             academic_correctness = INCORRECT
             instruction = (
-                "Do not say 'wrong'. Give one short concrete scaffold for the SAME problem, "
-                "then let the learner try again."
+                "Do not say 'wrong'. Acknowledge the effort and teach this one small step for "
+                f"the SAME problem: {problem.conceptual_hint} Then wait for another try."
             )
             self.current_prompt_level = "conceptual"
 
@@ -473,6 +722,7 @@ class GeminiLiveNumeracyTools:
             "problem_id": problem.id,
             "question": problem.question,
             "expected_answer": problem.expected,
+            "difficulty_tier": problem.difficulty_tier,
             "learner_answer": answer,
             "heard_numbers": numbers,
             "object_nouns_ignored": True,
@@ -520,7 +770,7 @@ class GeminiLiveNumeracyTools:
             phase = "wrap_window"
         else:
             phase = "wrap_now"
-        score = session_score(self.call_events, "multiplication")
+        score = session_score(self.call_events, MULTIPLICATION_MASTERY_SKILL)
         enough_evidence = (
             score.get("independent_correct", 0) + score.get("independent_incorrect", 0) >= 3
         )
@@ -547,10 +797,10 @@ class GeminiLiveNumeracyTools:
         }
 
     def authoritative_session_score(self) -> dict[str, Any]:
-        score = session_score(self.call_events, "multiplication")
+        score = session_score(self.call_events, MULTIPLICATION_MASTERY_SKILL)
         mastery = (
             ((self.learning_state.get("grading_evidence") or {}).get("skills") or {}).get(
-                "multiplication"
+                MULTIPLICATION_MASTERY_SKILL
             )
             or {}
         )

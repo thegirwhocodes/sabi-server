@@ -10,7 +10,7 @@ Optimizations for Nigerian English:
 """
 
 import io
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import logging
 import os
 import re
@@ -678,12 +678,12 @@ class SpeechToText:
             return None, RuntimeError("provider is not configured")
         try:
             return dict(future.result(timeout=timeout) or {}), None
-        except TimeoutError as exc:
-            if timeout is not None and not future.done():
-                return None, TimeoutError(
-                    f"{timeout_label} exceeded the {timeout:g}s vote deadline"
-                )
-            return None, exc
+        except FutureTimeoutError as exc:
+            if future.done():
+                return None, exc
+            return None, TimeoutError(
+                f"{timeout_label} exceeded the {timeout:g}s vote deadline"
+            )
         except Exception as exc:
             return None, exc
 

@@ -35,7 +35,7 @@ from numeric_grading import (
     verified_numeric_control_message,
 )
 from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, original_sabi_prompt_for_phone
-from phone_utils import phone_is_numeracy_only
+from phone_utils import phone_is_numeracy_only, phone_uses_gemini_live
 from transcript_normalizer import (
     is_likely_stt_hallucination_transcript,
     is_phone_system_transcript,
@@ -923,6 +923,21 @@ class RealtimeCall:
             await _send_packet(self.writer, AUDIO_TYPE_PCM_8K, pcm[offset:offset + FRAME_BYTES])
             elapsed = time.monotonic() - frame_start
             await asyncio.sleep(max(0, FRAME_MS / 1000 - elapsed))
+
+    async def send_pcm_frame(self, frame: bytes) -> None:
+        """Send one already-paced PCM frame without draining caller audio.
+
+        Gemini Live owns playback pacing and must keep receiving caller audio
+        while Sabi speaks.  ``play_pcm`` intentionally drains old input before
+        a normal prompt; using it per Live frame would erase barge-in speech.
+        """
+        if self.hungup or not frame:
+            return
+        await _send_packet(self.writer, AUDIO_TYPE_PCM_8K, frame)
+
+    async def send_hangup(self) -> None:
+        """Tell Asterisk the media application has finished the call."""
+        await _send_packet(self.writer, AUDIO_TYPE_HANGUP)
 
     async def play_pcm_with_barge(
         self,
@@ -2807,6 +2822,22 @@ async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.
         )
         if call.conversation_style == "original":
             await call.run_original_sabi()
+        elif phone_uses_gemini_live(call.phone):
+            # The canary connects before starting the AudioSocket read loop.
+            # A setup failure can therefore fall back safely to the established
+            # turn-based path without losing caller audio or call metadata.
+            from gemini_live import GeminiLiveCallRunner, GeminiLiveSetupError
+
+            try:
+                await GeminiLiveCallRunner(call).run()
+            except GeminiLiveSetupError as exc:
+                logger.error(
+                    "Gemini Live setup failed; using established pipeline uuid=%s phone=%s error=%s",
+                    call.call_uuid,
+                    call.phone,
+                    exc,
+                )
+                await call.run()
         else:
             await call.run()
     except Exception as exc:

@@ -85,3 +85,26 @@ def phone_is_numeracy_only(
         for value in re.split(r"[,;\n]+", configured or "")
         if value.strip()
     }
+
+
+def phone_uses_gemini_live(
+    raw: str | None,
+    configured: str | None = None,
+) -> bool:
+    """Return whether this caller is in the persistent Gemini Live canary.
+
+    The allowlist is intentionally separate from the numeracy-only allowlist.
+    A learner can remain on the ordinary STT -> text LLM -> TTS pipeline while
+    still being numeracy-only, and an empty allowlist fails safely to the
+    established AudioSocket route.
+    """
+    if configured is None:
+        configured = os.getenv("SABI_GEMINI_LIVE_PHONES", "")
+    target = normalize_phone_number(raw)
+    if target == "unknown":
+        return False
+    return target in {
+        normalize_phone_number(value)
+        for value in re.split(r"[,;\n]+", configured or "")
+        if value.strip()
+    }

@@ -181,8 +181,52 @@ def main() -> int:
         grade,
     )
     ok &= check(
-        "correct_problem_must_resolve_before_deck_advances",
-        tools.next_problem().get("problem_id") != "object_noun_regression",
+        "correct_grade_atomically_registers_next_problem",
+        (grade.get("next_problem") or {}).get("problem_id") != "object_noun_regression"
+        and tools.current_problem is not None
+        and tools.current_problem.id == (grade.get("next_problem") or {}).get("problem_id")
+        and tools.current_problem_resolved is False,
+        grade,
+    )
+    repeated_next = tools.next_problem()
+    ok &= check(
+        "registered_followup_cannot_be_replaced_before_answer",
+        repeated_next.get("status") == "active_problem"
+        and repeated_next.get("problem_id") == (grade.get("next_problem") or {}).get("problem_id")
+        and repeated_next.get("question") == (grade.get("next_problem") or {}).get("question"),
+        repeated_next,
+    )
+
+    grade_event = {"name": "grade_numeric_answer", "result": grade}
+    registered_question = (grade.get("next_problem") or {}).get("question") or ""
+    mismatch = gemini_live.registered_followup_enforcement(
+        [grade_event],
+        "Correct! Three bags have five notebooks each. How many notebooks is that?",
+        "two fries",
+        120,
+    )
+    ok &= check(
+        "controller_replaces_invented_question_with_registered_followup",
+        mismatch is not None
+        and mismatch.get("unregistered_question_corrected") is True
+        and registered_question in str(mismatch.get("instruction") or ""),
+        mismatch,
+    )
+    ok &= check(
+        "controller_does_not_duplicate_exact_registered_question",
+        gemini_live.registered_followup_enforcement(
+            [grade_event],
+            f"Correct! {registered_question}",
+            "two fries",
+            120,
+        )
+        is None,
+    )
+    ok &= check(
+        "controller_does_not_treat_a_social_check_in_as_an_invented_maths_item",
+        not gemini_live.assistant_asked_math_question(
+            "Correct! Did that explanation make sense?"
+        ),
     )
 
     resolved_tools = gemini_live.GeminiLiveNumeracyTools("resolved-regression")
@@ -315,8 +359,9 @@ def main() -> int:
     ok &= check(
         "session_context_is_injected_once_with_tool_requirements",
         "one continuous" in constraints
-        and "Call get_next_numeracy_problem before EVERY new maths question" in constraints
+        and "Call get_next_numeracy_problem at lesson opening" in constraints
         and "grade_numeric_answer BEFORE" in constraints
+        and "atomically registers the following item" in constraints
         and "Object words never change the grade" in constraints
         and "five to seven minutes" in constraints
         and "get_lesson_progress BEFORE" in constraints,

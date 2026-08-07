@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import struct
 import time
 import wave
@@ -410,7 +411,8 @@ class GeminiLiveNumeracyTools:
             academic_correctness = CORRECT
             instruction = (
                 "Explicitly say the numeric answer is correct, regardless of any object noun. "
-                "Then call get_next_numeracy_problem before asking a new maths question."
+                "The next problem is already registered in next_problem. If continuing, ask "
+                "that exact question and never invent or substitute a different one."
             )
             self.current_problem_resolved = True
         elif not unique_numbers:
@@ -482,6 +484,11 @@ class GeminiLiveNumeracyTools:
             "grader_version": event["grader_version"],
             "instruction": instruction,
         }
+        if status == "correct":
+            # Reserve the next answer key atomically with the successful grade.
+            # This removes the gap in which the model could improvise a spoken
+            # question while the backend was still holding the solved item.
+            result["next_problem"] = self.next_problem()
         self.grade_history.append(result)
         return result
 
@@ -601,7 +608,8 @@ def build_live_setup(system_prompt: str) -> dict[str, Any]:
                             "name": "get_next_numeracy_problem",
                             "description": (
                                 "Get Sabi's next deterministic, non-repeating numeracy problem. "
-                                "Call this before every new maths question."
+                                "Use this at lesson opening or when no active problem exists. If "
+                                "a problem is already active, it returns that exact same problem."
                             ),
                             "parameters": {"type": "OBJECT", "properties": {}},
                         },
@@ -681,13 +689,17 @@ Live conversation rules:
   continuation instruction. Two or three correct answers never end a lesson.
 
 Deterministic numeracy rules — these are mandatory:
-- Call get_next_numeracy_problem before EVERY new maths question.
+- Call get_next_numeracy_problem at lesson opening or whenever there is no
+  active registered problem.
 - Ask the exact question returned by that tool and never reveal expected_answer.
 - When the learner gives a numeric answer, call grade_numeric_answer BEFORE you
   say or imply that it is correct, incorrect, close, or unclear.
 - Never answer, praise, scaffold, or ask a new maths question without the tool
   call required above. A conversationally invented question has no valid key.
 - The grading tool is authoritative. If it says correct, explicitly say correct.
+- A correct grade atomically registers the following item in next_problem. If
+  continuing, ask that exact next_problem question. Never improvise, paraphrase,
+  replace it, or request a different item.
 - A correct number remains correct whether Gemini heard apples, fries, mangoes,
   biscuits, or any other object noun. Object words never change the grade.
 - If the tool says incorrect, scaffold the same problem instead of inventing a
@@ -747,6 +759,91 @@ def caller_requested_stop(text: str) -> bool:
         phrase in normalized
         for phrase in ("stop", "goodbye", "bye", "end the call", "i am done", "i'm done")
     )
+
+
+def _normalize_question_text(text: str) -> str:
+    """Normalize punctuation/casing while preserving the question's words."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
+def registered_followup_from_tool_events(
+    tool_events: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Return the newest problem atomically registered by a correct grade."""
+    for event in reversed(tool_events or []):
+        if event.get("name") != "grade_numeric_answer":
+            continue
+        result = event.get("result") or {}
+        next_problem = result.get("next_problem") or {}
+        if (
+            result.get("status") == "correct"
+            and next_problem.get("problem_id")
+            and next_problem.get("question")
+        ):
+            return dict(next_problem)
+    return None
+
+
+def assistant_asked_registered_problem(
+    assistant_text: str,
+    problem: dict[str, Any] | None,
+) -> bool:
+    """Check whether Gemini actually spoke the registered question."""
+    question = _normalize_question_text((problem or {}).get("question") or "")
+    assistant = _normalize_question_text(assistant_text)
+    return bool(question and question in assistant)
+
+
+def assistant_asked_math_question(assistant_text: str) -> bool:
+    """Detect a spoken maths prompt that may conflict with the answer key."""
+    raw = str(assistant_text or "")
+    normalized = _normalize_question_text(raw)
+    explicit_math_prompt = any(
+        phrase in normalized
+        for phrase in (
+            "how many",
+            "how much",
+            "what is",
+            "what s",
+            "tell me the number",
+            "what do you get",
+            "what does that make",
+        )
+    )
+    math_terms = (" times ", " groups ", " each ", " altogether", " total", " naira")
+    terse_math_prompt = "?" in raw and any(term in f" {normalized} " for term in math_terms)
+    return explicit_math_prompt or terse_math_prompt
+
+
+def registered_followup_enforcement(
+    tool_events: list[dict[str, Any]] | None,
+    assistant_text: str,
+    user_text: str,
+    elapsed_seconds: int,
+) -> dict[str, Any] | None:
+    """Build a controller cue when Gemini omits or replaces the reserved item."""
+    problem = registered_followup_from_tool_events(tool_events)
+    if not problem or caller_requested_stop(user_text):
+        return None
+    if assistant_asked_registered_problem(assistant_text, problem):
+        return None
+
+    asked_other_question = assistant_asked_math_question(assistant_text)
+    # Once the minimum lesson time has passed, a praise-only turn may lead into
+    # the clock-controlled wrap. A conflicting question is never permitted.
+    if int(elapsed_seconds) >= GEMINI_LIVE_MIN_LESSON_SECONDS and not asked_other_question:
+        return None
+
+    question = str(problem["question"])
+    return {
+        "problem_id": str(problem["problem_id"]),
+        "question": question,
+        "unregistered_question_corrected": asked_other_question,
+        "instruction": (
+            f'[SABI_ASK_REGISTERED_PROBLEM] Ask exactly: "{question}" '
+            "Do not add, paraphrase, or replace the maths question."
+        ),
+    }
 
 
 class GeminiLiveCallRunner:
@@ -961,15 +1058,25 @@ class GeminiLiveCallRunner:
         raw_user = " ".join(self.input_transcript.split())
         assistant = " ".join(self.output_transcript.split())
         elapsed_seconds = int(time.monotonic() - self.call_started_at)
+        followup_enforcement = registered_followup_enforcement(
+            self.turn_tool_events,
+            assistant,
+            raw_user,
+            elapsed_seconds,
+        )
         early_wrap_blocked = bool(
             assistant
             and not caller_requested_stop(raw_user)
             and is_early_wrap_text(assistant, elapsed_seconds)
             and self.early_wrap_repairs < 3
         )
-        if early_wrap_blocked:
+        if early_wrap_blocked or (
+            followup_enforcement
+            and followup_enforcement.get("unregistered_question_corrected")
+        ):
             # Turn completion can arrive while unplayed native audio is still
-            # queued.  Drop the unheard remainder of the premature farewell.
+            # queued. Drop the unheard remainder of a premature farewell or an
+            # invented question whose answer key would not match the backend.
             _drain_queue(self.playback_queue)
             self.output_packet_buffer.clear()
         async with self.buffer_lock:
@@ -1029,6 +1136,10 @@ class GeminiLiveCallRunner:
                 flags.append("deterministic_numeric_grade")
             if early_wrap_blocked:
                 flags.append("early_wrap_blocked")
+            if followup_enforcement:
+                flags.append("registered_followup_cued")
+                if followup_enforcement.get("unregistered_question_corrected"):
+                    flags.append("unregistered_question_corrected")
             self.call.last_tts_provider = "gemini_live_native_audio"
             transcript = {
                 "text": raw_user,
@@ -1082,17 +1193,32 @@ class GeminiLiveCallRunner:
                 elapsed_seconds,
                 progress.get("phase"),
             )
+            controller_text = (
+                str(followup_enforcement["instruction"])
+                if followup_enforcement
+                else (
+                    "[SABI_EARLY_WRAP_BLOCKED] The five-minute minimum has not been "
+                    f"reached. Continue the {progress.get('phase', 'lesson')} phase now. "
+                    "Do not apologize, summarize, mention next time, or say goodbye. "
+                    "Call get_next_numeracy_problem if there is no unresolved problem."
+                )
+            )
             await self._send_json(
                 {
                     "realtimeInput": {
-                        "text": (
-                            "[SABI_EARLY_WRAP_BLOCKED] The five-minute minimum has not been "
-                            f"reached. Continue the {progress.get('phase', 'lesson')} phase now. "
-                            "Do not apologize, summarize, mention next time, or say goodbye. "
-                            "Call get_next_numeracy_problem if there is no unresolved problem."
-                        )
+                        "text": controller_text
                     }
                 }
+            )
+        elif followup_enforcement and self.websocket is not None and not self.call.hungup:
+            logger.warning(
+                "Gemini Live registered follow-up enforced uuid=%s problem=%s corrected=%s",
+                self.call.call_uuid,
+                followup_enforcement.get("problem_id"),
+                followup_enforcement.get("unregistered_question_corrected"),
+            )
+            await self._send_json(
+                {"realtimeInput": {"text": str(followup_enforcement["instruction"])}}
             )
 
     async def _receiver(self) -> None:

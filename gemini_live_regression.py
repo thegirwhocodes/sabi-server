@@ -14,6 +14,7 @@ os.environ.setdefault(
 )
 
 import gemini_live
+from gemini_grading import make_evidence_event, summarize_mastery
 import voice_realtime
 from phone_utils import phone_uses_gemini_live
 
@@ -76,6 +77,18 @@ def main() -> int:
         ),
         live_setup.get("realtimeInputConfig"),
     )
+    compact_prompt = gemini_live.build_gemini_live_base_prompt(
+        "\n## STUDENT CONTEXT\nReturning learner Naomi.",
+        "\n## CURRENT NUMERACY CURRICULUM PATH\nMultiplication groups.",
+    )
+    ok &= check(
+        "live_prompt_is_compact_and_contains_one_curriculum_block",
+        "five-to-seven-minute" in compact_prompt
+        and compact_prompt.count("## CURRENT NUMERACY CURRICULUM PATH") == 1
+        and "do not merely quiz" in compact_prompt
+        and len(compact_prompt) < 12000,
+        len(compact_prompt),
+    )
 
     source = inspect.getsource(voice_realtime.handle_audiosocket_call)
     ok &= check(
@@ -121,9 +134,9 @@ def main() -> int:
     tools = gemini_live.GeminiLiveNumeracyTools("regression-call")
     questions = [tools.next_problem() for _ in range(4)]
     ok &= check(
-        "problem_tool_advances_instead_of_repeating",
-        len({item["problem_id"] for item in questions}) == 4
-        and len({item["expected_answer"] for item in questions}) == 4,
+        "unresolved_problem_cannot_be_replaced",
+        len({item["problem_id"] for item in questions}) == 1
+        and all("expected_answer" not in item for item in questions),
         questions,
     )
 
@@ -141,6 +154,117 @@ def main() -> int:
         and grade.get("object_nouns_ignored") is True,
         grade,
     )
+    ok &= check(
+        "correct_problem_must_resolve_before_deck_advances",
+        tools.next_problem().get("problem_id") != "object_noun_regression",
+    )
+
+    tools.current_problem = gemini_live.NumeracyProblem(
+        "support_regression",
+        "Three groups have four each. How many altogether?",
+        12,
+        "multiplication",
+        "equal_groups",
+    )
+    tools.current_problem_resolved = False
+    tools.current_prompt_level = "none"
+    tools.current_attempt = 0
+    unclear = tools.grade_answer("I did not hear")
+    retry_correct = tools.grade_answer("twelve apples")
+    ok &= check(
+        "technical_retry_is_not_wrong_and_preserves_independence",
+        unclear.get("audio_scorability") == "not_scorable"
+        and unclear.get("academic_correctness") == "indeterminate"
+        and retry_correct.get("is_correct") is True
+        and retry_correct.get("independence") == "independent",
+        [unclear, retry_correct],
+    )
+
+    tools.current_problem = gemini_live.NumeracyProblem(
+        "multiple_numbers_regression",
+        "Five groups have six each. How many altogether?",
+        30,
+    )
+    tools.current_problem_resolved = False
+    tools.current_prompt_level = "none"
+    tools.current_attempt = 0
+    multiple_numbers = tools.grade_answer("Is it twenty or thirty?")
+    ok &= check(
+        "multiple_candidate_numbers_are_not_scorable",
+        multiple_numbers.get("audio_scorability") == "not_scorable"
+        and multiple_numbers.get("is_correct") is None,
+        multiple_numbers,
+    )
+
+    tools.current_problem = gemini_live.NumeracyProblem(
+        "scaffold_regression",
+        "Two groups have six each. How many altogether?",
+        12,
+        "multiplication",
+        "equal_groups",
+    )
+    tools.current_problem_resolved = False
+    tools.current_prompt_level = "none"
+    tools.current_attempt = 0
+    first_wrong = tools.grade_answer("ten")
+    supported_correct = tools.grade_answer("twelve")
+    ok &= check(
+        "correct_after_conceptual_hint_is_supported_not_independent",
+        first_wrong.get("independence") == "independent"
+        and supported_correct.get("is_correct") is True
+        and supported_correct.get("independence") == "scaffolded",
+        [first_wrong, supported_correct],
+    )
+
+    mastery_events = []
+    specs = [
+        ("call-a", "item-1", "equal_groups", "correct"),
+        ("call-a", "item-2", "array", "correct"),
+        ("call-a", "item-3", "equal_groups", "incorrect"),
+        ("call-b", "item-4", "rate", "correct"),
+        ("call-b", "item-5", "array", "correct"),
+    ]
+    for index, (call_id, item_id, item_form, correctness) in enumerate(specs, 1):
+        mastery_events.append(
+            make_evidence_event(
+                call_id=call_id,
+                item_id=item_id,
+                item_form=item_form,
+                skill="multiplication",
+                expected_answer=index,
+                learner_answer=str(index),
+                heard_numbers=[index],
+                audio_scorability="scorable",
+                academic_correctness=correctness,
+                independence="independent",
+                prompt_level="none",
+                attempt_index=1,
+            )
+        )
+    mastery = summarize_mastery(mastery_events, "multiplication")
+    ok &= check(
+        "mastery_requires_four_of_five_across_two_calls_and_forms",
+        mastery.get("status") == "secure"
+        and mastery.get("independent_correct") == 4
+        and len(mastery.get("evidence_call_ids") or []) == 2,
+        mastery,
+    )
+    one_call_mastery = summarize_mastery(
+        [{**event, "call_id": "one-call"} for event in mastery_events],
+        "multiplication",
+    )
+    ok &= check(
+        "one_call_cannot_establish_secure_mastery",
+        one_call_mastery.get("status") != "secure",
+        one_call_mastery,
+    )
+    duplicate = {**mastery_events[-1], "academic_correctness": "incorrect"}
+    duplicate_mastery = summarize_mastery([*mastery_events, duplicate], "multiplication")
+    ok &= check(
+        "duplicate_item_does_not_create_a_sixth_mastery_vote",
+        duplicate_mastery.get("independent_window_size") == 5,
+        duplicate_mastery,
+    )
 
     constraints = gemini_live.build_live_call_constraints(
         "Hello! What is your name?",
@@ -151,7 +275,16 @@ def main() -> int:
         "one continuous" in constraints
         and "Call get_next_numeracy_problem before EVERY new maths question" in constraints
         and "grade_numeric_answer BEFORE" in constraints
-        and "Object words never change the grade" in constraints,
+        and "Object words never change the grade" in constraints
+        and "five to seven minutes" in constraints
+        and "get_lesson_progress BEFORE" in constraints,
+    )
+    ok &= check(
+        "lesson_clock_blocks_early_wrap_and_opens_after_five_minutes",
+        tools.lesson_progress(81).get("may_wrap") is False
+        and tools.lesson_progress(81).get("phase") == "today_lesson"
+        and gemini_live.is_early_wrap_text("So today, we learned multiplication. Next time...", 81)
+        and not gemini_live.is_early_wrap_text("So today, we learned multiplication.", 301),
     )
 
     return 0 if ok else 1

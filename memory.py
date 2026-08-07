@@ -164,6 +164,8 @@ class StudentMemory:
         duration_seconds: int,
         channel: str = "asterisk_audiosocket",
         starting_learning_state: Optional[dict] = None,
+        authoritative_learning_state: Optional[dict] = None,
+        authoritative_score: Optional[dict] = None,
     ):
         """Persist a completed PBX/AudioSocket phone session for monitoring."""
         if not self.client or not student_id or not messages:
@@ -236,6 +238,32 @@ class StudentMemory:
             current_module = analysis_student.get("current_module", 0) or 0
             module_name = MODULE_NAMES.get(current_module, "diagnostic")
             stats = analyze_session(analysis_student, cleaned_messages)
+            if isinstance(authoritative_learning_state, dict) and authoritative_learning_state:
+                stats.learning_state = dict(authoritative_learning_state)
+                stats.recommended_module = int(
+                    authoritative_learning_state.get("current_module")
+                    or stats.recommended_module
+                    or current_module
+                )
+            if isinstance(authoritative_score, dict):
+                stats.correct_count = int(authoritative_score.get("correct_count") or 0)
+                stats.wrong_count = int(authoritative_score.get("wrong_count") or 0)
+                stats.should_advance = bool(authoritative_score.get("should_advance"))
+                skill = str(authoritative_score.get("skill") or "multiplication")
+                accuracy = authoritative_score.get("independent_accuracy")
+                stats.skills = {skill: float(accuracy)} if accuracy is not None else {}
+                stats.topics_covered = [skill]
+                mastery_status = str(
+                    (authoritative_score.get("mastery") or {}).get("status") or "emerging"
+                )
+                stats.current_level = mastery_status
+                stats.summary = (
+                    f"Authoritative {skill} evidence: "
+                    f"{authoritative_score.get('independent_correct', 0)} independent correct, "
+                    f"{authoritative_score.get('independent_incorrect', 0)} independent incorrect, "
+                    f"{authoritative_score.get('supported_correct', 0)} supported correct, and "
+                    f"{authoritative_score.get('not_scorable', 0)} not scorable."
+                )
             summary = stats.summary or summary
             persisted_learning_state = dict(stats.learning_state or {})
             if stats.should_advance:
@@ -297,6 +325,8 @@ class StudentMemory:
                 learning_state_after=persisted_learning_state,
                 should_advance=stats.should_advance,
             )
+            if isinstance(authoritative_score, dict):
+                call_scorecard["authoritative_grading"] = dict(authoritative_score)
 
             # Sabi's qualitative teacher note (post-call LLM pass, heuristic fallback).
             teacher_note = None

@@ -365,6 +365,36 @@ async function refresh(){try{const d=await fetch('hearing_status.json?'+Date.now
     )
 
 
+def _write_oluremi_gideon_dashboard(output_dir: Path) -> None:
+    """Write the focused, gold-aware review requested for the two July calls."""
+    output_dir.joinpath("index.html").write_text(
+        """<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
+<title>Oluremi & Gideon · Gemini hearing</title><style>
+:root{--ivory:#fbf6e9;--card:#fffdf7;--ink:#221d17;--muted:#71675b;--gold:#b88a25;--line:#e4d8bc;--green:#28745a;--red:#a6453d;--blue:#315b8b}
+*{box-sizing:border-box}body{margin:0;background:var(--ivory);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}header{position:sticky;top:0;z-index:3;padding:21px 28px;color:#fff;background:linear-gradient(115deg,#211a11,#4b3517);box-shadow:0 5px 22px #33240d26}h1{margin:0;font:700 26px Georgia,serif}.sub{color:#eadcb9;margin-top:4px}main{max-width:1400px;margin:auto;padding:20px 28px 48px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:17px}.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 14px}.stat b{display:block;color:var(--gold);font-size:22px}.call{margin-bottom:20px}.callhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:11px}.callhead h2{margin:0;font:700 23px Georgia,serif}.meta{color:var(--muted);font-size:12px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:13px}.turn{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 6px 18px #5d461315}.top{display:flex;justify-content:space-between;gap:10px}.badge{height:max-content;padding:4px 9px;border-radius:99px;font-size:10px;font-weight:850;letter-spacing:.45px}.match{color:var(--green);background:#dcefe8}.check{color:var(--red);background:#f5deda}.same{color:var(--blue);background:#dbe8f8}.different{color:#80601b;background:#f7eac4}.waiting{color:var(--muted);background:#eee7d8}.who{margin-top:8px;color:var(--gold);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px}.answer{font-weight:720;margin-top:2px}.context{color:#514a40;margin-top:2px}.muted{color:var(--muted)}audio{width:100%;height:35px;margin-top:4px}.err{color:var(--red);margin-top:6px}.playlist{border:0;border-radius:9px;padding:8px 11px;background:#2e261b;color:#fff;font-weight:750;cursor:pointer;margin-top:7px}.legend{background:#fff9e9;border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin-bottom:16px}.status{font-size:11px;font-weight:800;text-transform:uppercase;color:var(--blue)}@media(max-width:700px){main,header{padding-left:13px;padding-right:13px}.stats{grid-template-columns:repeat(2,1fr)}.cards{grid-template-columns:1fr}}</style></head>
+<body><header><h1>Oluremi & Gideon · full-conversation hearing test</h1><div class=sub>Historical Sabi context → original learner audio → Gemini reports only what it heard</div></header><main><div class=legend><b>How to read the badges:</b> MATCH/CHECK uses independently verified words. SAME AS OLD/DIFFERENT FROM OLD compares against the old saved transcript, which is not guaranteed to be correct.</div><section class=stats id=stats></section><section id=calls></section></main>
+<script>
+const FOCUS=['be48a49b-8121-476f-bb9b-83d849a135f0','e66ee2b7-f4e8-4c59-ad2d-7129a7ac84be'];
+const NAMES={'be48a49b-8121-476f-bb9b-83d849a135f0':'Oluremi','e66ee2b7-f4e8-4c59-ad2d-7129a7ac84be':'Gideon'};
+const GOLD={
+ 'be48a49b-8121-476f-bb9b-83d849a135f0:0':'My name is Oluremi',
+ 'be48a49b-8121-476f-bb9b-83d849a135f0:4':'Thirty',
+ 'be48a49b-8121-476f-bb9b-83d849a135f0:5':'Thirty',
+ 'be48a49b-8121-476f-bb9b-83d849a135f0:8':'Fifteen',
+ 'be48a49b-8121-476f-bb9b-83d849a135f0:9':'Thirty',
+ 'e66ee2b7-f4e8-4c59-ad2d-7129a7ac84be:1':'My name is Gideon',
+ 'e66ee2b7-f4e8-4c59-ad2d-7129a7ac84be:2':'My name is Gideon'};
+const NUM={zero:'0',one:'1',two:'2',three:'3',four:'4',five:'5',six:'6',seven:'7',eight:'8',nine:'9',ten:'10',eleven:'11',twelve:'12',thirteen:'13',fourteen:'14',fifteen:'15',sixteen:'16',seventeen:'17',eighteen:'18',nineteen:'19',twenty:'20',thirty:'30'};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function norm(s){let x=String(s??'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\\s+/g,' ').trim();return NUM[x]||x}
+let playing=null;async function playCall(id){if(playing)playing.pause();const urls=JSON.parse(document.getElementById(id).dataset.urls||'[]');for(const u of urls){await new Promise(resolve=>{const a=new Audio(u);playing=a;a.onended=resolve;a.onerror=resolve;a.play().catch(resolve)})}playing=null}
+function turnCard(call,t){const r=t.report||{},key=call.call_id+':'+t.turn,verified=Object.hasOwn(GOLD,key),reference=verified?GOLD[key]:(t.historical_saved_transcript||'[empty]'),candidates=[r.verbatim_text,r.semantic_value,t.literal_transcript].map(norm),done=t.status==='complete',same=done&&candidates.includes(norm(reference));let label='WAITING',cls='waiting';if(done){label=verified?(same?'MATCH':'CHECK'):(same?'SAME AS OLD':'DIFFERENT FROM OLD');cls=verified?(same?'match':'check'):(same?'same':'different')}else if(t.status==='failed'){label='NO HEARING REPORT';cls='check'}return `<article class=turn><div class=top><b>Turn ${esc(t.turn)}</b><span class="badge ${cls}">${label}</span></div><div class=who>Sabi immediately before</div><div class=context>${esc(t.preceding_sabi||'[Opening line was not retained]')}</div>${t.preceding_sabi_audio_url?`<audio controls preload=metadata src="${esc(t.preceding_sabi_audio_url)}"></audio>`:''}<div class=who>Play original learner turn</div><audio controls preload=metadata src="${esc(t.learner_audio_url)}"></audio><div class=who>${verified?'Known words':'Old saved transcript · not verified'}</div><div class=answer>${esc(reference)}</div><div class=who>Gemini literal transcript</div><div class="answer muted">${esc(t.literal_transcript||'[empty]')}</div><div class=who>Gemini says it heard</div><div class=answer>${esc(r.verbatim_text||'[waiting / unclear]')}</div><div class=meta>${esc(r.semantic_kind||'')} ${r.semantic_value?'· '+esc(r.semantic_value):''} ${r.certainty?'· '+esc(r.certainty)+' certainty':''}</div>${r.uncertainty_note?`<div class=meta>${esc(r.uncertainty_note)}</div>`:''}<div class=who>Historical Sabi replied</div><div class=context>${esc(t.historical_sabi_response||'[no saved reply]')}</div>${t.historical_sabi_audio_url?`<audio controls preload=metadata src="${esc(t.historical_sabi_audio_url)}"></audio>`:''}${t.error?`<div class=err>${esc(t.error)}</div>`:''}</article>`}
+async function refresh(){try{const d=await fetch('hearing_status.json?'+Date.now()).then(r=>r.json()),calls=d.calls.filter(c=>FOCUS.includes(c.call_id)),turns=calls.flatMap(c=>c.turns),verified=turns.filter(t=>Object.hasOwn(GOLD,calls.find(c=>c.turns.includes(t)).call_id+':'+t.turn));document.getElementById('stats').innerHTML=[['Conversations',calls.length],['All turns',turns.length],['Processed',turns.filter(t=>['complete','failed'].includes(t.status)).length],['Verified turns',verified.length]].map(([k,v])=>`<div class=stat><b>${v}</b><span>${k}</span></div>`).join('');document.getElementById('calls').innerHTML=calls.map(c=>{const urls=[];for(const t of c.turns){if(t.learner_audio_url)urls.push(t.learner_audio_url);if(t.historical_sabi_audio_url)urls.push(t.historical_sabi_audio_url)}const pid='p'+c.call_id.slice(0,8);return `<section class=call><div class=callhead><div><h2>${esc(NAMES[c.call_id])}</h2><div class=meta>${esc(c.turns.length)} learner turns · ${esc(c.duration_seconds)} seconds</div><button class=playlist id=${pid} data-urls='${esc(JSON.stringify(urls))}' onclick="playCall('${pid}')">▶ Play full historical conversation</button></div><span class=status>${esc(c.status)}</span></div><div class=cards>${c.turns.map(t=>turnCard(c,t)).join('')}</div></section>`}).join('')}catch(e){}}refresh();setInterval(refresh,1000);
+</script></body></html>""",
+        encoding="utf-8",
+    )
+
+
 async def replay_call(
     call: dict[str, Any],
     calls: list[dict[str, Any]],
@@ -431,7 +461,13 @@ async def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     calls = _load_calls(args.audio_root, call_ids)
     _copy_audio(args.output_dir, calls)
-    _write_dashboard(args.output_dir)
+    if set(FOCUS_CALL_IDS := (
+        "be48a49b-8121-476f-bb9b-83d849a135f0",
+        "e66ee2b7-f4e8-4c59-ad2d-7129a7ac84be",
+    )).issubset(set(call_ids)):
+        _write_oluremi_gideon_dashboard(args.output_dir)
+    else:
+        _write_dashboard(args.output_dir)
     _write_status(args.output_dir, calls)
     semaphore = asyncio.Semaphore(max(1, args.concurrency))
     await asyncio.gather(

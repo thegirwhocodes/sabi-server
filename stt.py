@@ -325,6 +325,85 @@ def _consensus_key(text: str, *, numeric_context: bool) -> tuple[str, int | None
     return f"text:{normalized}", None
 
 
+def _numeric_candidates(text: str) -> list[int]:
+    """Return distinct complete numeric values without guessing a final answer."""
+    try:
+        from numeric_grading import extract_numbers
+
+        return list(dict.fromkeys(int(value) for value in extract_numbers(text)))
+    except Exception:
+        return []
+
+
+def _segment_value(segment, name: str):
+    if isinstance(segment, dict):
+        return segment.get(name)
+    return getattr(segment, name, None)
+
+
+def _rounded_mean(values: list[float]) -> float | None:
+    return round(sum(values) / len(values), 4) if values else None
+
+
+def _whisper_diagnostics(segments) -> dict:
+    """Preserve raw Whisper quality signals instead of inventing confidence."""
+    rows = list(segments or [])
+    logprobs: list[float] = []
+    no_speech: list[float] = []
+    compression: list[float] = []
+    word_probabilities: list[float] = []
+    for segment in rows:
+        value = _segment_value(segment, "avg_logprob")
+        if value is not None:
+            logprobs.append(float(value))
+        value = _segment_value(segment, "no_speech_prob")
+        if value is not None:
+            no_speech.append(float(value))
+        value = _segment_value(segment, "compression_ratio")
+        if value is not None:
+            compression.append(float(value))
+        for word in _segment_value(segment, "words") or []:
+            probability = _segment_value(word, "probability")
+            if probability is not None:
+                word_probabilities.append(float(probability))
+    return {
+        "segment_count": len(rows),
+        "avg_logprob": _rounded_mean(logprobs),
+        "max_no_speech_prob": round(max(no_speech), 4) if no_speech else None,
+        "max_compression_ratio": round(max(compression), 4) if compression else None,
+        "min_word_probability": (
+            round(min(word_probabilities), 4) if word_probabilities else None
+        ),
+        "mean_word_probability": _rounded_mean(word_probabilities),
+    }
+
+
+def _numeric_vote_summary(result: dict | None, error: Exception | None = None) -> dict:
+    """Build an auditable vote without treating a label as probability."""
+    if error is not None:
+        return {
+            "status": "timeout" if isinstance(error, TimeoutError) else "error",
+            "error": f"{error.__class__.__name__}: {_safe_error_text(error)}",
+            "numeric_candidates": [],
+            "single_numeric_value": None,
+        }
+    payload = dict(result or {})
+    text = " ".join(str(payload.get("text") or "").split())
+    candidates = _numeric_candidates(text)
+    status = "ok" if len(candidates) == 1 else "multiple_values" if candidates else "empty"
+    return {
+        "status": status,
+        "text": text,
+        "numeric_candidates": candidates,
+        "single_numeric_value": candidates[0] if len(candidates) == 1 else None,
+        "provider": str(payload.get("provider") or ""),
+        "model": str(payload.get("model") or ""),
+        "latency_seconds": round(float(payload.get("ensemble_latency_seconds") or 0), 3),
+        "duration_seconds": round(float(payload.get("duration_seconds") or 0), 3),
+        "diagnostics": dict(payload.get("diagnostics") or {}),
+    }
+
+
 def _ensemble_result_summary(result: dict | None, error: Exception | None = None) -> dict:
     """Persist useful comparison evidence without leaking request payloads."""
     if error is not None:
@@ -423,6 +502,9 @@ class SpeechToText:
         # Reuse one connection across turns so every short child answer does
         # not pay a fresh DNS/TCP/TLS setup cost.
         self._gemini_http = httpx.Client(
+            limits=httpx.Limits(max_keepalive_connections=4, max_connections=8),
+        )
+        self._groq_http = httpx.Client(
             limits=httpx.Limits(max_keepalive_connections=4, max_connections=8),
         )
         env_provider = os.getenv("SABI_STT_PROVIDER", "auto")
@@ -833,6 +915,103 @@ class SpeechToText:
             "selection_reason": "no_two_engine_agreement_and_gemini_unavailable",
             "ensemble_results": alternatives,
             "ensemble_latency_seconds": round(time.monotonic() - started, 3),
+        }
+
+    def transcribe_numeric_sidecar(
+        self,
+        audio_path: str,
+        *,
+        decision_deadline_seconds: float = 1.5,
+        collection_timeout_seconds: float = 30.0,
+    ) -> dict:
+        """Collect independent Groq/local numeric votes for Gemini Live.
+
+        This is deliberately separate from ``parallel_consensus``: it sends no
+        question or expected-answer context, never starts another Gemini
+        request, never converts log-probability into a fake confidence, and
+        abstains unless both engines return the same single numeric value.
+
+        Shadow collection may wait beyond the live decision deadline so Sabi
+        can measure CPU latency without delaying the conversation. The result
+        records whether the same vote would have been eligible in a live gate.
+        """
+        started = time.monotonic()
+        decision_deadline = max(0.1, float(decision_deadline_seconds))
+        collection_timeout = max(decision_deadline, float(collection_timeout_seconds))
+        futures: dict[str, Future | None] = {
+            "groq": None,
+            "local_whisper": self._ensemble_executor.submit(
+                self._timed_provider_call,
+                self._transcribe_local_numeric_vote,
+                audio_path,
+            ),
+        }
+        if self._groq_key:
+            futures["groq"] = self._ensemble_executor.submit(
+                self._timed_provider_call,
+                self._transcribe_groq_numeric_vote,
+                audio_path,
+            )
+
+        groq, groq_error = self._future_result(
+            futures["groq"],
+            timeout=collection_timeout,
+            timeout_label="Groq numeric sidecar",
+        )
+        remaining = max(0.1, collection_timeout - (time.monotonic() - started))
+        local, local_error = self._future_result(
+            futures["local_whisper"],
+            timeout=remaining,
+            timeout_label="local Whisper numeric sidecar",
+        )
+        votes = {
+            "groq": _numeric_vote_summary(groq, groq_error),
+            "local_whisper": _numeric_vote_summary(local, local_error),
+        }
+        groq_value = votes["groq"].get("single_numeric_value")
+        local_value = votes["local_whisper"].get("single_numeric_value")
+        numeric_agreement = groq_value is not None and groq_value == local_value
+        provider_latencies = [
+            float(vote.get("latency_seconds") or 0)
+            for vote in votes.values()
+            if vote.get("status") == "ok"
+        ]
+        decision_latency = max(provider_latencies) if len(provider_latencies) == 2 else None
+        decision_eligible = bool(
+            numeric_agreement
+            and decision_latency is not None
+            and decision_latency <= decision_deadline
+        )
+        if decision_eligible:
+            status = "agreed"
+            selection_reason = "groq_and_local_whisper_agreed_within_deadline"
+            hypothetical_action = "accept_consensus_number"
+        elif numeric_agreement:
+            status = "agreed_late"
+            selection_reason = "groq_and_local_whisper_agreed_after_deadline"
+            hypothetical_action = "neutral_repeat_deadline"
+        elif groq_value is not None and local_value is not None:
+            status = "disagreed"
+            selection_reason = "groq_and_local_whisper_disagreed"
+            hypothetical_action = "neutral_repeat_disagreement"
+        else:
+            status = "abstained"
+            selection_reason = "one_or_both_engines_lacked_one_numeric_value"
+            hypothetical_action = "neutral_repeat_abstention"
+        return {
+            "status": status,
+            "mode": "shadow",
+            "numeric_agreement": bool(numeric_agreement),
+            "decision_eligible": decision_eligible,
+            "consensus_numeric_value": int(groq_value) if numeric_agreement else None,
+            "decision_deadline_seconds": round(decision_deadline, 3),
+            "decision_latency_seconds": (
+                round(decision_latency, 3) if decision_latency is not None else None
+            ),
+            "collection_latency_seconds": round(time.monotonic() - started, 3),
+            "selection_reason": selection_reason,
+            "hypothetical_action": hypothetical_action,
+            "ensemble_results": votes,
         }
 
     def _provider_for_mode(self, mode: str) -> str:

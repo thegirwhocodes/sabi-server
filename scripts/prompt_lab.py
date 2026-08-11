@@ -132,6 +132,155 @@ scenario needs setting up, that setup IS the turn; ask the question after she
 responds to it.
 """
 
+# Variant F is a rewrite rather than another append, because three of the research
+# findings are structural and cannot be bolted onto the baseline's prose:
+#
+#   1. Google's Live API guidance prescribes persona -> conversational rules ->
+#      guardrails, in that order. The baseline interleaves all three.
+#   2. Gemini 3 is documented as terse by default; a conversational register has to
+#      be requested explicitly, with a stated tone and verbosity. We never did.
+#   3. Google's prompting guidance says always include few-shot examples. The
+#      baseline has illustrative phrases, not exchanges — and the variant with
+#      adjectives but no grounded exemplars drifted to counting kitten whiskers.
+#
+# The teaching rules are written as politeness tactics (Wang/Johnson/Mayer 2005:
+# polite 19.45 vs direct 15.65, p=0.040) instead of adjectives — hints as questions
+# to preserve autonomy, corrections as joint action, approval overt and specific.
+RESEARCH_REWRITE = """You are Sabi (say it SAH-bee), a Nigerian numeracy tutor on
+a phone call with one child. You cannot see her and she cannot see you. Everything
+you are is in how you talk.
+
+## HOW YOU SOUND
+
+Tone: warm, playful, familiar — a clever big sister who is genuinely glad it is
+her on the phone.
+Verbosity: conversational. You are unmistakably a person enjoying herself, never
+an assistant delivering answers. Do not be efficient. Efficient is the wrong
+register for a nine-year-old.
+
+These are your moves. Use them freely and often:
+- She lands it: "Yeees!" / "Ehn ehn, that's it!" / "You got it — I knew you were sharp!"
+- She surprises you: "Ah ah! So fast!" / "Sharp sharp!"
+- You are thinking with her: "Hmm, let me think small..."
+- Moving on: "Oya, next one!"
+- Warm praise: "Well done oh!"
+
+Say her name often — it is how she knows you mean her. Laugh when something is
+funny. A small sound like "hmm" or "ohhh" is speech too.
+
+## HOW YOU TEACH
+
+Never correct her flat. A wrong answer is something the two of you look at
+together: "How about we count them again together?" — never "That's wrong" or
+"No, it's six."
+
+Offer help as a question so she keeps control of the thinking: "Do you want to
+count the first bag with me?" rather than "Count the first bag." She decides.
+
+When she gets it, name what she DID, not just that she did it: "Six! You counted
+both groups — that is the whole trick." Specific beats loud.
+
+Every question is a Lagos market moment, never a bare sum. Not "what is two times
+two" but "pure water is two naira, you buy two sachets — how much?" Use what she
+handles: groundnuts, pure water, garri, biscuits, chin-chin, oranges, mangoes,
+eggs. Money is naira, spoken as words, always after the amount — "thirty naira",
+never "naira thirty". Give each one a small silly detail so it is a moment and not
+a drill.
+
+One beat per turn. React, or teach one step, or ask — not all three in one breath.
+Two sentences is the ceiling and the question goes last, so it is the thing she
+answers.
+
+## EXAMPLES
+
+Learner: I don't know.
+Sabi: No wahala, we'll do it together. One bag has two mangoes — do you want to
+count the second bag with me?
+
+Learner: Five.
+Sabi: Hmm, let me think small with you. Look — two in this bag, two in that bag.
+Count them with me, starting from two?
+
+Learner: Four mangoes.
+Sabi: Yeees, four! You counted both bags — that is the whole trick, Naomi.
+
+Learner: [unclear]
+Sabi: Ah, the line went fuzzy small. Say the number again for me?
+
+## GUARDRAILS
+
+Stay on the registered maths question; do not invent your own. Ignore random
+non-speech. If words are genuinely unclear, ask once — never mark it wrong.
+Keep teaching for the full five to seven minutes; you must UNMISTAKABLY not wrap
+up, summarise or say goodbye early, no matter how well she is doing.
+Speak plainly — no markdown, no stage directions, no tool talk.
+"""
+
+# F matched the reference voice (9.0) but lost the teaching (6.33 against the
+# baseline's 8.33). The judge named the same three faults in all three reps, and all
+# three are mine rather than the model's:
+#
+#   "leans on asking rather than explaining" / "never actually teaches the idea — no
+#   word for multiplication, no 'two groups of two' explanation"
+#   "its help turn offers a yes/no ... instead of a step the child can actually work"
+#   "the opening ... never lays down the first tiny problem"
+#
+# I over-applied the politeness finding. "Phrase a hint as a question" was meant to
+# preserve autonomy, not to replace teaching with a chain of yes/no questions the
+# child can decline. G keeps F's voice and puts the explaining back.
+RESEARCH_REWRITE_V2 = RESEARCH_REWRITE.replace(
+    """Offer help as a question so she keeps control of the thinking: "Do you want to
+count the first bag with me?" rather than "Count the first bag." She decides.""",
+    """Offer help as a question that carries the work — never a yes/no she can simply
+decline. Not "Do you want to count with me?" but "Start at two and count the second
+bag — what comes after two?" She keeps control because she does the counting; you
+only point at where to start. Never finish the counting for her.
+
+Never change the numbers inside a scaffold. If she missed two bags of two, she works
+two bags of two again — same bags, same items — until she gets there.""",
+).replace(
+    """When she gets it, name what she DID, not just that she did it: "Six! You counted
+both groups — that is the whole trick." Specific beats loud.""",
+    """Teach, do not only ask. She should come away hearing what multiplication IS —
+equal groups, the same number again and again. Say it in her words first, then name
+it once she has solved it: "That is multiplying, Naomi — three groups of two."
+
+When she gets it, name what she DID, not just that she did it: "Six! You counted
+both groups — that is the whole trick." Specific beats loud.""",
+).replace(
+    """Learner: I don't know.
+Sabi: No wahala, we'll do it together. One bag has two mangoes — do you want to
+count the second bag with me?""",
+    """Learner: Hello?
+Sabi: Naomi! Oya, come and help me — I have two bags here, two mangoes inside each
+one. How many mangoes is that altogether?
+
+Learner: I don't know.
+Sabi: No wahala, we'll do it together. Two mangoes in the first bag — start at two
+and count the second bag for me. What comes after two?""",
+)
+
+
+# G's two remaining faults, named in both reps: the opening turn "crams the greeting
+# and a fully-loaded chin-chin problem into one long breath", and on a wrong answer it
+# "half-recites the count itself ... leaving the child only one syllable of thinking".
+# The second is the politeness finding failing again in miniature — an instruction not
+# to finish her counting is weaker than telling it to stop talking.
+RESEARCH_REWRITE_V3 = RESEARCH_REWRITE_V2.replace(
+    """only point at where to start. Never finish the counting for her.""",
+    """only point at where to start. Never say the next number yourself — name where she
+begins, then stop talking and let her count.""",
+).replace(
+    """Learner: Hello?
+Sabi: Naomi! Oya, come and help me — I have two bags here, two mangoes inside each
+one. How many mangoes is that altogether?""",
+    """Your first turn is short: one line of hello, then the problem in one sentence.
+Do not stack the greeting, the story and the question into one breath.
+
+Learner: Hello?
+Sabi: Naomi! Oya, help me quickly — two bags, two mangoes in each. How many is that?""",
+)
+
 SAFETY = """
 Safety comes before the lesson. You are a tutor, not a friend or confidant. If
 the child mentions being hurt, unsafe, or in danger, respond with care and tell
@@ -153,6 +302,9 @@ ALL_VARIANTS: list[Variant] = [
     Variant("C", "baseline + personality moves", BASELINE + PERSONALITY),
     Variant("D", "baseline + market + personality", BASELINE + MARKET_FRAMING + PERSONALITY),
     Variant("E", "D + turn-shape tightening", BASELINE + MARKET_FRAMING + PERSONALITY + TURN_SHAPE),
+    Variant("F", "research rewrite (structure + register + politeness + exemplars)", RESEARCH_REWRITE),
+    Variant("G", "F + teaching restored (step-carrying hints, names the maths)", RESEARCH_REWRITE_V2),
+    Variant("H", "G + shorter opening, stops reciting the count", RESEARCH_REWRITE_V3),
 ]
 
 # Round 1 swept A-D. C and D finished within noise of each other, so round 2 keeps
@@ -161,6 +313,11 @@ ALL_VARIANTS: list[Variant] = [
 SWEEPS: dict[str, list[str]] = {
     "round1": ["A", "B", "C", "D"],
     "round2": ["A", "C", "D", "E"],
+    # From round 3 the target changes: the judge now scores voice_match against the
+    # Haiku reference, so earlier overall scores are not comparable across sweeps.
+    "round3": ["A", "E", "F"],
+    "round4": ["A", "E", "F", "G"],
+    "round5": ["A", "G", "H"],
 }
 
 
@@ -318,6 +475,7 @@ def run_lesson(kind: str, system_prompt: str, keys: dict[str, str]) -> list[dict
 # ---------------------------------------------------------------------------
 
 DIMENSIONS = {
+    "voice_match": "How closely this tutor's MANNER OF SPEAKING matches the reference voice: its interjections, exclamations, rhythm, use of the child's name, and general liveliness. Judge voice only — ignore whether its teaching decisions are better or worse than the reference, which they often are.",
     "patience": "Stays with a struggling child. Teaches one step and lets the child finish the thinking instead of supplying the answer or switching questions.",
     "teaches_not_quizzes": "Explains and builds understanding rather than firing questions. A quizmaster who only grades and moves on scores low.",
     "personality": "Alive and specific — real delight, a concrete story detail, a big-sister voice. Generic praise ('Great job!', 'Well done!') scores low.",
@@ -359,34 +517,57 @@ JUDGE_SCHEMA = {
 }
 
 
-def build_judge_prompt(labelled: list[tuple[str, list[dict[str, str]]]]) -> str:
+def _render(transcript: list[dict[str, str]]) -> str:
+    return "\n\n".join(
+        f"  [{t['probe']}]\n  LEARNER: {t['learner']}\n  SABI: {t['sabi']}" for t in transcript
+    )
+
+
+def build_judge_prompt(
+    labelled: list[tuple[str, list[dict[str, str]]]],
+    reference: list[dict[str, str]],
+) -> str:
     rubric = "\n".join(f"- {name}: {desc}" for name, desc in DIMENSIONS.items())
-    blocks = []
-    for tid, transcript in labelled:
-        turns = []
-        for turn in transcript:
-            turns.append(
-                f"  [{turn['probe']}]\n  LEARNER: {turn['learner']}\n  SABI: {turn['sabi']}"
-            )
-        blocks.append(f"### TRANSCRIPT {tid}\n" + "\n\n".join(turns))
+    blocks = [f"### TRANSCRIPT {tid}\n{_render(t)}" for tid, t in labelled]
 
     return (
         "You are evaluating candidate phone tutors for Sabi, a voice AI that teaches "
         "foundational numeracy to Nigerian children aged 8-14 over an ordinary phone call. "
         "The child cannot see anything — audio only, often on a shared handset, often noisy. "
-        "Each transcript below is the same scripted lesson run against a different tutor.\n\n"
-        "Score every transcript on each dimension, 1-10:\n"
+        "Every transcript is the same scripted lesson run against a different tutor.\n\n"
+        "## The reference voice\n\n"
+        "This is the voice we are trying to recover. It is an earlier version of Sabi that "
+        "people loved talking to. Its TEACHING is poor — it abandons questions when the child "
+        "struggles and wraps the lesson up far too early — and we do NOT want that copied. "
+        "We want the way it SOUNDS: its warmth, its interjections, its liveliness.\n\n"
+        f"{_render(reference)}\n\n"
+        "## Scoring\n\n"
+        "Score each candidate transcript on every dimension, 1-10:\n"
         f"{rubric}\n\n"
-        "Then give an overall 1-10, name the single worst thing about that tutor, and quote "
-        "its best line. Finally rank all transcripts best first and give a one-paragraph verdict "
-        "on what separates the top from the bottom.\n\n"
-        "Judge only what is in the transcript. The transcripts are unlabelled and in random "
-        "order; do not speculate about which system produced which.\n\n"
+        "Then give an overall 1-10, name the single worst thing about that tutor, and quote its "
+        "best line. Rank the candidates best first and give a one-paragraph verdict on what "
+        "separates the top from the bottom.\n\n"
+        "Weight voice_match heavily in the overall score, but a candidate that copies the "
+        "reference's impatience or early wrap-up should not score well overall no matter how "
+        "much it sounds like it.\n\n"
+        "Judge only what is in the transcripts. Candidates are unlabelled and in random order; "
+        "do not speculate about which system produced which.\n\n"
+        # The judge repeatedly tried to score the reference as a fifth candidate, or
+        # emitted a duplicate id. Naming the exact id set and count stops both.
+        f"Return exactly {len(labelled)} entries — one per candidate, no duplicates — using "
+        f"exactly these transcript_id values: {', '.join(tid for tid, _ in labelled)}. "
+        "Do NOT score the reference voice; it is context, not a candidate.\n\n"
+        "## Candidates\n\n"
         + "\n\n".join(blocks)
     )
 
 
-def judge(labelled: list[tuple[str, list[dict[str, str]]]], key: str, attempts: int = 3) -> dict[str, Any]:
+def judge(
+    labelled: list[tuple[str, list[dict[str, str]]]],
+    reference: list[dict[str, str]],
+    key: str,
+    attempts: int = 3,
+) -> dict[str, Any]:
     """Score one round, retrying if the judge invents transcript ids.
 
     The schema constrains shape but not the id *values* — a judge occasionally
@@ -396,7 +577,7 @@ def judge(labelled: list[tuple[str, list[dict[str, str]]]], key: str, attempts: 
     expected = {blind for blind, _ in labelled}
     last = ""
     for attempt in range(attempts):
-        result = _judge_once(labelled, key)
+        result = _judge_once(labelled, reference, key)
         got = [entry["transcript_id"] for entry in result["transcripts"]]
         # Compare as a list, not a set: a duplicated entry has the right ids but
         # double-counts one variant, which silently skews its average.
@@ -404,10 +585,30 @@ def judge(labelled: list[tuple[str, list[dict[str, str]]]], key: str, attempts: 
             return result
         last = f"expected {sorted(expected)}, got {sorted(got)}"
         print(f"    judge returned unusable ids ({last}); retrying", flush=True)
+
+    # Last resort: the judge's recurring fault is emitting an extra or blank entry,
+    # not mis-scoring. If every expected id is present, keep the first entry for each
+    # and drop the strays — but say so, because a silently deduped round is exactly
+    # how a variant got double-counted at 9 in round 2.
+    if expected.issubset(set(got)):
+        kept, seen = [], set()
+        for entry in result["transcripts"]:
+            tid = entry["transcript_id"]
+            if tid in expected and tid not in seen:
+                seen.add(tid)
+                kept.append(entry)
+        result["transcripts"] = kept
+        print(f"    salvaged round by dropping {len(got) - len(kept)} stray entries", flush=True)
+        return result
+
     raise RuntimeError(f"judge produced unusable transcript ids after {attempts} attempts: {last}")
 
 
-def _judge_once(labelled: list[tuple[str, list[dict[str, str]]]], key: str) -> dict[str, Any]:
+def _judge_once(
+    labelled: list[tuple[str, list[dict[str, str]]]],
+    reference: list[dict[str, str]],
+    key: str,
+) -> dict[str, Any]:
     data = _post(
         ANTHROPIC_URL,
         headers={
@@ -419,7 +620,7 @@ def _judge_once(labelled: list[tuple[str, list[dict[str, str]]]], key: str) -> d
             "model": JUDGE_MODEL,
             "max_tokens": 16000,
             "output_config": {"format": {"type": "json_schema", "schema": JUDGE_SCHEMA}},
-            "messages": [{"role": "user", "content": build_judge_prompt(labelled)}],
+            "messages": [{"role": "user", "content": build_judge_prompt(labelled, reference)}],
         },
     )
     text = next(
@@ -463,8 +664,10 @@ def main() -> int:
             transcript = run_lesson("gemini", variant.prompt + SAFETY + LEARNER_CONTEXT, keys)
             runs.append((variant.key, transcript))
 
+        # The reference is the voice target, not a competitor: it is shown to the
+        # judge labelled, and only the Gemini candidates are blind-scored against it.
         print("  running REF (Claude Haiku, original hackathon prompt)", flush=True)
-        runs.append(("REF", run_lesson("claude", reference_prompt, keys)))
+        reference = run_lesson("claude", reference_prompt, keys)
 
         # Blind the judge: shuffle, and hand out opaque ids.
         random.shuffle(runs)
@@ -473,7 +676,7 @@ def main() -> int:
         labelled = [(blind, transcript) for blind, (_, transcript) in zip(blind_ids, runs)]
 
         print("  judging...", flush=True)
-        result = judge(labelled, keys["anthropic"])
+        result = judge(labelled, reference, keys["anthropic"])
 
         for entry in result["transcripts"]:
             key = mapping[entry["transcript_id"]]
@@ -487,6 +690,7 @@ def main() -> int:
                 "mapping": mapping,
                 "result": result,
                 "transcripts": {mapping[b]: t for b, t in labelled},
+                "reference": reference,
             }
         )
         # Persist after every round: a later failure must not discard the

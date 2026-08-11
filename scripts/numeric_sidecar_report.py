@@ -97,13 +97,14 @@ def main() -> int:
     ]
 
     if args.turns:
-        print(f"{'turn':>5}  {'expected':>8}  {'gemini':<24} {'groq':<20} {'local':<20} status")
+        second_label = (rows[0].get("second_engine") or "second")[:19]
+        print(f"{'turn':>5}  {'expected':>8}  {'gemini':<24} {'groq':<20} {second_label:<20} status")
         for row in rows:
             print(
                 f"{row.get('turn_index', -1):>5}  {row.get('expected_answer'):>8}  "
                 f"{(row.get('gemini_text') or '')[:23]:<24} "
                 f"{(row.get('groq_text') or '')[:19]:<20} "
-                f"{(row.get('local_whisper_text') or '')[:19]:<20} "
+                f"{(row.get('second_text') or row.get('local_whisper_text') or '')[:19]:<20} "
                 f"{row.get('status', '')}"
                 + ("  [stale]" if row.get("stale") else "")
             )
@@ -137,7 +138,8 @@ def main() -> int:
             print(
                 f"  call={row.get('call_uuid')} turn={row.get('turn_index')} "
                 f"expected={row.get('expected_answer')} consensus={row.get('consensus_numeric_value')} "
-                f"groq={row.get('groq_text')!r} local={row.get('local_whisper_text')!r}"
+                f"groq={row.get('groq_text')!r} "
+                f"{row.get('second_engine', 'second')}={row.get('second_text') or row.get('local_whisper_text')!r}"
             )
     return 0
 

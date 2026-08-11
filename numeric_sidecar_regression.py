@@ -58,6 +58,8 @@ def build_stt(groq_text: str, local_text: str, *, groq_delay: float = 0.0,
     item = object.__new__(SpeechToText)
     item._ensemble_executor = ThreadPoolExecutor(max_workers=3)
     item._groq_key = "test-key"
+    item._azure_speech_key = ""
+    item._azure_speech_region = ""
     seen_paths: list[str] = []
 
     def groq_vote(audio_path: str) -> dict:
@@ -314,6 +316,58 @@ def main() -> int:
     check("sidecar_submit_is_guarded_from_exceptions",
           "Numeric sidecar submit failed" in gemini_source,
           "a measurement failure must not break a call")
+
+    # 19. Azure as the second vote — different family, same policy.
+    engine, seen_azure = build_stt("thirty", "unused")
+    engine._azure_speech_key = "azure-test-key"
+    engine._azure_speech_region = "eastus"
+
+    def azure_vote(audio_path: str) -> dict:
+        seen_azure.append(audio_path)
+        return {
+            "text": "30",
+            "provider": "azure",
+            "model": "azure-speech:en-NG",
+            "diagnostics": {"azure_confidence": 0.07, "recognition_status": "Success"},
+        }
+
+    engine._transcribe_azure_numeric_vote = azure_vote
+    names = [name for name, _call, _ok in engine.numeric_sidecar_engines()]
+    check("azure_is_the_default_second_vote_when_configured",
+          names == ["groq", "azure"], str(names))
+    result = engine.transcribe_numeric_sidecar(str(wav), collection_timeout_seconds=10.0)
+    check("azure_vote_agrees_on_the_number",
+          result["status"] == "agreed" and result["consensus_numeric_value"] == 30, str(result))
+    check("record_names_both_engines", result["engines"] == ["groq", "azure"], str(result["engines"]))
+    check("azure_diagnostics_are_preserved",
+          result["ensemble_results"]["azure"]["diagnostics"].get("azure_confidence") == 0.07,
+          str(result["ensemble_results"]["azure"]))
+    check("azure_and_groq_share_one_clip",
+          len({path for path in seen_azure}) == 1, str(seen_azure))
+
+    azure_source = inspect.getsource(SpeechToText._transcribe_azure_numeric_vote)
+    # Scan the executable code, not the docstring that explains why we avoid these.
+    azure_parts = azure_source.split('"""')
+    azure_code = azure_parts[0] + "".join(azure_parts[2:])
+    check("azure_vote_takes_no_context",
+          "context" not in inspect.signature(SpeechToText._transcribe_azure_numeric_vote).parameters,
+          "vote must not accept lesson context")
+    check("azure_vote_sends_no_phrase_list",
+          "phrase" not in azure_code.lower() and "expected" not in azure_code.lower(),
+          "biasing Azure toward the answer destroys the point of the vote")
+    check("azure_confidence_is_not_a_gate",
+          "azure_confidence" in azure_source and "azure_confidence" not in inspect.getsource(
+              SpeechToText._collect_numeric_votes),
+          "Azure confidence is recorded, never used to accept an answer")
+
+    # 20. Forcing the offline engine back must still work (no Azure dependency).
+    os.environ["SABI_NUMERIC_SIDECAR_SECOND_ENGINE"] = "local_whisper"
+    engine, _ = build_stt("thirty", "thirty")
+    engine._azure_speech_key = "azure-test-key"
+    engine._azure_speech_region = "eastus"
+    names = [name for name, _call, _ok in engine.numeric_sidecar_engines()]
+    check("second_engine_is_overridable", names == ["groq", "local_whisper"], str(names))
+    os.environ.pop("SABI_NUMERIC_SIDECAR_SECOND_ENGINE")
 
     print()
     if FAILURES:

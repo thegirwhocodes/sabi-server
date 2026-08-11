@@ -233,13 +233,14 @@ class NumericSidecar:
             self._records.append(record)
         self._write_record(record)
         logger.info(
-            "Numeric sidecar uuid=%s turn=%s status=%s groq=%r local=%r consensus=%s "
+            "Numeric sidecar uuid=%s turn=%s status=%s groq=%r %s=%r consensus=%s "
             "expected=%s gemini=%r stale=%s latency=%.2fs",
             self.call_uuid,
             record["turn_index"],
             record["status"],
             record["groq_text"],
-            record["local_whisper_text"],
+            record["second_engine"],
+            record["second_text"],
             record["consensus_numeric_value"],
             record["expected_answer"],
             record["gemini_text"],
@@ -255,8 +256,11 @@ class NumericSidecar:
         started: float,
     ) -> dict[str, Any]:
         votes = dict(result.get("ensemble_results") or {})
-        groq = dict(votes.get("groq") or {})
-        local = dict(votes.get("local_whisper") or {})
+        engines = list(result.get("engines") or ["groq", "local_whisper"])
+        first_name = engines[0]
+        second_name = engines[1] if len(engines) > 1 else "local_whisper"
+        groq = dict(votes.get(first_name) or {})
+        local = dict(votes.get(second_name) or {})
         consensus = result.get("consensus_numeric_value")
         expected = job["expected_answer"]
         agreement_matches_expected = (
@@ -285,10 +289,15 @@ class NumericSidecar:
             "wall_seconds": round(time.monotonic() - started, 3),
             "queued_at": job["queued_at"],
             "audio": dict(result.get("audio") or {}),
+            "engines": engines,
             "groq_text": groq.get("text", ""),
             "groq_numeric_candidates": groq.get("numeric_candidates", []),
-            "local_whisper_text": local.get("text", ""),
-            "local_whisper_numeric_candidates": local.get("numeric_candidates", []),
+            "second_engine": second_name,
+            "second_text": local.get("text", ""),
+            "second_numeric_candidates": local.get("numeric_candidates", []),
+            # Kept so older records and the report stay readable when the
+            # second vote is the offline engine.
+            "local_whisper_text": local.get("text", "") if second_name == "local_whisper" else "",
             # Late results are evidence, never an action: by the time they land
             # the learner has already moved on.
             "stale": bool(job["turn_index"] < int(current_turn)),

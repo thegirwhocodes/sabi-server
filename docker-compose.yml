@@ -75,6 +75,8 @@ services:
       - TWILIO_AUTH_TOKEN
       - INTRON_API_KEY
       - GEMINI_API_KEY
+      - AZURE_SPEECH_KEY
+      - AZURE_SPEECH_REGION
     volumes:
       - ./audio_cache:/app/audio_cache
       - shared_audio:/shared/audio
@@ -105,6 +107,10 @@ secrets:
     file: ./secrets/INTRON_API_KEY
   GEMINI_API_KEY:
     file: ./secrets/GEMINI_API_KEY
+  AZURE_SPEECH_KEY:
+    file: ./secrets/AZURE_SPEECH_KEY
+  AZURE_SPEECH_REGION:
+    file: ./secrets/AZURE_SPEECH_REGION
 
 volumes:
   ollama_data:

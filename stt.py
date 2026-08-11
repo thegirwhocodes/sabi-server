@@ -580,6 +580,14 @@ class SpeechToText:
         self._groq_http = httpx.Client(
             limits=httpx.Limits(max_keepalive_connections=4, max_connections=8),
         )
+        # Azure Speech: the numeric sidecar's second, non-Whisper vote.
+        self._azure_speech_key = get_secret("AZURE_SPEECH_KEY") or os.getenv("AZURE_SPEECH_KEY", "")
+        self._azure_speech_region = (
+            get_secret("AZURE_SPEECH_REGION") or os.getenv("AZURE_SPEECH_REGION", "")
+        ).strip()
+        self._azure_http = httpx.Client(
+            limits=httpx.Limits(max_keepalive_connections=4, max_connections=8),
+        )
         env_provider = os.getenv("SABI_STT_PROVIDER", "auto")
         self._provider = (provider or env_provider).strip().lower() or "auto"
         env_literacy_provider = os.getenv("SABI_LITERACY_STT_PROVIDER", self._provider)
@@ -1049,39 +1057,29 @@ class SpeechToText:
         collection_timeout: float,
     ) -> dict:
         """Run both engines over the one canonical clip and score their votes."""
-        futures: dict[str, Future | None] = {
-            "groq": None,
-            "local_whisper": self._ensemble_executor.submit(
-                self._timed_provider_call,
-                self._transcribe_local_numeric_vote,
-                audio_path,
-            ),
-        }
-        if self._groq_key:
-            futures["groq"] = self._ensemble_executor.submit(
-                self._timed_provider_call,
-                self._transcribe_groq_numeric_vote,
-                audio_path,
+        engines = self.numeric_sidecar_engines()
+        futures: dict[str, Future | None] = {}
+        for name, call, available in engines:
+            futures[name] = (
+                self._ensemble_executor.submit(self._timed_provider_call, call, audio_path)
+                if available
+                else None
             )
 
-        groq, groq_error = self._future_result(
-            futures["groq"],
-            timeout=collection_timeout,
-            timeout_label="Groq numeric sidecar",
-        )
-        remaining = max(0.1, collection_timeout - (time.monotonic() - started))
-        local, local_error = self._future_result(
-            futures["local_whisper"],
-            timeout=remaining,
-            timeout_label="local Whisper numeric sidecar",
-        )
-        votes = {
-            "groq": _numeric_vote_summary(groq, groq_error),
-            "local_whisper": _numeric_vote_summary(local, local_error),
-        }
-        groq_value = votes["groq"].get("single_numeric_value")
-        local_value = votes["local_whisper"].get("single_numeric_value")
-        numeric_agreement = groq_value is not None and groq_value == local_value
+        votes: dict[str, dict] = {}
+        for name, _call, _available in engines:
+            remaining = max(0.1, collection_timeout - (time.monotonic() - started))
+            result, error = self._future_result(
+                futures[name],
+                timeout=remaining,
+                timeout_label=f"{name} numeric sidecar",
+            )
+            votes[name] = _numeric_vote_summary(result, error)
+
+        first_name, second_name = engines[0][0], engines[1][0]
+        first_value = votes[first_name].get("single_numeric_value")
+        second_value = votes[second_name].get("single_numeric_value")
+        numeric_agreement = first_value is not None and first_value == second_value
         provider_latencies = [
             float(vote.get("latency_seconds") or 0)
             for vote in votes.values()
@@ -1093,17 +1091,18 @@ class SpeechToText:
             and decision_latency is not None
             and decision_latency <= decision_deadline
         )
+        pair = f"{first_name}_and_{second_name}"
         if decision_eligible:
             status = "agreed"
-            selection_reason = "groq_and_local_whisper_agreed_within_deadline"
+            selection_reason = f"{pair}_agreed_within_deadline"
             hypothetical_action = "accept_consensus_number"
         elif numeric_agreement:
             status = "agreed_late"
-            selection_reason = "groq_and_local_whisper_agreed_after_deadline"
+            selection_reason = f"{pair}_agreed_after_deadline"
             hypothetical_action = "neutral_repeat_deadline"
-        elif groq_value is not None and local_value is not None:
+        elif first_value is not None and second_value is not None:
             status = "disagreed"
-            selection_reason = "groq_and_local_whisper_disagreed"
+            selection_reason = f"{pair}_disagreed"
             hypothetical_action = "neutral_repeat_disagreement"
         else:
             status = "abstained"
@@ -1112,9 +1111,10 @@ class SpeechToText:
         return {
             "status": status,
             "mode": "shadow",
+            "engines": [first_name, second_name],
             "numeric_agreement": bool(numeric_agreement),
             "decision_eligible": decision_eligible,
-            "consensus_numeric_value": int(groq_value) if numeric_agreement else None,
+            "consensus_numeric_value": int(first_value) if numeric_agreement else None,
             "decision_deadline_seconds": round(decision_deadline, 3),
             "decision_latency_seconds": (
                 round(decision_latency, 3) if decision_latency is not None else None
@@ -1124,6 +1124,74 @@ class SpeechToText:
             "hypothetical_action": hypothetical_action,
             "audio": dict(clip_meta or {}),
             "ensemble_results": votes,
+        }
+
+    def numeric_sidecar_engines(self) -> list[tuple[str, object, bool]]:
+        """The two independent votes, as (name, callable, credentials_present).
+
+        Groq is always the first vote. The second defaults to Azure when it is
+        configured, because the gold-clip bake-off (11 Aug 2026) scored Azure
+        4/7 at 0.71s against local Whisper's 2/7 at 11s — the local engine
+        cannot meet a live decision deadline on CPU. Set
+        SABI_NUMERIC_SIDECAR_SECOND_ENGINE=local_whisper to force the offline
+        engine back (useful when comparing, or if Azure must not see audio).
+        """
+        second = os.getenv("SABI_NUMERIC_SIDECAR_SECOND_ENGINE", "auto").strip().lower()
+        azure_ready = bool(self._azure_speech_key and self._azure_speech_region)
+        if second == "auto":
+            second = "azure" if azure_ready else "local_whisper"
+        if second == "azure":
+            secondary = ("azure", self._transcribe_azure_numeric_vote, azure_ready)
+        else:
+            secondary = ("local_whisper", self._transcribe_local_numeric_vote, True)
+        return [
+            ("groq", self._transcribe_groq_numeric_vote, bool(self._groq_key)),
+            secondary,
+        ]
+
+    def _transcribe_azure_numeric_vote(self, audio_path: str) -> dict:
+        """One independent Azure Speech vote — a different model family to Whisper.
+
+        Deliberately no phrase list and no lesson context: the vote exists to
+        check Gemini's hearing, so biasing it toward the expected answer would
+        destroy the only thing it is for. Azure's own confidence is recorded but
+        NOT trusted as a gate — on the gold clips a correct "30" scored 0.07
+        while a wrong "Woodward" scored 0.048.
+        """
+        audio = Path(audio_path).read_bytes()
+        language = os.getenv("SABI_AZURE_SPEECH_LANGUAGE", "en-NG").strip() or "en-NG"
+        url = (
+            f"https://{self._azure_speech_region}.stt.speech.microsoft.com"
+            "/speech/recognition/conversation/cognitiveservices/v1"
+        )
+        response = self._azure_http.post(
+            url,
+            params={"language": language, "format": "detailed", "profanity": "raw"},
+            headers={
+                "Ocp-Apim-Subscription-Key": self._azure_speech_key,
+                "Content-Type": "audio/wav; codecs=audio/pcm; samplerate=16000",
+                "Accept": "application/json",
+            },
+            content=audio,
+            timeout=float(os.getenv("SABI_AZURE_SPEECH_TIMEOUT_SECONDS", "10")),
+        )
+        response.raise_for_status()
+        data = _safe_json(response)
+        best = (data.get("NBest") or [{}])[0]
+        return {
+            "text": str(data.get("DisplayText") or best.get("Display") or "").strip(),
+            "provider": "azure",
+            "model": f"azure-speech:{language}",
+            "language": language,
+            "duration_seconds": round(float(data.get("Duration") or 0) / 1e7, 3),
+            "diagnostics": {
+                "recognition_status": data.get("RecognitionStatus", ""),
+                "azure_confidence": round(float(best.get("Confidence") or 0), 4),
+                "lexical": str(best.get("Lexical") or ""),
+                "alternatives": [
+                    str(alt.get("Display") or "") for alt in (data.get("NBest") or [])[1:4]
+                ],
+            },
         }
 
     def _transcribe_groq_numeric_vote(self, audio_path: str) -> dict:

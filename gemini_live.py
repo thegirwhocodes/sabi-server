@@ -35,6 +35,7 @@ from call_admin import (
 from curriculum_path import build_curriculum_path_prompt
 from guardrails import SABI_SAFETY_PREAMBLE
 from learning_state import analyze_session, force_numeracy_course
+from numeric_sidecar import NumericSidecar, expected_number_from_problem
 from gemini_grading import (
     CORRECT,
     INDETERMINATE,
@@ -1083,6 +1084,13 @@ class GeminiLiveCallRunner:
         self.tools: GeminiLiveNumeracyTools | None = None
         self.call_started_at = time.monotonic()
         self.turn_started_at = self.call_started_at
+        # Shadow only: Groq + local Whisper listen to the same finished turn so
+        # we can measure Gemini's number hearing without touching the call.
+        self.sidecar = NumericSidecar(
+            self.call.call_uuid,
+            getattr(self.call, "stt", None),
+            audio_dir=os.getenv("SABI_SHARED_AUDIO_DIR", "/shared/audio"),
+        )
 
     async def _prepare_prompt(self) -> str:
         self.student = await self.call.memory.find_or_create_student(self.call.phone)
@@ -1262,6 +1270,56 @@ class GeminiLiveCallRunner:
         if responses:
             await self._send_json({"toolResponse": {"functionResponses": responses}})
 
+    def _graded_item_this_turn(self) -> dict[str, Any]:
+        """The item the backend actually graded on this turn, if any."""
+        for event in reversed(self.turn_tool_events):
+            if event.get("name") != "grade_numeric_answer":
+                continue
+            result = event.get("result") or {}
+            if isinstance(result, dict) and result.get("expected_answer") is not None:
+                return result
+        return {}
+
+    def _submit_numeric_sidecar(self, user_path: Path | None, raw_user: str) -> bool:
+        """Queue the shadow Groq/local comparison for a numeric-answer turn.
+
+        Prefers the item the grader used, because a correct grade immediately
+        reserves the *next* problem — comparing against that reserved item
+        would score the sidecar against a question the child never heard.
+        """
+        if not getattr(self, "sidecar", None) or not self.sidecar.enabled:
+            return False
+        graded = self._graded_item_this_turn()
+        if graded:
+            expected = expected_number_from_problem(graded)
+            problem_id = str(graded.get("problem_id") or "")
+            prompt_level = str(graded.get("prompt_level") or "")
+        elif self.tools and not self.tools.current_problem_resolved:
+            expected = expected_number_from_problem(self.tools.current_problem)
+            problem_id = str(getattr(self.tools.current_problem, "id", "") or "")
+            prompt_level = str(self.tools.current_prompt_level or "")
+        else:
+            return False
+        try:
+            return self.sidecar.submit(
+                turn_index=self.turn_index,
+                audio_path=user_path,
+                gemini_text=raw_user,
+                expected_answer=expected,
+                problem_id=problem_id,
+                attempt=int(getattr(self.tools, "current_attempt", 0) or 0),
+                prompt_level=prompt_level,
+            )
+        except Exception as exc:
+            # A measurement path must never be able to break a live lesson.
+            logger.warning(
+                "Numeric sidecar submit failed uuid=%s turn=%s error=%s",
+                self.call.call_uuid,
+                self.turn_index,
+                type(exc).__name__,
+            )
+            return False
+
     async def _finalize_turn(self) -> None:
         raw_user = " ".join(self.input_transcript.split())
         assistant = " ".join(self.output_transcript.split())
@@ -1335,7 +1393,10 @@ class GeminiLiveCallRunner:
             )
             if user_path and user_pcm:
                 _write_wav(user_path, user_pcm)
+            sidecar_submitted = self._submit_numeric_sidecar(user_path, raw_user)
             flags = ["gemini_live", "continuous_audio", "native_audio_response"]
+            if sidecar_submitted:
+                flags.append("numeric_sidecar_shadow")
             if self.turn_interrupted:
                 flags.append("barge_in")
             if self.turn_tool_events:
@@ -1384,6 +1445,7 @@ class GeminiLiveCallRunner:
                 self.turn_interrupted,
             )
             self.turn_index += 1
+            self.sidecar.note_current_turn(self.turn_index)
 
         self.input_transcript = ""
         self.output_transcript = ""
@@ -1555,6 +1617,21 @@ class GeminiLiveCallRunner:
                     type(exc).__name__,
                 )
         self.call.memory.clear_call(self.call.call_id)
+        if self.sidecar.enabled:
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    self.sidecar.drain,
+                    float(os.getenv("SABI_NUMERIC_SIDECAR_DRAIN_SECONDS", "20")),
+                )
+                logger.warning("Numeric sidecar summary %s", self.sidecar.summary())
+            except Exception as exc:
+                logger.warning(
+                    "Numeric sidecar summary failed uuid=%s error=%s",
+                    self.call.call_uuid,
+                    type(exc).__name__,
+                )
         logger.warning(
             "Gemini Live call complete uuid=%s phone=%s end_reason=%s duration=%ss "
             "user_turns=%s assistant_turns=%s usage=%s",

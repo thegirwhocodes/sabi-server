@@ -341,6 +341,79 @@ def _segment_value(segment, name: str):
     return getattr(segment, name, None)
 
 
+def _resample_pcm16(pcm: bytes, source_rate: int, target_rate: int) -> bytes:
+    """Linear-interpolate 16-bit mono PCM without depending on `audioop`.
+
+    `audioop` was removed in Python 3.13, and the sidecar has to build the same
+    canonical clip on the server image and on Naomi's Mac.
+    """
+    if source_rate == target_rate or not pcm:
+        return pcm
+    from array import array
+
+    samples = array("h")
+    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+    if not samples:
+        return b""
+    ratio = source_rate / float(target_rate)
+    out_length = max(1, int(len(samples) / ratio))
+    resampled = array("h", bytes(2 * out_length))
+    last_index = len(samples) - 1
+    for index in range(out_length):
+        position = index * ratio
+        left = int(position)
+        if left >= last_index:
+            resampled[index] = samples[last_index]
+            continue
+        weight = position - left
+        value = samples[left] + (samples[left + 1] - samples[left]) * weight
+        resampled[index] = max(-32768, min(32767, int(round(value))))
+    return resampled.tobytes()
+
+
+def _canonical_numeric_clip(audio_path: str, target_rate: int = 16000) -> tuple[str, dict]:
+    """Write one 16 kHz mono copy that BOTH sidecar engines transcribe.
+
+    The research design requires the two votes to see identical bytes; letting
+    each provider resample internally would make a disagreement impossible to
+    attribute. Returns the temp path plus the audit metadata (hash, seconds).
+    """
+    import hashlib
+
+    with wave.open(audio_path, "rb") as source:
+        channels = source.getnchannels()
+        sample_width = source.getsampwidth()
+        source_rate = source.getframerate()
+        pcm = source.readframes(source.getnframes())
+    if sample_width != 2:
+        raise ValueError(f"sidecar expects 16-bit PCM, got {sample_width * 8}-bit")
+    if channels > 1:
+        from array import array
+
+        interleaved = array("h")
+        interleaved.frombytes(pcm[: len(pcm) - (len(pcm) % (2 * channels))])
+        mono = array("h", bytes(2 * (len(interleaved) // channels)))
+        for index in range(len(mono)):
+            frame = interleaved[index * channels : (index + 1) * channels]
+            mono[index] = int(sum(frame) / channels)
+        pcm = mono.tobytes()
+    resampled = _resample_pcm16(pcm, source_rate, target_rate)
+    handle = tempfile.NamedTemporaryFile(prefix="sabi-sidecar-", suffix=".wav", delete=False)
+    handle.close()
+    with wave.open(handle.name, "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(target_rate)
+        target.writeframes(resampled)
+    return handle.name, {
+        "source_path": str(audio_path),
+        "source_sample_rate": source_rate,
+        "sample_rate": target_rate,
+        "seconds": round(len(resampled) / float(target_rate * 2), 3),
+        "sha256": hashlib.sha256(resampled).hexdigest(),
+    }
+
+
 def _rounded_mean(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 4) if values else None
 
@@ -938,6 +1011,44 @@ class SpeechToText:
         started = time.monotonic()
         decision_deadline = max(0.1, float(decision_deadline_seconds))
         collection_timeout = max(decision_deadline, float(collection_timeout_seconds))
+        try:
+            clip_path, clip_meta = _canonical_numeric_clip(audio_path)
+        except Exception as exc:
+            return {
+                "status": "unusable_audio",
+                "mode": "shadow",
+                "numeric_agreement": False,
+                "decision_eligible": False,
+                "consensus_numeric_value": None,
+                "selection_reason": f"clip_preparation_failed: {_safe_error_text(exc)}",
+                "hypothetical_action": "neutral_repeat_unusable_audio",
+                "audio": {"source_path": str(audio_path)},
+                "ensemble_results": {},
+            }
+        try:
+            return self._collect_numeric_votes(
+                clip_path,
+                clip_meta,
+                started=started,
+                decision_deadline=decision_deadline,
+                collection_timeout=collection_timeout,
+            )
+        finally:
+            try:
+                os.unlink(clip_path)
+            except OSError:
+                pass
+
+    def _collect_numeric_votes(
+        self,
+        audio_path: str,
+        clip_meta: dict,
+        *,
+        started: float,
+        decision_deadline: float,
+        collection_timeout: float,
+    ) -> dict:
+        """Run both engines over the one canonical clip and score their votes."""
         futures: dict[str, Future | None] = {
             "groq": None,
             "local_whisper": self._ensemble_executor.submit(
@@ -1011,7 +1122,75 @@ class SpeechToText:
             "collection_latency_seconds": round(time.monotonic() - started, 3),
             "selection_reason": selection_reason,
             "hypothetical_action": hypothetical_action,
+            "audio": dict(clip_meta or {}),
             "ensemble_results": votes,
+        }
+
+    def _transcribe_groq_numeric_vote(self, audio_path: str) -> dict:
+        """One independent Groq vote: no question context, no local fallback.
+
+        The turn-based `_transcribe_groq` path injects the lesson prompt and
+        silently salvages to local Whisper. Both behaviours are wrong for a
+        vote — the prompt biases recognition toward the expected answer and the
+        salvage would make the two "independent" engines the same engine.
+        """
+        with open(audio_path, "rb") as handle:
+            audio_bytes = handle.read()
+        model = os.getenv("SABI_SIDECAR_GROQ_MODEL", "whisper-large-v3").strip() or "whisper-large-v3"
+        payload = {
+            "model": model,
+            "language": "en",
+            "temperature": "0",
+            "response_format": "verbose_json",
+        }
+        # Off by default: the research says only adopt a fixed generic prompt if
+        # bake-off data shows it helps, and never one containing the operands.
+        generic_prompt = os.getenv("SABI_SIDECAR_GENERIC_PROMPT", "").strip()
+        if generic_prompt:
+            payload["prompt"] = generic_prompt
+        response = self._groq_http.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {self._groq_key}"},
+            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            data=payload,
+            timeout=float(os.getenv("SABI_SIDECAR_GROQ_TIMEOUT_SECONDS", "10")),
+        )
+        response.raise_for_status()
+        data = _safe_json(response)
+        segments = data.get("segments") or []
+        return {
+            "text": str(data.get("text") or "").strip(),
+            "provider": "groq",
+            "model": model,
+            "language": data.get("language", "en"),
+            "duration_seconds": round(float(data.get("duration") or 0.0), 3),
+            "prompted": bool(generic_prompt),
+            "diagnostics": _whisper_diagnostics(segments),
+        }
+
+    def _transcribe_local_numeric_vote(self, audio_path: str) -> dict:
+        """One independent local faster-whisper vote with real word probabilities."""
+        self._load_local_model()
+        with self._local_inference_lock:
+            segments, info = self._model.transcribe(
+                audio_path,
+                language="en",
+                beam_size=int(os.getenv("SABI_SIDECAR_LOCAL_BEAM_SIZE", "5")),
+                initial_prompt=None,
+                hotwords=NUMBER_HOTWORDS,
+                word_timestamps=True,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 200},
+            )
+            rows = list(segments)
+        return {
+            "text": "".join(segment.text for segment in rows).strip(),
+            "provider": "local_whisper",
+            "model": f"faster-whisper:{self._model_size}:{self._device}",
+            "language": getattr(info, "language", "en"),
+            "duration_seconds": round(float(getattr(info, "duration", 0.0) or 0.0), 3),
+            "hotwords": True,
+            "diagnostics": _whisper_diagnostics(rows),
         }
 
     def _provider_for_mode(self, mode: str) -> str:

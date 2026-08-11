@@ -17,7 +17,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
+
+# Run from anywhere: the number parser lives beside the server modules.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _numbers(text: str) -> list[int]:

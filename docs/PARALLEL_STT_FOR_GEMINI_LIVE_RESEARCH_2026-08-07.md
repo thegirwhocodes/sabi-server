@@ -228,3 +228,24 @@ Benchmark Azure `en-NG`, SBPN, NaijaVox 2.0, and Parakeet on the same gold clips
 7. Enable exact numeric consensus for grading only after the precision gate passes.
 8. Separately benchmark Azure `en-NG` and an independent local family.
 
+
+## Implementation status — Phase 1 shipped (10 August 2026)
+
+Phase 1 of the sequence above is now in the code and deployed on the Gemini Live lane.
+
+| Item | Where |
+|---|---|
+| Independent Groq vote — no lesson prompt, no local salvage | `stt.py: SpeechToText._transcribe_groq_numeric_vote` |
+| Independent local faster-whisper vote — number hotwords, word probabilities | `stt.py: SpeechToText._transcribe_local_numeric_vote` |
+| One canonical 16 kHz clip + SHA-256, sent to both engines | `stt.py: _canonical_numeric_clip` |
+| Vote scoring, 1.5 s decision deadline, abstention rules | `stt.py: SpeechToText.transcribe_numeric_sidecar` |
+| Shadow orchestration, stale-turn marking, capacity limit, records | `numeric_sidecar.py` |
+| Attachment at Gemini turn finalisation (numeric items only) | `gemini_live.py: GeminiLiveCallRunner._submit_numeric_sidecar` |
+| Offline policy regressions (39 checks) | `numeric_sidecar_regression.py` |
+| Phase 2 read-out | `scripts/numeric_sidecar_report.py` |
+
+Guarantees enforced by the regression suite: the two votes never receive the question, operands or expected answer; a single engine can never decide; teen/tens conflicts, multi-value speech and silence abstain; a late or crashed vote is recorded but never applied; and `gemini_live.py` contains no read of `consensus_numeric_value`, so shadow mode cannot leak into grading.
+
+Records land in `<SABI_SHARED_AUDIO_DIR>/numeric_sidecar/<call_uuid>.jsonl` with the call UUID, turn ID, audio hash and seconds, Gemini's transcript, both engine transcripts plus real Whisper diagnostics, extracted candidates, agreement outcome, per-engine latency, model/config versions, and the hypothetical accept/abstain decision.
+
+Phase 3 remains closed: `SABI_NUMERIC_SIDECAR_MODE` accepts only `shadow`, and any other value logs a warning and stays in shadow. Opening it requires the Phase 2 labelled bake-off and the ≥98% accepted-value precision gate.

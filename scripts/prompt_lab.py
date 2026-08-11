@@ -32,6 +32,7 @@ import random
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -281,6 +282,25 @@ Learner: Hello?
 Sabi: Naomi! Oya, help me quickly — two bags, two mangoes in each. How many is that?""",
 )
 
+
+# Naomi, after seeing G against the reference: "i dont need it to have so much
+# brevity - i actually like haiku becuase it talks a little longer - it doesnt feel
+# so tranactional". The two-sentence ceiling came from my rubric, not from her, and
+# every variant that maximised brevity (E, H) was optimising the wrong way. I drops
+# the cap and keeps the one real phone constraint: one question per turn.
+RESEARCH_REWRITE_V4 = RESEARCH_REWRITE_V2.replace(
+    """One beat per turn. React, or teach one step, or ask — not all three in one breath.
+Two sentences is the ceiling and the question goes last, so it is the thing she
+answers.""",
+    """Take your time. You are having a conversation, not filling in a form — a small
+aside about the woman who sings while she sells, a moment of delight before you get
+to the maths, a bit of chat about her day, all of that IS the lesson, not a detour
+from it. Never sound like you are processing her answer and moving on.
+
+The one thing you must not do is ask two questions in the same breath. One question
+per turn, and it comes last, so it is the thing she answers.""",
+)
+
 SAFETY = """
 Safety comes before the lesson. You are a tutor, not a friend or confidant. If
 the child mentions being hurt, unsafe, or in danger, respond with care and tell
@@ -305,6 +325,7 @@ ALL_VARIANTS: list[Variant] = [
     Variant("F", "research rewrite (structure + register + politeness + exemplars)", RESEARCH_REWRITE),
     Variant("G", "F + teaching restored (step-carrying hints, names the maths)", RESEARCH_REWRITE_V2),
     Variant("H", "G + shorter opening, stops reciting the count", RESEARCH_REWRITE_V3),
+    Variant("I", "G without the brevity cap — allowed to talk longer", RESEARCH_REWRITE_V4),
 ]
 
 # Round 1 swept A-D. C and D finished within noise of each other, so round 2 keeps
@@ -318,6 +339,8 @@ SWEEPS: dict[str, list[str]] = {
     "round3": ["A", "E", "F"],
     "round4": ["A", "E", "F", "G"],
     "round5": ["A", "G", "H"],
+    # From round 6 "unhurried" replaces "phone_brevity" — scores are not comparable back.
+    "round6": ["A", "G", "I"],
 }
 
 
@@ -479,7 +502,11 @@ DIMENSIONS = {
     "patience": "Stays with a struggling child. Teaches one step and lets the child finish the thinking instead of supplying the answer or switching questions.",
     "teaches_not_quizzes": "Explains and builds understanding rather than firing questions. A quizmaster who only grades and moves on scores low.",
     "personality": "Alive and specific — real delight, a concrete story detail, a big-sister voice. Generic praise ('Great job!', 'Well done!') scores low.",
-    "phone_brevity": "One or two short spoken sentences per turn, one question at a time. Written-text habits (markdown, lists, long paragraphs) score low.",
+    # Replaced "phone_brevity" after Naomi's correction: she likes that the reference
+    # talks a little longer, because it stops the call feeling transactional. Short is
+    # not the goal — a turn that reads as a form being filled in is. The real phone
+    # constraint is one question at a time, which is about load, not word count.
+    "unhurried": "Sounds like a person enjoying a conversation, not a system processing an answer. Taking extra words for a joke, an aside, or a moment of delight is GOOD and should score high. Score low only for turns that are genuinely transactional and clipped, or that stack two questions so the child does not know which to answer. Do not reward brevity for its own sake.",
     "beginner_sizing": "Numbers stay tiny and concrete for a first multiplication lesson. Jumping to large or abstract facts scores low.",
     "concrete_framing": "Maths is embedded in things a Nigerian child handles — market items, naira — rather than posed as bare arithmetic.",
     "no_early_wrapup": "Keeps teaching through the whole lesson. Summarising, saying goodbye, or 'next time' at 90 seconds scores very low.",
@@ -638,18 +665,41 @@ def main() -> int:
     parser.add_argument("--reps", type=int, default=3, help="judged rounds (default 3)")
     parser.add_argument("--sweep", default="round1", choices=sorted(SWEEPS), help="which variant set to score")
     parser.add_argument("--out", default="/tmp/prompt_lab_results.json")
+    parser.add_argument(
+        "--reference-from",
+        help="reuse the stored Haiku reference transcripts from an earlier results json "
+             "instead of regenerating them (no Anthropic calls)",
+    )
+    parser.add_argument(
+        "--no-judge",
+        action="store_true",
+        help="produce transcripts only, no LLM scoring — for human side-by-side review",
+    )
     args = parser.parse_args()
 
     wanted = SWEEPS[args.sweep]
     variants = [v for v in ALL_VARIANTS if v.key in wanted]
 
-    keys = {"gemini": _secret("GEMINI_API_KEY"), "anthropic": _secret("ANTHROPIC_API_KEY")}
+    needs_anthropic = not (args.reference_from and args.no_judge)
+    keys = {"gemini": _secret("GEMINI_API_KEY")}
+    keys["anthropic"] = _secret("ANTHROPIC_API_KEY") if needs_anthropic else ""
 
     # Running as scripts/prompt_lab.py puts scripts/ on sys.path, not the repo root.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from original_sabi_prompt import original_sabi_prompt_for_phone
 
     reference_prompt = original_sabi_prompt_for_phone("+18604367048")
+
+    # Reusing stored reference transcripts keeps the comparison honest when the
+    # Anthropic key is unavailable: the Haiku side is real output from an earlier
+    # run, not a substitute model standing in for it.
+    stored_references: list[list[dict[str, str]]] = []
+    if args.reference_from:
+        prior = json.loads(Path(args.reference_from).read_text())
+        stored_references = [r["reference"] for r in prior["rounds"] if r.get("reference")]
+        if not stored_references:
+            raise SystemExit(f"no stored reference transcripts in {args.reference_from}")
+        print(f"reusing {len(stored_references)} stored Haiku reference transcripts", flush=True)
 
     rounds: list[dict[str, Any]] = []
     totals: dict[str, list[int]] = {}
@@ -666,8 +716,12 @@ def main() -> int:
 
         # The reference is the voice target, not a competitor: it is shown to the
         # judge labelled, and only the Gemini candidates are blind-scored against it.
-        print("  running REF (Claude Haiku, original hackathon prompt)", flush=True)
-        reference = run_lesson("claude", reference_prompt, keys)
+        if stored_references:
+            reference = stored_references[rep % len(stored_references)]
+            print("  reusing stored REF transcript", flush=True)
+        else:
+            print("  running REF (Claude Haiku, original hackathon prompt)", flush=True)
+            reference = run_lesson("claude", reference_prompt, keys)
 
         # Blind the judge: shuffle, and hand out opaque ids.
         random.shuffle(runs)
@@ -675,8 +729,12 @@ def main() -> int:
         mapping = {blind: key for blind, (key, _) in zip(blind_ids, runs)}
         labelled = [(blind, transcript) for blind, (_, transcript) in zip(blind_ids, runs)]
 
-        print("  judging...", flush=True)
-        result = judge(labelled, reference, keys["anthropic"])
+        if args.no_judge:
+            print("  skipping judge (transcripts only)", flush=True)
+            result = {"transcripts": [], "ranking_best_first": [], "verdict": ""}
+        else:
+            print("  judging...", flush=True)
+            result = judge(labelled, reference, keys["anthropic"])
 
         for entry in result["transcripts"]:
             key = mapping[entry["transcript_id"]]
@@ -700,6 +758,13 @@ def main() -> int:
 
     def mean(values: list[int]) -> float:
         return round(sum(values) / len(values), 2) if values else 0.0
+
+    if not totals:
+        print("\nno scores (judge skipped) — transcripts written for side-by-side review")
+        with open(args.out, "w") as handle:
+            json.dump({"names": {v.key: v.label for v in variants}, "rounds": rounds}, handle, indent=2)
+        print(f"full results -> {args.out}")
+        return 0
 
     summary = {
         key: {

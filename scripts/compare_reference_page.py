@@ -62,62 +62,71 @@ letter-spacing:.5px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
 """
 
 
-def render(data: dict, candidate: str) -> str:
+def render(data: dict, candidates: list[str]) -> str:
     rounds = data["rounds"]
     names = data.get("names", {})
-    summary = data.get("summary", {}).get(candidate, {})
-    dims = summary.get("dimensions", {})
-
     def stat(label: str, value) -> str:
         return f"<div class=stat><b>{escape(str(value))}</b>{escape(label)}</div>"
 
-    stats = "".join([
-        stat("voice match vs Haiku", dims.get("voice_match", "—")),
-        stat("personality", dims.get("personality", "—")),
-        stat("teaches, not quizzes", dims.get("teaches_not_quizzes", "—")),
-        stat("overall", summary.get("overall", "—")),
-        stat("runs shown", len(rounds)),
-    ])
+    # Average words per turn, since length is the thing being compared by eye.
+    def avg_words(turns: list[dict[str, str]]) -> int:
+        spoken = [len((t.get("sabi") or "").split()) for t in turns]
+        return round(sum(spoken) / len(spoken)) if spoken else 0
+
+    ref_words = [avg_words(r["reference"]) for r in rounds if r.get("reference")]
+    stats = [stat("words/turn — Haiku", round(sum(ref_words) / len(ref_words)) if ref_words else "—")]
+    for cand in candidates:
+        per = [avg_words(r["transcripts"][cand]) for r in rounds if r["transcripts"].get(cand)]
+        stats.append(stat(f"words/turn — {cand}", round(sum(per) / len(per)) if per else "—"))
+    stats.append(stat("runs shown", len(rounds)))
+    stats = "".join(stats)
 
     sections = []
     for entry in rounds:
-        transcript = entry["transcripts"].get(candidate)
         reference = entry.get("reference")
-        if not transcript or not reference:
+        if not reference or not any(entry["transcripts"].get(c) for c in candidates):
             continue
 
         beats = []
-        for cand_turn, ref_turn in zip(transcript, reference):
+        for index, ref_turn in enumerate(reference):
             def say(text: str) -> str:
                 text = (text or "").strip()
                 return f"<div class=say>{escape(text)}</div>" if text else \
                        "<div class='say empty'>(said nothing)</div>"
 
+            cols = [
+                "<div class='col ref'><div class=who><span class='badge b-ref'>reference</span>"
+                "Claude Haiku · original prompt</div>"
+                f"{say(ref_turn['sabi'])}</div>"
+            ]
+            for cand in candidates:
+                turns = entry["transcripts"].get(cand) or []
+                turn = turns[index] if index < len(turns) else {}
+                cols.append(
+                    f"<div class=col><div class=who><span class='badge b-cand'>{escape(cand)}</span>"
+                    f"{escape(names.get(cand, cand))}</div>{say(turn.get('sabi', ''))}</div>"
+                )
+
             beats.append(
                 "<article class=beat>"
                 "<div class=beathead>"
-                f"<div class=learner><span>child</span>{escape(cand_turn['learner'])}</div>"
-                f"<div class=probe>{escape(cand_turn['probe'])}</div>"
-                "</div><div class=cols>"
-                "<div class='col ref'><div class=who><span class='badge b-ref'>reference</span>"
-                "Claude Haiku · original hackathon prompt</div>"
-                f"{say(ref_turn['sabi'])}</div>"
-                f"<div class=col><div class=who><span class='badge b-cand'>candidate</span>"
-                f"Gemini · prompt {escape(candidate)}</div>"
-                f"{say(cand_turn['sabi'])}</div>"
-                "</div></article>"
+                f"<div class=learner><span>child</span>{escape(ref_turn['learner'])}</div>"
+                f"<div class=probe>{escape(ref_turn['probe'])}</div>"
+                "</div>"
+                f"<div class=cols style='grid-template-columns:repeat({len(cols)},1fr)'>"
+                + "".join(cols) + "</div></article>"
             )
 
         sections.append(f"<h2>Run {entry['rep']}</h2>" + "".join(beats))
 
-    label = escape(names.get(candidate, candidate))
+    label = escape(", ".join(candidates))
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        f"<title>Sabi — {label} vs the Haiku reference</title><style>{CSS}</style></head><body>"
+        f"<title>Sabi — {label} vs Haiku</title><style>{CSS}</style></head><body>"
         "<header><h1>Sabi voice comparison</h1>"
-        f"<div class=sub>Prompt {escape(candidate)} — {label} — against the voice we are "
-        "trying to recover. Same scripted lesson, same learner turns, both sides.</div></header>"
+        f"<div class=sub>Prompts {label} against the voice we are trying to recover. "
+        "Same scripted lesson, same learner turns, every column.</div></header>"
         f"<main><div class=stats>{stats}</div>"
         "<div class=legend><b>Read the left column for the voice, not the teaching.</b> "
         "The reference sounds like the Sabi people loved, but it is the worst teacher in the "
@@ -132,14 +141,14 @@ def render(data: dict, candidate: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", help="a prompt_lab results json")
-    parser.add_argument("--candidate", default="G")
+    parser.add_argument("--candidate", default="G", help="comma-separated, e.g. G,I")
     parser.add_argument("--out", default="sabi_voice_comparison.html")
     parser.add_argument("--serve", action="store_true", help=f"serve on 127.0.0.1:{PORT}")
     args = parser.parse_args()
 
     data = json.loads(Path(args.results).read_text())
     out = Path(args.out)
-    out.write_text(render(data, args.candidate))
+    out.write_text(render(data, [c.strip() for c in args.candidate.split(",") if c.strip()]))
     print(f"wrote {out}")
 
     if args.serve:

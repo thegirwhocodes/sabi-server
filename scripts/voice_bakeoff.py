@@ -9,9 +9,10 @@ voices. The lesson is a real 8-turn run of prompt G, and the child's side is
 rendered once and shared across all versions, so the only thing that changes
 between voices is Sabi.
 
-Sources: all 30 Gemini prebuilt voices, plus every speaker cloned on Sabi's own
-Chatterbox server (which includes bukola, the original hackathon Sabi, and naomi,
-the voice every non-Gemini caller hears today).
+Nigerian-first: every speaker cloned on Sabi's own Chatterbox server (including
+bukola, the original hackathon Sabi, and naomi, what every non-Gemini caller hears
+today), plus YarnGPT's Nigerian voices. Three Gemini prebuilts are held as controls
+— they are generic rather than Nigerian.
 
 Usage (inside the sabi-server image, on the compose network, with secrets):
     python scripts/voice_bakeoff.py --transcript /out/round6.json --candidate G
@@ -41,22 +42,26 @@ GEMINI_URL = (
 # original voice is reachable without ElevenLabs, whose subscription is unpaid.
 CHATTERBOX_URL = "http://chatterbox:8001/tts"
 CHATTERBOX_HEALTH = "http://chatterbox:8001/health"
+YARNGPT_URL = "https://yarngpt.ai/api/v1/tts"
+
+# YarnGPT is a Nigerian TTS service and the descriptions are from tts.py, where it
+# is described as Sabi's primary TTS — 16 Nigerian-accented voices, 4 wired up.
+YARNGPT_VOICES: dict[str, str] = {
+    "Chinenye": "engaging, warm",
+    "Wura": "young, sweet",
+    "Adaora": "warm, engaging",
+    "Idera": "melodic, gentle",
+}
 
 # One fixed voice for the child across every column, so the only variable is Sabi.
 CHILD_VOICE = "Puck"
 
-# Google's own one-word descriptor for each prebuilt voice.
+# Gemini's prebuilt voices are generic, not Nigerian, so only the ones worth
+# holding as a control are kept: what is live today, plus the two warm options the
+# research shortlisted. Chasing all 30 burned 240 clips on rate limits for voices
+# that were never plausible for Sabi anyway.
 GEMINI_VOICES: dict[str, str] = {
-    "Kore": "Firm", "Leda": "Youthful", "Sulafat": "Warm", "Achird": "Friendly",
-    "Vindemiatrix": "Gentle", "Sadachbia": "Lively", "Laomedeia": "Upbeat",
-    "Callirrhoe": "Easy-going", "Autonoe": "Bright", "Zephyr": "Bright",
-    "Aoede": "Breezy", "Despina": "Smooth", "Erinome": "Clear", "Achernar": "Soft",
-    "Pulcherrima": "Forward", "Schedar": "Even", "Gacrux": "Mature",
-    "Algieba": "Smooth", "Umbriel": "Easy-going", "Puck": "Upbeat",
-    "Charon": "Informative", "Fenrir": "Excitable", "Orus": "Firm",
-    "Enceladus": "Breathy", "Iapetus": "Clear", "Algenib": "Gravelly",
-    "Rasalgethi": "Informative", "Alnilam": "Firm", "Zubenelgenubi": "Casual",
-    "Sadaltager": "Knowledgeable",
+    "Kore": "Firm", "Leda": "Youthful", "Sulafat": "Warm",
 }
 
 # Voices that are already in play, called out so they are easy to find in a long list.
@@ -67,13 +72,9 @@ NOTES: dict[str, str] = {
 }
 
 
-# Rendering all 30 Gemini voices x 8 turns means 240 rate-limited calls. These get
-# the whole lesson; every other voice gets one characterful line to screen it by,
-# and can be promoted to a full render with --voices.
-FULL_LESSON = {
-    "Kore", "Leda", "Sulafat", "Achird", "Vindemiatrix",
-    "Sadachbia", "Laomedeia", "Callirrhoe",
-}
+# Everything Nigerian gets the whole lesson; the Gemini controls do too, since
+# there are only three of them now.
+FULL_LESSON = set(GEMINI_VOICES)
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,12 @@ def discover_voices(only: list[str] | None) -> list[Voice]:
             "chatterbox", speaker,
         ))
 
+    for name, descriptor in YARNGPT_VOICES.items():
+        voices.append(Voice(
+            f"yarngpt_{name.lower()}", f"{name} (YarnGPT)",
+            f"YarnGPT · Nigerian · {descriptor}", "yarngpt", name,
+        ))
+
     for name, descriptor in GEMINI_VOICES.items():
         note = NOTES.get(name)
         voices.append(Voice(
@@ -170,6 +177,15 @@ def say_gemini(text: str, voice_name: str, key: str) -> tuple[bytes, str]:
     raw = _post(f"{GEMINI_URL}?key={key}", payload, {"content-type": "application/json"})
     part = json.loads(raw)["candidates"][0]["content"]["parts"][0]["inlineData"]
     return wav_from_pcm(base64.b64decode(part["data"])), "wav"
+
+
+def say_yarngpt(text: str, voice: str, key: str) -> tuple[bytes, str]:
+    audio = _post(
+        YARNGPT_URL,
+        {"text": text[:2000], "voice": voice, "response_format": "mp3"},
+        {"content-type": "application/json", "authorization": f"Bearer {key}"},
+    )
+    return audio, "mp3"
 
 
 def say_chatterbox(text: str, speaker: str) -> tuple[bytes, str]:
@@ -345,6 +361,7 @@ def main() -> int:
     out = Path(args.out)
     (out / "audio").mkdir(parents=True, exist_ok=True)
     gemini_key = _secret("GEMINI_API_KEY")
+    yarngpt_key = _secret("YARNGPT_API_KEY")
 
     voices = discover_voices(args.voices.split(",") if args.voices else None)
     print(f"{len(voices)} voices x {len(turns)} turns", flush=True)
@@ -369,8 +386,12 @@ def main() -> int:
     def render(job: tuple[str, str, str, str]) -> None:
         slug, text, provider, name = job
         try:
-            audio, ext = (say_gemini(text, name, gemini_key) if provider == "gemini"
-                          else say_chatterbox(text, name))
+            if provider == "gemini":
+                audio, ext = say_gemini(text, name, gemini_key)
+            elif provider == "yarngpt":
+                audio, ext = say_yarngpt(text, name, yarngpt_key)
+            else:
+                audio, ext = say_chatterbox(text, name)
         except Exception as exc:  # one bad voice must not sink the rest
             print(f"  {slug}: FAILED {exc}", flush=True)
             clips[slug] = None

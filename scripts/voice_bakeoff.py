@@ -1,19 +1,21 @@
-"""Hear the same Sabi lines in different voices, side by side.
+"""Hear a whole Sabi lesson delivered by every available voice.
 
 The prompt lab compares words. This compares delivery, which the research says
 matters more: Moreno and Mayer found the agent's voice, not its persona, was the
 significant contributor to learning outcomes.
 
-Every voice speaks the SAME lines — otherwise this would compare scripts, not
-voices. Lines default to real output from prompt G.
+Every voice speaks the SAME lesson — otherwise this would compare scripts, not
+voices. The lesson is a real 8-turn run of prompt G, and the child's side is
+rendered once and shared across all versions, so the only thing that changes
+between voices is Sabi.
 
-Voices:
-  bukola   ElevenLabs, the original hackathon Sabi (young, Nigerian, conversational)
-  kore     Gemini prebuilt — what Sabi speaks today. Google's descriptor: "Firm"
-  leda     Gemini prebuilt — Google's descriptor: "Youthful"
+Sources: all 30 Gemini prebuilt voices, plus every speaker cloned on Sabi's own
+Chatterbox server (which includes bukola, the original hackathon Sabi, and naomi,
+the voice every non-Gemini caller hears today).
 
-Usage (inside the sabi-server image, with secrets mounted):
-    python scripts/voice_bakeoff.py --out /out/voices
+Usage (inside the sabi-server image, on the compose network, with secrets):
+    python scripts/voice_bakeoff.py --transcript /out/round6.json --candidate G
+    python scripts/voice_bakeoff.py --transcript /out/round6.json --voices kore,leda
 """
 
 from __future__ import annotations
@@ -22,7 +24,10 @@ import argparse
 import base64
 import json
 import struct
+import time
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
@@ -32,23 +37,43 @@ GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_TTS_MODEL}:generateContent"
 )
-ELEVEN_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 # Sabi's own Chatterbox server holds cloned speakers, including bukola — so the
 # original voice is reachable without ElevenLabs, whose subscription is unpaid.
 CHATTERBOX_URL = "http://chatterbox:8001/tts"
+CHATTERBOX_HEALTH = "http://chatterbox:8001/health"
 
-# Real turns from prompt G, chosen to span the registers that matter on a call:
-# the opening, a child who is stuck, a correction, and a celebration.
-LINES: list[tuple[str, str]] = [
-    ("opening", "Naomi! Oya, come and help me quickly — I went to the shop and I bought "
-                "two packets of chin-chin, and there are two crunchy pieces inside each packet."),
-    ("stuck", "No wahala, Naomi, we will count them together! You have the first sachet "
-              "that costs two naira, and then you pick up the second one — so if you start "
-              "at two and count up two more, what number do you land on?"),
-    ("wrong answer", "Hmm, let me think small with you. Look — two in the first basket, and "
-                     "two in the second basket. Start at two and count the second basket for me."),
-    ("celebration", "Ah ah! So fast! Sharp sharp! You got it — I knew you were sharp, Naomi."),
-]
+# One fixed voice for the child across every column, so the only variable is Sabi.
+CHILD_VOICE = "Puck"
+
+# Google's own one-word descriptor for each prebuilt voice.
+GEMINI_VOICES: dict[str, str] = {
+    "Kore": "Firm", "Leda": "Youthful", "Sulafat": "Warm", "Achird": "Friendly",
+    "Vindemiatrix": "Gentle", "Sadachbia": "Lively", "Laomedeia": "Upbeat",
+    "Callirrhoe": "Easy-going", "Autonoe": "Bright", "Zephyr": "Bright",
+    "Aoede": "Breezy", "Despina": "Smooth", "Erinome": "Clear", "Achernar": "Soft",
+    "Pulcherrima": "Forward", "Schedar": "Even", "Gacrux": "Mature",
+    "Algieba": "Smooth", "Umbriel": "Easy-going", "Puck": "Upbeat",
+    "Charon": "Informative", "Fenrir": "Excitable", "Orus": "Firm",
+    "Enceladus": "Breathy", "Iapetus": "Clear", "Algenib": "Gravelly",
+    "Rasalgethi": "Informative", "Alnilam": "Firm", "Zubenelgenubi": "Casual",
+    "Sadaltager": "Knowledgeable",
+}
+
+# Voices that are already in play, called out so they are easy to find in a long list.
+NOTES: dict[str, str] = {
+    "bukola": "the original hackathon Sabi",
+    "naomi": "live today on the non-Gemini lane",
+    "Kore": "live today on your number",
+}
+
+
+# Rendering all 30 Gemini voices x 8 turns means 240 rate-limited calls. These get
+# the whole lesson; every other voice gets one characterful line to screen it by,
+# and can be promoted to a full render with --voices.
+FULL_LESSON = {
+    "Kore", "Leda", "Sulafat", "Achird", "Vindemiatrix",
+    "Sadachbia", "Laomedeia", "Callirrhoe",
+}
 
 
 @dataclass(frozen=True)
@@ -58,18 +83,7 @@ class Voice:
     detail: str
     provider: str
     name: str
-
-
-VOICES: list[Voice] = [
-    Voice("bukola", "Bukola — the original Sabi",
-          "Chatterbox clone · young, Nigerian, conversational", "chatterbox", "bukola"),
-    Voice("kore", "Kore — your number today",
-          'Gemini prebuilt · Google\'s descriptor: "Firm"', "gemini", "Kore"),
-    Voice("leda", "Leda — a warmer Gemini option",
-          'Gemini prebuilt · Google\'s descriptor: "Youthful"', "gemini", "Leda"),
-    Voice("naomi", "Naomi — every other caller today",
-          "Chatterbox clone · the live TTS on the non-Gemini lane", "chatterbox", "naomi"),
-]
+    full: bool = True
 
 
 def _secret(name: str) -> str:
@@ -79,11 +93,59 @@ def _secret(name: str) -> str:
     raise SystemExit(f"missing credential: {name}")
 
 
-def _post(url: str, payload: dict | None, headers: dict[str, str]) -> bytes:
-    data = json.dumps(payload).encode() if payload is not None else None
-    request = urllib.request.Request(url, data=data, headers=headers)
-    with urllib.request.urlopen(request, timeout=120) as response:
-        return response.read()
+def _post(url: str, payload: dict, headers: dict[str, str], attempts: int = 6) -> bytes:
+    """Gemini TTS rate-limits aggressively; a first pass at six workers lost 240 of
+    279 clips to 429s. Back off and honour Retry-After rather than dropping voices."""
+    delay = 4.0
+    for attempt in range(attempts):
+        request = urllib.request.Request(
+            url, data=json.dumps(payload).encode(), headers=headers
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (429, 500, 502, 503) or attempt == attempts - 1:
+                raise
+            wait = float(exc.headers.get("Retry-After") or 0) or delay
+            time.sleep(wait)
+            delay = min(delay * 2, 90)
+    raise RuntimeError("unreachable")
+
+
+def discover_voices(only: list[str] | None) -> list[Voice]:
+    voices: list[Voice] = []
+
+    # Chatterbox first — these are Sabi's own clones, so they matter most.
+    try:
+        with urllib.request.urlopen(CHATTERBOX_HEALTH, timeout=15) as response:
+            speakers = json.load(response).get("speakers", [])
+    except Exception as exc:
+        print(f"chatterbox unavailable ({exc}) — Gemini voices only", flush=True)
+        speakers = []
+
+    for speaker in speakers:
+        note = NOTES.get(speaker)
+        voices.append(Voice(
+            speaker, speaker.title(),
+            "Chatterbox clone" + (f" · {note}" if note else ""),
+            "chatterbox", speaker,
+        ))
+
+    for name, descriptor in GEMINI_VOICES.items():
+        note = NOTES.get(name)
+        voices.append(Voice(
+            name.lower(), name,
+            f'Gemini · "{descriptor}"' + (f" · {note}" if note else ""),
+            "gemini", name, name in FULL_LESSON,
+        ))
+
+    if only:
+        wanted = {v.strip().lower() for v in only}
+        # An explicitly requested voice always gets the full lesson.
+        voices = [Voice(v.key, v.label, v.detail, v.provider, v.name, True)
+                  for v in voices if v.key in wanted]
+    return voices
 
 
 def wav_from_pcm(pcm: bytes, rate: int = 24000, channels: int = 1, width: int = 2) -> bytes:
@@ -119,131 +181,214 @@ def say_chatterbox(text: str, speaker: str) -> tuple[bytes, str]:
     return audio, "mp3"
 
 
-def say_eleven(text: str, voice_id: str, key: str) -> tuple[bytes, str]:
-    payload = {"text": text, "model_id": "eleven_multilingual_v2"}
-    audio = _post(
-        ELEVEN_URL.format(voice_id=voice_id),
-        payload,
-        {"content-type": "application/json", "xi-api-key": key, "accept": "audio/mpeg"},
-    )
-    return audio, "mp3"
-
-
 CSS = """
 :root{--ivory:#fbf6e9;--card:#fffdf7;--ink:#221d17;--muted:#71675b;--gold:#b88a25;
 --line:#e4d8bc;--blue:#315b8b;--green:#28745a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--ivory);color:var(--ink);
 font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-header{position:sticky;top:0;z-index:3;padding:20px 28px;color:#fff;
+header{position:sticky;top:0;z-index:5;padding:18px 28px;color:#fff;
 background:linear-gradient(115deg,#211a11,#4b3517);box-shadow:0 5px 22px #33240d26}
-h1{margin:0;font:700 25px Georgia,serif}
-.sub{color:#eadcb9;margin-top:4px;font-size:13.5px}
-main{max-width:1400px;margin:auto;padding:20px 28px 60px}
+h1{margin:0;font:700 24px Georgia,serif}
+.sub{color:#eadcb9;margin-top:3px;font-size:13px}
+main{max-width:1500px;margin:auto;padding:20px 28px 70px}
 .legend{background:#fff9e9;border:1px solid var(--line);border-radius:12px;
-padding:12px 15px;margin-bottom:18px;font-size:13.5px;color:#514a40}
+padding:12px 15px;margin-bottom:20px;font-size:13.5px;color:#514a40}
 .legend b{color:var(--ink)}
-.beat{background:var(--card);border:1px solid var(--line);border-radius:15px;
-margin-bottom:15px;overflow:hidden}
-.beathead{padding:13px 16px;background:#fff8e7;border-bottom:1px solid var(--line)}
-.probe{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;
-color:var(--gold);margin-bottom:5px}
-.said{font-weight:640}
-.cols{display:grid;gap:0}
-.col{padding:14px 16px}
-.col+.col{border-left:1px solid var(--line)}
-.col.now{background:#faf5e8}
-.who{font-size:12px;font-weight:800;margin-bottom:2px}
-.detail{color:var(--muted);font-size:12px;margin-bottom:8px}
-.badge{display:inline-block;padding:3px 8px;border-radius:99px;font-size:10px;
-font-weight:850;letter-spacing:.4px;margin-bottom:6px}
-.b-old{color:var(--blue);background:#dbe8f8}
-.b-now{color:#80601b;background:#f7eac4}
-.b-alt{color:var(--green);background:#dcefe8}
-audio{width:100%;height:36px}
-.err{color:#a6453d;font-size:13px}
-@media(max-width:820px){.cols{grid-template-columns:1fr!important}
-.col+.col{border-left:0;border-top:1px solid var(--line)}
-main,header{padding-left:14px;padding-right:14px}}
+h2{margin:26px 0 12px;font:700 20px Georgia,serif}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.vcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 15px}
+.vcard.live{box-shadow:inset 3px 0 0 var(--gold)}
+.who{font-size:14px;font-weight:800}
+.detail{color:var(--muted);font-size:12px;margin:2px 0 10px;min-height:32px}
+.play{border:0;border-radius:10px;padding:9px 13px;background:#2e261b;color:#fff;
+font-weight:750;cursor:pointer;font-size:13.5px;width:100%}
+.play:hover{background:#463a29}
+.play[aria-pressed=true]{background:var(--gold);color:#211a11}
+.nowplay{margin-top:7px;font-size:11.5px;color:var(--muted);min-height:15px}
+details{margin-top:9px}
+summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}
+.turnrow{margin-top:8px}
+.turnlabel{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+audio{width:100%;height:32px}
+.script{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.line{padding:11px 15px;border-bottom:1px solid var(--line)}
+.line:last-child{border-bottom:0}
+.probe{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--gold)}
+.child{font-weight:700;margin-top:4px}
+.child span{color:var(--muted);font-weight:400;font-size:11px;text-transform:uppercase;
+letter-spacing:.5px;margin-right:7px}
+.said{margin-top:5px;color:#3f382e}
+.err{color:#a6453d;font-size:12.5px}
+@media(max-width:700px){main,header{padding-left:14px;padding-right:14px}}
 """
 
-BADGES = {"bukola": "b-old", "kore": "b-now", "leda": "b-alt", "naomi": "b-old"}
 
+def build_page(clips: dict, turns: list[dict], voices: list[Voice], candidate: str) -> str:
+    playlists = {}
+    for voice in voices:
+        seq = []
+        for index in range(len(turns)):
+            child = clips.get(f"child_{index}")
+            sabi = clips.get(f"{voice.key}_{index}")
+            if child:
+                seq.append([child, f"child: {turns[index]['learner'][:40]}"])
+            if sabi:
+                seq.append([sabi, f"{voice.label} — turn {index + 1} of {len(turns)}"])
+        playlists[voice.key] = seq
 
-def build_page(rendered: dict[tuple[str, str], str | None]) -> str:
-    beats = []
-    for probe, text in LINES:
-        cols = []
-        for voice in VOICES:
-            src = rendered.get((voice.key, probe))
-            player = (
-                f"<audio controls preload=none src='{escape(src)}'></audio>"
-                if src else "<div class=err>could not synthesise</div>"
+    cards, samples = [], []
+    for voice in voices:
+        live = " live" if voice.key in ("kore", "naomi") else ""
+        rows = []
+        for index in range(len(turns)):
+            src = clips.get(f"{voice.key}_{index}")
+            player = (f"<audio controls preload=none src='{escape(src)}'></audio>"
+                      if src else "<div class=err>not synthesised</div>")
+            rows.append(
+                f"<div class=turnrow><div class=turnlabel>turn {index + 1}</div>{player}</div>"
             )
-            klass = "col now" if voice.key == "kore" else "col"
-            cols.append(
-                f"<div class='{klass}'><span class='badge {BADGES[voice.key]}'>"
-                f"{escape(voice.key)}</span>"
+        if voice.full:
+            cards.append(
+                f"<div class='vcard{live}'>"
                 f"<div class=who>{escape(voice.label)}</div>"
+                f"<div class=detail>{escape(voice.detail)}</div>"
+                f"<button class=play id='btn-{escape(voice.key)}' aria-pressed=false "
+                f'onclick="toggle(\'{escape(voice.key)}\')">▶ Play the whole lesson</button>'
+                f"<div class=nowplay id='np-{escape(voice.key)}'></div>"
+                f"<details><summary>turn by turn</summary>{''.join(rows)}</details>"
+                "</div>"
+            )
+        else:
+            src = clips.get(f"{voice.key}_{len(turns) - 1}")
+            player = (f"<audio controls preload=none src='{escape(src)}'></audio>"
+                      if src else "<div class=err>not synthesised</div>")
+            samples.append(
+                f"<div class=vcard><div class=who>{escape(voice.label)}</div>"
                 f"<div class=detail>{escape(voice.detail)}</div>{player}</div>"
             )
-        beats.append(
-            "<article class=beat><div class=beathead>"
-            f"<div class=probe>{escape(probe)}</div>"
-            f"<div class=said>{escape(text)}</div></div>"
-            f"<div class=cols style='grid-template-columns:repeat({len(cols)},1fr)'>"
-            + "".join(cols) + "</div></article>"
+
+    script_lines = []
+    for index, turn in enumerate(turns):
+        script_lines.append(
+            f"<div class=line><div class=probe>turn {index + 1} · {escape(turn['probe'])}</div>"
+            f"<div class=child><span>child</span>{escape(turn['learner'])}</div>"
+            f"<div class=said>{escape(turn['sabi'])}</div></div>"
         )
+
+    js = """
+const PL = __PLAYLISTS__;
+let audio = null, current = null;
+function reset(key){
+  const b=document.getElementById('btn-'+key);
+  if(b){b.setAttribute('aria-pressed','false'); b.textContent='▶ Play the whole lesson';}
+  const n=document.getElementById('np-'+key); if(n) n.textContent='';
+}
+function stop(){ if(audio){audio.pause(); audio=null;} if(current){reset(current);} current=null; }
+function toggle(key){
+  if(current===key){ stop(); return; }
+  stop(); current=key;
+  const btn=document.getElementById('btn-'+key), np=document.getElementById('np-'+key);
+  btn.setAttribute('aria-pressed','true'); btn.textContent='■ Stop';
+  let i=0;
+  const next=()=>{
+    if(current!==key) return;
+    if(i>=PL[key].length){ stop(); return; }
+    const item=PL[key][i++];
+    np.textContent=item[1];
+    audio=new Audio(item[0]);
+    audio.onended=next; audio.onerror=next;
+    audio.play().catch(()=>next());
+  };
+  next();
+}
+""".replace("__PLAYLISTS__", json.dumps(playlists))
 
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        f"<title>Sabi — voice bake-off</title><style>{CSS}</style></head><body>"
-        "<header><h1>Sabi voice bake-off</h1>"
-        "<div class=sub>The same lines from prompt G, spoken three ways.</div></header>"
-        "<main><div class=legend><b>Every voice reads identical text</b>, so what you are "
-        "hearing is delivery only. Bukola is the original hackathon Sabi — the one people "
-        "liked. Kore is what the live number uses today. Leda is the warm Gemini "
-        "alternative, and Naomi is the Chatterbox clone every non-Gemini caller hears today. "
-        "Voice is worth taking seriously: in the pedagogical-agent research it "
-        "was the agent's voice, not its persona, that moved learning outcomes.</div>"
-        + "".join(beats) + "</main></body></html>"
+        f"<title>Sabi — full lesson, {len(voices)} voices</title>"
+        f"<style>{CSS}</style></head><body>"
+        "<header><h1>Sabi voice bake-off — the whole lesson</h1>"
+        f"<div class=sub>A complete {len(turns)}-turn run of prompt {escape(candidate)}, "
+        f"delivered by {len(voices)} voices.</div></header><main>"
+        "<div class=legend><b>Press play on any voice to hear the entire call.</b> Every "
+        "voice reads identical words, and the child's side is the same recording throughout, "
+        "so the only thing changing is Sabi. Gold-edged cards are what is live today. These "
+        "are 24kHz studio renders — the real call is 8kHz narrowband, which flattens exactly "
+        "the warmth you are listening for, so shortlist here and confirm on a phone.</div>"
+        f"<div class=grid>{''.join(cards)}</div>"
+        + (f"<h2>Every other voice — one line each</h2>"
+           "<div class=legend>Screen these by ear, then ask for a full lesson in any of "
+           "them.</div>"
+           f"<div class=grid>{''.join(samples)}</div>" if samples else "")
+        + f"<h2>The lesson they are all reading</h2>"
+        f"<div class=script>{''.join(script_lines)}</div>"
+        f"</main><script>{js}</script></body></html>"
     )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--transcript", required=True, help="a prompt_lab results json")
+    parser.add_argument("--candidate", default="G")
+    parser.add_argument("--rep", type=int, default=1, help="which run to voice")
+    parser.add_argument("--voices", help="comma-separated subset; default is every voice")
+    parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--out", default="/out/voices")
     args = parser.parse_args()
 
+    data = json.loads(Path(args.transcript).read_text())
+    entry = next(r for r in data["rounds"] if r["rep"] == args.rep)
+    turns = entry["transcripts"][args.candidate]
+
     out = Path(args.out)
     (out / "audio").mkdir(parents=True, exist_ok=True)
-
     gemini_key = _secret("GEMINI_API_KEY")
-    eleven_key = eleven_voice = ""  # only needed if an elevenlabs voice is listed
 
-    rendered: dict[tuple[str, str], str | None] = {}
-    for voice in VOICES:
-        for probe, text in LINES:
-            slug = f"{voice.key}_{probe.replace(' ', '-')}"
-            try:
-                if voice.provider == "gemini":
-                    audio, ext = say_gemini(text, voice.name, gemini_key)
-                elif voice.provider == "chatterbox":
-                    audio, ext = say_chatterbox(text, voice.name)
-                else:
-                    audio, ext = say_eleven(text, eleven_voice, eleven_key)
-            except Exception as exc:  # keep the other voices usable
-                print(f"  {slug}: FAILED {exc}", flush=True)
-                rendered[(voice.key, probe)] = None
-                continue
-            path = out / "audio" / f"{slug}.{ext}"
-            path.write_bytes(audio)
-            rendered[(voice.key, probe)] = f"audio/{path.name}"
-            print(f"  {slug}: {len(audio) // 1024} KB", flush=True)
+    voices = discover_voices(args.voices.split(",") if args.voices else None)
+    print(f"{len(voices)} voices x {len(turns)} turns", flush=True)
+
+    jobs: list[tuple[str, str, str, str]] = []
+    for index, turn in enumerate(turns):
+        line = turn["learner"]
+        if not line.startswith("["):  # the unclear-audio beat has no words to speak
+            jobs.append((f"child_{index}", line, "gemini", CHILD_VOICE))
+    # The last turn is the celebration — the most characterful line to screen by.
+    sample_index = len(turns) - 1
+    for voice in voices:
+        wanted = range(len(turns)) if voice.full else [sample_index]
+        for index in wanted:
+            if (turns[index].get("sabi") or "").strip():
+                jobs.append(
+                    (f"{voice.key}_{index}", turns[index]["sabi"], voice.provider, voice.name)
+                )
+
+    clips: dict[str, str | None] = {}
+
+    def render(job: tuple[str, str, str, str]) -> None:
+        slug, text, provider, name = job
+        try:
+            audio, ext = (say_gemini(text, name, gemini_key) if provider == "gemini"
+                          else say_chatterbox(text, name))
+        except Exception as exc:  # one bad voice must not sink the rest
+            print(f"  {slug}: FAILED {exc}", flush=True)
+            clips[slug] = None
+            return
+        path = out / "audio" / f"{slug}.{ext}"
+        path.write_bytes(audio)
+        clips[slug] = f"audio/{path.name}"
+
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        for done, _ in enumerate(pool.map(render, jobs), 1):
+            if done % 25 == 0:
+                print(f"  {done}/{len(jobs)} clips", flush=True)
+
+    failed = sum(1 for v in clips.values() if v is None)
+    print(f"done: {len(jobs) - failed} clips, {failed} failed", flush=True)
 
     page = out / "voice_bakeoff.html"
-    page.write_text(build_page(rendered))
+    page.write_text(build_page(clips, turns, voices, args.candidate))
     print(f"wrote {page}")
     return 0
 

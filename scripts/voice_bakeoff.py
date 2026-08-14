@@ -55,13 +55,19 @@ YARNGPT_VOICES: dict[str, str] = {
 
 # One fixed voice for the child across every column, so the only variable is Sabi.
 CHILD_VOICE = "Puck"
+CHILD_STYLE = (
+    "Speak as a young Nigerian child on a phone call, warm and natural. "
+    "Say only the line itself:"
+)
 
 # Gemini's prebuilt voices are generic, not Nigerian, so only the ones worth
 # holding as a control are kept: what is live today, plus the two warm options the
 # research shortlisted. Chasing all 30 burned 240 clips on rate limits for voices
 # that were never plausible for Sabi anyway.
 GEMINI_VOICES: dict[str, str] = {
-    "Kore": "Firm", "Leda": "Youthful", "Sulafat": "Warm",
+    "Kore": "Firm", "Leda": "Youthful", "Sulafat": "Warm", "Achird": "Friendly",
+    "Vindemiatrix": "Gentle", "Sadachbia": "Lively", "Laomedeia": "Upbeat",
+    "Callirrhoe": "Easy-going",
 }
 
 # Voices that are already in play, called out so they are easy to find in a long list.
@@ -85,6 +91,7 @@ class Voice:
     provider: str
     name: str
     full: bool = True
+    style: str = ""   # spoken-style direction, Gemini TTS only
 
 
 def _secret(name: str) -> str:
@@ -142,10 +149,16 @@ def discover_voices(only: list[str] | None) -> list[Voice]:
     for name, descriptor in GEMINI_VOICES.items():
         note = NOTES.get(name)
         voices.append(Voice(
-            name.lower(), name,
-            f'Gemini · "{descriptor}"' + (f" · {note}" if note else ""),
-            "gemini", name, name in FULL_LESSON,
+            f"{name.lower()}_ng", f"{name} — Nigerian steer",
+            f'Gemini · "{descriptor}" · told to speak Nigerian English',
+            "gemini", name, True, NIGERIAN_STYLE,
         ))
+        if name == "Kore":  # the control: same voice, no style direction
+            voices.append(Voice(
+                "kore_plain", "Kore — no steer (live today)",
+                f'Gemini · "{descriptor}" · {note or "unsteered"}',
+                "gemini", name, True, "",
+            ))
 
     if only:
         wanted = {v.strip().lower() for v in only}
@@ -164,7 +177,19 @@ def wav_from_pcm(pcm: bytes, rate: int = 24000, channels: int = 1, width: int = 
     return header + pcm
 
 
-def say_gemini(text: str, voice_name: str, key: str) -> tuple[bytes, str]:
+# Gemini's prebuilt voices default to a generic American read. The TTS model is
+# prompt-steerable, so a style direction changes delivery: on a test line the
+# steered render came back 0.4s longer, not the ~3s it would take to read the
+# instruction aloud, so it is being followed rather than spoken.
+NIGERIAN_STYLE = (
+    "Speak in a warm, natural Nigerian English accent, like a Lagos big sister "
+    "talking to a child she is fond of. Say only the line itself:"
+)
+
+
+def say_gemini(text: str, voice_name: str, key: str, style: str = "") -> tuple[bytes, str]:
+    if style:
+        text = f"{style}\n\n{text}"
     payload = {
         "contents": [{"parts": [{"text": text}]}],
         "generationConfig": {
@@ -366,28 +391,29 @@ def main() -> int:
     voices = discover_voices(args.voices.split(",") if args.voices else None)
     print(f"{len(voices)} voices x {len(turns)} turns", flush=True)
 
-    jobs: list[tuple[str, str, str, str]] = []
+    jobs: list[tuple[str, str, str, str, str]] = []
     for index, turn in enumerate(turns):
         line = turn["learner"]
         if not line.startswith("["):  # the unclear-audio beat has no words to speak
-            jobs.append((f"child_{index}", line, "gemini", CHILD_VOICE))
+            jobs.append((f"child_{index}", line, "gemini", CHILD_VOICE, CHILD_STYLE))
     # The last turn is the celebration — the most characterful line to screen by.
     sample_index = len(turns) - 1
     for voice in voices:
         wanted = range(len(turns)) if voice.full else [sample_index]
         for index in wanted:
             if (turns[index].get("sabi") or "").strip():
-                jobs.append(
-                    (f"{voice.key}_{index}", turns[index]["sabi"], voice.provider, voice.name)
-                )
+                jobs.append((
+                    f"{voice.key}_{index}", turns[index]["sabi"],
+                    voice.provider, voice.name, voice.style,
+                ))
 
     clips: dict[str, str | None] = {}
 
-    def render(job: tuple[str, str, str, str]) -> None:
-        slug, text, provider, name = job
+    def render(job: tuple[str, str, str, str, str]) -> None:
+        slug, text, provider, name, style = job
         try:
             if provider == "gemini":
-                audio, ext = say_gemini(text, name, gemini_key)
+                audio, ext = say_gemini(text, name, gemini_key, style)
             elif provider == "yarngpt":
                 audio, ext = say_yarngpt(text, name, yarngpt_key)
             else:

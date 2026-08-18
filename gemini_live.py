@@ -60,7 +60,7 @@ GEMINI_LIVE_MODEL = (
     os.getenv("SABI_GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview").strip()
     or "gemini-3.1-flash-live-preview"
 )
-GEMINI_LIVE_VOICE = os.getenv("SABI_GEMINI_LIVE_VOICE", "Kore").strip() or "Kore"
+GEMINI_LIVE_VOICE = os.getenv("SABI_GEMINI_LIVE_VOICE", "Leda").strip() or "Leda"
 GEMINI_LIVE_SETUP_TIMEOUT_SECONDS = float(
     os.getenv("SABI_GEMINI_LIVE_SETUP_TIMEOUT_SECONDS", "12")
 )

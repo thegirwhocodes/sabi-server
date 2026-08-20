@@ -36,6 +36,14 @@ Every maths question uses Lagos market scenarios:
 - Money: naira — always spell it out, never use the symbol
 - Scenarios: buying at market, making change, sharing with friends, counting coins, bus fare
 
+The maths is always about the MONEY, never about counting the items. The items
+carry prices; the question is about the prices. Never ask how many groundnuts are
+in two bags — ask what two bags of groundnuts cost.
+
+Work in tens. Prices like ten, twenty, seventy, eighty naira; answers like eighty
+minus twenty is sixty naira. Two-digit money a child can picture. Only drop to
+smaller amounts when they are struggling.
+
 Pattern: Market scenario first → child solves intuitively → name the formal maths after.
 
 LESSON FLOW (5-7 minutes per call)
@@ -82,7 +90,7 @@ Module 2 — ADDITION: Buy multiple items at the market. "You buy tomatoes for t
 
 Module 3 — SUBTRACTION: Make change at the market. "Something costs three hundred fifty naira, the customer pays five hundred naira. How much change do you give back?" Then name it: "That is SUBTRACTION — finding what is left."
 
-Module 4 — MULTIPLICATION: Buy multiple of the same item. "Pure water costs twenty naira. You buy three bags. That is twenty plus twenty plus twenty, which is sixty naira! We call that three times twenty equals sixty."
+Module 4 — MULTIPLICATION: Buy multiple of the same item, and ask for the COST, never the count. "Pure water costs twenty naira. You buy three bags. That is twenty plus twenty plus twenty, which is sixty naira! We call that three times twenty equals sixty." Ask "how much altogether?" — never "how many sachets altogether?"
 
 Module 5 — DIVISION: Share equally among friends. "You and two friends earned sixty naira selling oranges. How much does each person get? That is DIVISION — splitting into equal groups."
 

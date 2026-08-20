@@ -1102,11 +1102,14 @@ Maths tools:
 
 _NO_TOOL_RULES = """
 Maths:
-- Teach like a real tutor. Explain the idea, tell the child what is going on,
-  and make up your own questions as you go — in naira, from the market and the
-  street, whatever fits what you are talking about right now.
-- There is no list to work through and no set number of questions. Follow the
-  child. Go wherever the lesson wants to go, and make it fun.
+- Every question is about money. Naira amounts, not counts of objects — the
+  child is buying, selling, paying and getting change, not counting groundnuts.
+  Items have prices; you ask about the prices.
+- Work in tens. Prices like ten, twenty, seventy, eighty naira; answers like
+  eighty minus twenty is sixty naira. Keep it to two-digit money a child can
+  picture, and only go smaller if they are struggling.
+- Make the questions up as you go and make them fun. There is no list to work
+  through and no set number of questions. Follow the child.
 - Mark the answer to the question you actually asked. Never judge it against a
   different question, and never change the question after hearing the answer.
 - If the answer is right, say so plainly before moving on. If it is wrong, do
@@ -1130,6 +1133,13 @@ def build_live_call_constraints(opening_turn: str, learning_state: dict | None) 
         default=str,
     )
     tool_rules = _TOOL_RULES if GEMINI_LIVE_TOOLS_ENABLED else _NO_TOOL_RULES
+    # The lesson-shape lines belong to the clock, which only runs with the deck.
+    lesson_shape = (
+        "- Explain when needed, ask one question, then wait.\n"
+        "- The target is five to seven minutes, not a fixed number of questions.\n"
+        if GEMINI_LIVE_TOOLS_ENABLED
+        else ""
+    )
     opening_rule = _TOOL_OPENING if GEMINI_LIVE_TOOLS_ENABLED else _NO_TOOL_OPENING
     return f"""
 
@@ -1152,9 +1162,7 @@ Conversation:
 - Listen to the whole utterance and respond conversationally.
 - The caller may interrupt you. Stop immediately and listen when they do.
 - Ignore silence, breaths, clicks, coughs, line noise, and random non-speech.
-- Explain when needed, ask one question, then wait.
-- The target is five to seven minutes, not a fixed number of questions.
-{tool_rules}"""
+{lesson_shape}{tool_rules}"""
 
 
 def _write_wav(path: Path, pcm: bytes) -> None:
@@ -1601,14 +1609,20 @@ class GeminiLiveCallRunner:
         raw_user = " ".join(self.input_transcript.split())
         assistant = " ".join(self.output_transcript.split())
         elapsed_seconds = int(time.monotonic() - self.call_started_at)
-        followup_enforcement = registered_followup_enforcement(
+        followup_enforcement = None if not GEMINI_LIVE_TOOLS_ENABLED else registered_followup_enforcement(
             self.turn_tool_events,
             assistant,
             raw_user,
             elapsed_seconds,
         )
+        # Both of these shove text into the middle of the lesson, and both belong
+        # to the deck: the wrap blocker exists to defend a lesson clock that is
+        # not running, and follow-up enforcement to defend a registered question
+        # that was never registered. In the hackathon shape Sabi runs on the
+        # prompt and her own judgement, so neither one speaks.
         early_wrap_blocked = bool(
-            assistant
+            GEMINI_LIVE_TOOLS_ENABLED
+            and assistant
             and not caller_requested_stop(raw_user)
             and is_early_wrap_text(assistant, elapsed_seconds)
             and self.early_wrap_repairs < 3

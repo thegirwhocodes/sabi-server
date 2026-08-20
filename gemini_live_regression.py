@@ -462,9 +462,11 @@ def main() -> int:
         ok &= check(
             "session_context_tells_a_toolless_sabi_to_mark_what_she_asked",
             "one continuous" in constraints
-            and "five to seven minutes" in constraints
-            and "make up your own questions" in constraints
-            and "no list to work through" in constraints
+            and "Make the questions up as you go" in constraints
+            and "no list to work" in constraints
+            and "Every question is about money" in constraints
+            and "Work in tens" in constraints
+            and "five to seven minutes" not in constraints
             and "Mark the answer to the question you actually asked" in constraints
             and "get_next_numeracy_problem" not in constraints
             and "grade_numeric_answer" not in constraints,

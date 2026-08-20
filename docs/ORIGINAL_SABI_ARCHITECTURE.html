@@ -1,0 +1,461 @@
+<title>Sabi Before Gemini</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Lexend:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ink:#0E0E0E; --char:#1C1A17; --ivory:#F7F1E4; --gold:#CBA868; --bronze:#9A7536; --clay:#C2643F;
+  --bg:var(--ivory); --surface:#FFFBF2; --surface2:#F2EADA; --line:#DCCFB4;
+  --text:#1C1A17; --dim:#5E574B; --accent:var(--bronze); --accentQuiet:#8A6E33; --mark:var(--clay);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:var(--ink); --surface:#151412; --surface2:#1C1A17; --line:#2E2A23;
+  --text:#EDE5D6; --dim:#9B9282; --accent:var(--gold); --accentQuiet:#A8905E; --mark:#D9805C;
+}}
+:root[data-theme="dark"]{
+  --bg:var(--ink); --surface:#151412; --surface2:#1C1A17; --line:#2E2A23;
+  --text:#EDE5D6; --dim:#9B9282; --accent:var(--gold); --accentQuiet:#A8905E; --mark:#D9805C;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:Lexend,"Helvetica Neue",Arial,sans-serif;font-size:16.5px;line-height:1.62;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:clamp(28px,5vw,64px) clamp(18px,4vw,40px) 96px}
+h1,h2,h3,.disp{font-family:"Cormorant Garamond",Iowan Old Style,Palatino,Georgia,serif;font-weight:600;
+  text-wrap:balance;letter-spacing:.005em}
+h1{font-size:clamp(2.6rem,6.4vw,4.1rem);line-height:1.02;margin:.1em 0 .16em;color:var(--text)}
+h2{font-size:clamp(1.75rem,3.5vw,2.35rem);line-height:1.12;margin:0 0 .1em}
+h3{font-size:1.32rem;line-height:1.2;margin:0 0 .1em}
+p{margin:0}
+code,.fp,.num{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.86em;color:var(--accent);background:var(--surface2);
+  padding:.1em .38em;border-radius:3px;word-break:break-word}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.19em;color:var(--accentQuiet);
+  font-family:Lexend,sans-serif;font-weight:500}
+header.top{border-bottom:1px solid var(--line);padding-bottom:34px;margin-bottom:46px;
+  display:flex;flex-direction:column;gap:16px}
+.sub{font-size:1.1rem;color:var(--dim);max-width:64ch}
+.meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+.chip{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--line);
+  color:var(--dim);padding:.3em .7em;border-radius:999px;background:var(--surface)}
+.chip.now{border-color:var(--accent);color:var(--accent)}
+main{display:flex;flex-direction:column;gap:60px}
+section.band{display:flex;flex-direction:column;gap:22px}
+.lede{color:var(--dim);max-width:70ch}
+/* generation blocks */
+.gen{background:var(--surface);border:1px solid var(--line);border-radius:2px;
+  padding:clamp(20px,3vw,30px);display:flex;flex-direction:column;gap:18px}
+.genhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;justify-content:space-between}
+.date{font-family:"IBM Plex Mono",monospace;font-size:.78rem;color:var(--accentQuiet);
+  letter-spacing:.04em;white-space:nowrap}
+/* the signal path */
+.path{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:2px 0 0}
+.hop{flex:1 1 128px;min-width:118px;border:1px solid var(--line);border-left-width:0;
+  background:var(--surface2);padding:11px 12px;display:flex;flex-direction:column;gap:4px}
+.hop:first-child{border-left-width:1px}
+.hop .who{font-size:.63rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accentQuiet)}
+.hop .what{font-size:.9rem;line-height:1.32;font-weight:500}
+.hop .det{font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--dim);line-height:1.4}
+.hop.owner{background:var(--bg);border-color:var(--accent);box-shadow:inset 0 2px 0 var(--accent)}
+.hop.gone{opacity:.62}
+@media(max-width:640px){.hop{border-left-width:1px;border-top-width:0}
+  .hop:first-child{border-top-width:1px}}
+/* tables */
+.tw{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:520px}
+th{text-align:left;font-weight:500;font-size:.68rem;text-transform:uppercase;letter-spacing:.13em;
+  color:var(--accentQuiet);padding:11px 14px;border-bottom:1px solid var(--line);
+  background:var(--surface2);white-space:nowrap}
+td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+.fp{color:var(--accent);white-space:nowrap;font-size:.82rem}
+.num{font-variant-numeric:tabular-nums;text-align:right;color:var(--dim);font-size:.8rem;
+  white-space:nowrap}
+th.num{text-align:right}
+.ds{color:var(--dim);font-size:.82rem;margin-top:3px;font-style:italic}
+.grp{display:flex;flex-direction:column;gap:12px}
+/* call sequence */
+ol.seq{list-style:none;counter-reset:s;padding:0;margin:0;display:flex;flex-direction:column;gap:0}
+ol.seq li{counter-increment:s;display:grid;grid-template-columns:38px 1fr;gap:16px;
+  padding:15px 0;border-top:1px solid var(--line)}
+ol.seq li:first-child{border-top:0}
+ol.seq li::before{content:counter(s,decimal-leading-zero);font-family:"IBM Plex Mono",monospace;
+  font-size:.76rem;color:var(--accentQuiet);padding-top:3px}
+ol.seq h4{margin:0 0 3px;font-size:.98rem;font-weight:600;font-family:Lexend,sans-serif}
+ol.seq p{color:var(--dim);font-size:.9rem}
+.note{border-left:2px solid var(--mark);background:var(--surface);padding:14px 18px;
+  color:var(--dim);font-size:.92rem}
+.note strong{color:var(--text)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:18px}
+.card{background:var(--surface);border:1px solid var(--line);padding:18px 20px;
+  display:flex;flex-direction:column;gap:7px}
+.card h4{margin:0;font-size:.95rem;font-family:Lexend,sans-serif;font-weight:600}
+.card p{font-size:.88rem;color:var(--dim)}
+ul.plain{margin:0;padding-left:1.05em;color:var(--dim);font-size:.9rem;
+  display:flex;flex-direction:column;gap:5px}
+ul.cols{margin:0;padding:0;list-style:none;columns:2;column-gap:26px;font-size:.84rem}
+ul.cols li{break-inside:avoid;padding:2.5px 0}
+@media(max-width:560px){ul.cols{columns:1}}
+footer{margin-top:76px;padding-top:24px;border-top:1px solid var(--line);
+  color:var(--dim);font-size:.82rem;display:flex;flex-direction:column;gap:6px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(prefers-reduced-motion:no-preference){.gen,.card{transition:border-color .2s ease}}
+</style>
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow">Education for Equality · architecture record</span>
+  <h1>Sabi before Gemini</h1>
+  <p class="sub">Every system that made the phone tutor work between February and August 2026 — three
+  generations of it — read out of the repository and off the server, file by file.</p>
+  <div class="meta">
+    <span class="chip">Read 20 Aug 2026</span>
+    <span class="chip">sabi-server · 90 modules · 37,639 lines</span>
+    <span class="chip">curriculum-app · 62 lib modules</span>
+    <span class="chip now">All of it still in the tree</span>
+  </div>
+</header>
+
+<main>
+
+<section class="band">
+  <span class="eyebrow">What this is</span>
+  <h2>Three different Sabis wore the same name</h2>
+  <p class="lede">They are not versions of one architecture. Each generation moved the hardest job —
+  deciding when a child has finished speaking — into a different box. That single choice is what
+  changed the voice, the cost, the latency and the failure modes each time. The owner of that job is
+  marked in gold on each path below.</p>
+
+  <div class="gen">
+    <div class="genhead">
+      <h3>The hackathon Sabi</h3>
+      <span class="date">FEB 2026 · MIT Africa Business Challenge · 2nd place</span>
+    </div>
+    <p class="lede">ElevenLabs owned the whole conversation. Twilio's voice URL pointed straight at
+    <code>api.us.elevenlabs.io/twilio/inbound_call</code>, so the call never touched our servers as
+    audio — only as text, through a Custom LLM webhook. This is the one whose voice you keep asking
+    for: <strong>Bukola</strong>, <code>oC2pCZZWEDRe6lmZpaaw</code>, Flash, stability 0.28,
+    similarity 0.70, speed 1.</p>
+    <div class="path"><div class="hop "><span class="who">child</span><span class="what">Dials the line</span><span class="det">+1 715 312 2345</span></div><div class="hop "><span class="who">twilio</span><span class="what">SIP / number</span><span class="det">voice URL →&lt;br&gt;ElevenLabs</span></div><div class="hop owner"><span class="who">elevenlabs</span><span class="what">Hears, decides when the turn ends, and speaks</span><span class="det">agent_5701kp7d…&lt;br&gt;voice: Bukola</span></div><div class="hop "><span class="who">next.js</span><span class="what">Custom LLM webhook</span><span class="det">/api/sabi/voice/llm</span></div><div class="hop "><span class="who">claude</span><span class="what">Writes the line</span><span class="det">anthropic sdk</span></div><div class="hop "><span class="who">supabase</span><span class="what">Who is this child</span><span class="det">sabi_students</span></div></div>
+    <p class="lede">Because ElevenLabs held the microphone, we never wrote a line of turn-taking code
+    — and never could tune it either. Agent settings: English, 8-minute maximum call, turn eagerness
+    medium-low so a child gets to finish. The prompt is frozen in two places so later curriculum work
+    can't quietly edit it: <code>lib/voice/sabi-hackathon-runtime.ts</code> in the web app and
+    <code>original_sabi_prompt.py</code> on the server.</p>
+  </div>
+
+  <div class="gen">
+    <div class="genhead">
+      <h3>The self-hosted rebuild</h3>
+      <span class="date">MAR 2026 · first commit 3b51788, 10 March</span>
+    </div>
+    <p class="lede">Everything moved onto one Hetzner box to kill the per-minute cost and make the
+    child pay nothing. Asterisk arrived on 13 March specifically for flash callback — the child rings,
+    hangs up, and Sabi rings back. The tutor ran as a FastAGI application: record a turn, transcribe
+    it, think, speak, repeat.</p>
+    <div class="path"><div class="hop "><span class="who">child</span><span class="what">Rings and hangs up</span><span class="det">₦0 to the child</span></div><div class="hop "><span class="who">asterisk</span><span class="what">Flash callback, then dials back</span><span class="det">sabi-flash →&lt;br&gt;ami_originate</span></div><div class="hop owner"><span class="who">sabi-server</span><span class="what">Records the turn, then runs it</span><span class="det">FastAGI :4573</span></div><div class="hop "><span class="who">groq / whisper</span><span class="what">Speech to text</span><span class="det">stt.py</span></div><div class="hop "><span class="who">claude haiku</span><span class="what">The reply</span><span class="det">llm.py</span></div><div class="hop "><span class="who">yarngpt / 11labs</span><span class="what">Speaks it back</span><span class="det">tts_and_convert</span></div></div>
+    <p class="lede">The TTS provider changed twice inside a week: Afro-TTS at first, replaced by
+    Chatterbox Turbo on 17 March with an emotion pipeline. On 3 May the whole loop was rebuilt for
+    latency — Cerebras in front of Claude, Groq for speech, streaming TTS.</p>
+  </div>
+
+  <div class="gen">
+    <div class="genhead">
+      <h3>The realtime lane</h3>
+      <span class="date">JUN 2026 · voice_realtime.py, 22 June · still serving everyone but Naomi</span>
+    </div>
+    <p class="lede">Record-then-think is not a conversation, so the FastAGI loop was replaced by a
+    full-duplex AudioSocket stream and Sabi finally got barge-in. This is the mature old Sabi, and it
+    is <em>still what every caller reaches</em> unless their number is on the Gemini allowlist.</p>
+    <div class="path"><div class="hop "><span class="who">child</span><span class="what">On the line</span><span class="det">8 kHz μ-law</span></div><div class="hop "><span class="who">asterisk</span><span class="what">AudioSocket</span><span class="det">sabi:9020</span></div><div class="hop owner"><span class="who">RealtimeCall</span><span class="what">Owns listening, barge-in, turn end</span><span class="det">voice_realtime.py</span></div><div class="hop "><span class="who">stt.py</span><span class="what">Hears the answer</span><span class="det">consensus,&lt;br&gt;VAD pre-gate</span></div><div class="hop "><span class="who">llm.py</span><span class="what">Cerebras → Claude → Groq → Ollama</span><span class="det">guardrails here</span></div><div class="hop "><span class="who">tts chain</span><span class="what">ElevenLabs → Chatterbox → YarnGPT</span><span class="det">8 kHz WAV back</span></div></div>
+    <p class="lede">In one week of June this lane gained shared-phone identity, per-skill scaffold
+    ladders, literacy and numeracy routing, the open-ended voice feedback note, call QA sidecars and
+    protected review endpoints — the commits are all dated 22 June.</p>
+  </div>
+</section>
+
+<section class="band">
+  <span class="eyebrow">The call, stage by stage</span>
+  <h2>What actually happens when the phone rings</h2>
+  <p class="lede">The realtime lane, traced through the code that runs it. Every path and port here
+  was read from <code>asterisk/extensions.conf</code> and <code>main.py</code> today.</p>
+  <ol class="seq">
+    <li><div><h4>The trunk delivers the call</h4><p>A SIP trunk terminates on the box —
+      <code>5060/udp</code> for signalling, <code>10000-10100/udp</code> for the audio itself. Two
+      endpoints are configured, <code>twilio</code> and <code>africastalking</code>; which one dials
+      out is chosen by <code>SABI_SIP_PROVIDER</code>.</p></div></li>
+    <li><div><h4>The dialplan asks the server what to do</h4><p>Contexts <code>[from-at]</code> and
+      <code>[from-twilio]</code> both call <code>POST /asterisk/inbound-route</code> with the caller's
+      number before doing anything else. The server answers with a route name.</p></div></li>
+    <li><div><h4>Flash callback, so the child never pays</h4><p><code>[sabi-flash]</code> hangs the
+      inbound leg up after a couple of seconds and fires <code>POST /asterisk/flash</code>, which
+      queues an AMI originate. Four seconds later the phone rings back. A 45-second cooldown absorbs
+      accidental double dials, and retries are off — one attempt only.</p></div></li>
+    <li><div><h4>The lesson leg opens a socket</h4><p><code>[sabi-inbound]</code> registers the call
+      with <code>POST /asterisk/audiosocket/register</code>, answers, then hands the channel to
+      <code>AudioSocket(uuid, sabi:9020)</code>. From here Asterisk is just a pipe.</p></div></li>
+    <li><div><h4>RealtimeCall takes over</h4><p>Raw 8 kHz frames arrive in
+      <code>voice_realtime.py</code>. The class reads packets, watches energy and Silero for real
+      speech, plays audio while still listening so barge-in works, and decides when a turn ended.</p></div></li>
+    <li><div><h4>The turn is transcribed</h4><p><code>transcribe_pcm</code> routes to whichever
+      recogniser the lane is configured for, with the lesson's own context as a hint — number words
+      when a number is expected, name handling when a name is.</p></div></li>
+    <li><div><h4>Unclear audio is never marked wrong</h4><p>Carrier voicemail, hallucinated Whisper
+      sentences and silence are all detected and answered with a repeat request. Two failed number
+      attempts fall back to the keypad: type the digits and press hash.</p></div></li>
+    <li><div><h4>Sabi thinks</h4><p><code>llm.py</code> runs the provider chain and is the only place
+      the deterministic guardrails are applied — input checked before the model sees it, output
+      checked before the child hears it.</p></div></li>
+    <li><div><h4>Sabi speaks</h4><p><code>tts_and_convert</code> tries the configured primary and
+      falls through the others, converts to 8 kHz WAV, and the frames go back down the same socket.</p></div></li>
+    <li><div><h4>The answer becomes evidence</h4><p>The turn is graded deterministically where it is
+      numeric, written into the learner's state, and persisted with a per-turn sidecar recording
+      which engine heard it and how long every stage took.</p></div></li>
+    <li><div><h4>The call ends and reports itself</h4><p>Asterisk's <code>h</code> extension posts to
+      <code>/asterisk/hangup</code> with cause, duration and billsec. A teacher's note is written.
+      The recordings stay on the shared audio volume for review.</p></div></li>
+  </ol>
+  <p class="note"><strong>Feedback, any time.</strong> The child or tester can press the hotkey or
+  simply say "I want to leave feedback". Sabi stops, plays a go-cue beep, records the note, and files
+  it against that exact call for review — built 22 June, hardened 29 June with a longer wait window,
+  a retry and a DTMF skip.</p>
+</section>
+
+<section class="band">
+  <span class="eyebrow">Every runtime module</span>
+  <h2>The server, grouped by the job it does</h2>
+  <p class="lede">Thirty-nine runtime modules. Line counts are from the working tree today; the
+  italic line under each description is the module's own docstring, not my summary.</p>
+  <section class="grp"><h3>The switchboard</h3><p class="lede">Everything that answers a ringing phone and hands the audio to a lesson.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">main.py</td><td class="num">1268</td><td>FastAPI app, model loading at boot, the three AudioSocket listeners plus FastAGI, every /asterisk/* and /admin/* route, and the AMI originate that makes Sabi dial out.<div class="ds">Sabi Voice AI Server</div></td></tr>
+<tr><td class="fp">voice_realtime.py</td><td class="num">2874</td><td>The AudioSocket lesson itself — the whole turn loop lives in the RealtimeCall class.<div class="ds">Realtime AudioSocket handler for Sabi phone lessons.</div></td></tr>
+<tr><td class="fp">voice_asterisk.py</td><td class="num">599</td><td>The older FastAGI handler, still running on 4573 as a fallback, and the shared TTS provider chain (tts_and_convert).<div class="ds">FastAGI handler for Sabi voice lessons over Asterisk.</div></td></tr>
+<tr><td class="fp">voice.py</td><td class="num">337</td><td>Africa&#x27;s Talking voice webhooks — the record-and-post-back XML path.<div class="ds">Africa&#x27;s Talking voice webhook handlers.</div></td></tr>
+<tr><td class="fp">voice_twilio.py</td><td class="num">292</td><td>Twilio voice webhooks — the TwiML record-and-post-back path, with ElevenLabs Bukola settings matched to the dashboard.<div class="ds">Twilio voice webhook handlers for Sabi.</div></td></tr>
+<tr><td class="fp">phone_utils.py</td><td class="num">136</td><td>Turns whatever the carrier hands us into one canonical number, and decides which lane a number belongs to.<div class="ds">Phone-number normalization for Sabi learner identity.</div></td></tr>
+<tr><td class="fp">secret_loader.py</td><td class="num">25</td><td>Reads Docker secrets out of /run/secrets so keys never sit in the image.<div class="ds">Secrets loader for Sabi server.</div></td></tr></tbody></table></div></section><section class="grp"><h3>Hearing</h3><p class="lede">Getting a Nigerian child&#x27;s voice, on an 8 kHz line, into text that can be graded.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">stt.py</td><td class="num">1835</td><td>Every recogniser Sabi has ever used, the routing between them, the Silero pre-gate, number-word biasing, and the parallel-consensus path.<div class="ds">Speech-to-Text for Sabi.</div></td></tr>
+<tr><td class="fp">turn_taking.py</td><td class="num">349</td><td>Deciding when the child has actually finished speaking — Silero speech gate, echo comparator, Smart Turn endpointing.<div class="ds">Self-hosted conversational turn detection for Sabi phone calls.</div></td></tr>
+<tr><td class="fp">audio_cleaner.py</td><td class="num">106</td><td>Optional DeepFilterNet v3 front end. Fails open, so a bad clean never costs a turn.<div class="ds">Optional, fail-open DeepFilterNet v3 front end for Sabi phone STT.</div></td></tr>
+<tr><td class="fp">transcript_normalizer.py</td><td class="num">306</td><td>Conservative cleanup of a phone transcript before anything grades it.<div class="ds">Conservative cleanup for phone STT transcripts before lesson grading.</div></td></tr>
+<tr><td class="fp">answer_matcher.py</td><td class="num">362</td><td>Fuzzy matching for what children actually say, including the mishears observed on real calls.<div class="ds">Fuzzy answer matching for children&#x27;s spoken responses.</div></td></tr>
+<tr><td class="fp">normalize_money_for_speech.py</td><td class="num">50</td><td>Puts the amount before the word — &#x27;thirty naira&#x27;, never &#x27;naira thirty&#x27;.<div class="ds">Put currency BEFORE &quot;naira&quot; so TTS reads naturally (&quot;thirty naira&quot;),</div></td></tr></tbody></table></div></section><section class="grp"><h3>Speaking</h3><p class="lede">Sabi&#x27;s voice, and the chain that survives a provider going down.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">tts.py</td><td class="num">88</td><td>The YarnGPT client — 16 Nigerian voices, wura the default.<div class="ds">Text-to-Speech using YarnGPT API (Nigerian voices).</div></td></tr></tbody></table></div></section><section class="grp"><h3>Thinking</h3><p class="lede">The tutor&#x27;s brain on the pre-Gemini lane.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">llm.py</td><td class="num">869</td><td>The provider chain (Cerebras to Claude to Groq to Ollama), prompt assembly, streaming, and the only place the deterministic guardrails are called.<div class="ds">LLM interface for Sabi teaching AI.</div></td></tr>
+<tr><td class="fp">original_sabi_prompt.py</td><td class="num">136</td><td>The hackathon prompt, frozen byte-for-byte so later curriculum work can never quietly edit the phone tutor.<div class="ds">Frozen prompt from the original ElevenLabs/Twilio hackathon Sabi.</div></td></tr></tbody></table></div></section><section class="grp"><h3>Teaching</h3><p class="lede">What Sabi decides to teach next, and how an answer becomes evidence.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">curriculum_path.py</td><td class="num">832</td><td>The deterministic lesson path — what comes next, in what order, for this child.<div class="ds">Deterministic curriculum path helpers for Sabi phone lessons.</div></td></tr>
+<tr><td class="fp">diagnostic_flow.py</td><td class="num">927</td><td>TaRL-style routing: find the level the child is actually at before teaching at it.<div class="ds">TaRL-style diagnostic routing for Sabi phone lessons.</div></td></tr>
+<tr><td class="fp">learning_state.py</td><td class="num">1149</td><td>The state machine — skills, streaks, scaffold ladders, course rotation, name extraction, session analysis.<div class="ds">Deterministic learning-state updates for Sabi phone lessons.</div></td></tr>
+<tr><td class="fp">curriculum_mastery.py</td><td class="num">173</td><td>Turning raw session evidence into curriculum-aligned mastery.<div class="ds">Curriculum-aligned mastery classification for Sabi.</div></td></tr>
+<tr><td class="fp">numeric_grading.py</td><td class="num">394</td><td>The deterministic guard on numeric answers, so a number is never graded by vibes.<div class="ds">Deterministic guard for simple numeric answer grading.</div></td></tr>
+<tr><td class="fp">teacher_notes.py</td><td class="num">329</td><td>The end-of-call note a human can actually read.<div class="ds">End-of-call teacher&#x27;s note for Sabi.</div></td></tr>
+<tr><td class="fp">learning_path_tree.py</td><td class="num">464</td><td>The branching, expand-on-click learning tree an educator reads in the console.<div class="ds">Educator branching learning-path tree for Sabi (Prezi-style expand-on-click).</div></td></tr></tbody></table></div></section><section class="grp"><h3>Knowing who called</h3><p class="lede">One phone, several children — the part nobody else solves.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">memory.py</td><td class="num">1943</td><td>Student records, session history, shared-phone identity, and every read and write to Supabase.<div class="ds">Student memory management for Sabi voice server.</div></td></tr></tbody></table></div></section><section class="grp"><h3>Safety</h3><p class="lede">The layer that has to hold when a child says something serious.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">guardrails.py</td><td class="num">333</td><td>Crisis detection, the fixed safe responses, and the Nigerian helpline numbers. A Python mirror of the web app&#x27;s guardrails.ts.<div class="ds">Sabi Safety Guardrails (Python mirror of curriculum-app/lib/voice/guardrails.ts)</div></td></tr>
+<tr><td class="fp">emergency_alert.py</td><td class="num">228</td><td>Best-effort alerting when a safeguarding incident is raised.<div class="ds">Best-effort emergency alerts for Sabi phone safeguarding incidents.</div></td></tr>
+<tr><td class="fp">sentry_setup.py</td><td class="num">127</td><td>Error monitoring with PII scrubbing written to NDPA and COPPA.<div class="ds">Sentry initialization for sabi-server.</div></td></tr></tbody></table></div></section><section class="grp"><h3>Review and evidence</h3><p class="lede">How a call becomes something a funder or a coordinator can look at.</p><div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it is for</th></tr></thead><tbody><tr><td class="fp">admin_review.py</td><td class="num">3662</td><td>The whole browser console — calls, learners, turns, audio, feedback, concierge and curriculum tabs. The single largest module in the codebase.<div class="ds">Protected browser review console for Sabi learner/call QA.</div></td></tr>
+<tr><td class="fp">call_admin.py</td><td class="num">764</td><td>The per-call sidecar: what was heard, by which engine, how long each stage took, review status.<div class="ds">Call-quality review helpers for Sabi phone sessions.</div></td></tr>
+<tr><td class="fp">feedback_admin.py</td><td class="num">149</td><td>Reading the open-ended voice notes children and testers leave.<div class="ds">Admin helpers for reviewing open-ended Sabi tester feedback notes.</div></td></tr>
+<tr><td class="fp">curriculum_review.py</td><td class="num">307</td><td>The admin-facing curriculum map of where each learner is.<div class="ds">Admin-facing curriculum map for Sabi learner progress review.</div></td></tr>
+<tr><td class="fp">pilot_evidence.py</td><td class="num">944</td><td>Cohort-level evidence for the pilot.<div class="ds">Pilot-proof cohort evidence for Sabi (Layer C).</div></td></tr>
+<tr><td class="fp">pilot_research_design.py</td><td class="num">1295</td><td>The publishable-grade research protocol, in code.<div class="ds">Publishable-grade pilot research protocol for Sabi.</div></td></tr>
+<tr><td class="fp">mastery_probe.py</td><td class="num">106</td><td>Monthly mastery probes — the independent check on whether learning stuck.<div class="ds">Monthly mastery probe scoring for Sabi pilot evidence (Layer C).</div></td></tr>
+<tr><td class="fp">launch_gates.py</td><td class="num">285</td><td>The evidence report that says whether a change is safe to launch.<div class="ds">Launch-gate evidence report for Sabi pre-pilot changes.</div></td></tr>
+<tr><td class="fp">admin_data_cleanup.py</td><td class="num">278</td><td>Auditing and safely cleaning learner identity rows.<div class="ds">Audit and safely clean Sabi learner identity rows in Supabase.</div></td></tr></tbody></table></div></section>
+</section>
+
+<section class="band">
+  <span class="eyebrow">The other half</span>
+  <h2>The web app was a phone system too</h2>
+  <p class="lede">Before the server existed, <code>curriculum-app</code> ran the whole tutor from
+  Next.js API routes — and those routes are still there. Three complete telephony paths live in it:
+  the ElevenLabs Custom LLM webhook, a pure TwiML record-and-respond loop, and an Africa's Talking
+  record-and-respond loop.</p>
+  <div class="two">
+    <div class="card"><h4>ElevenLabs Custom LLM</h4>
+      <p><code>/api/sabi/voice/llm</code> — receives OpenAI-format messages from the agent, digs the
+      caller ID out of the injected <code>{{system__caller_id}}</code> line, loads that child's
+      memory, calls Claude, streams back in OpenAI format. This is the seam that gave the hackathon
+      Sabi our curriculum and her memory while ElevenLabs kept her voice.</p></div>
+    <div class="card"><h4>Twilio TwiML loop</h4>
+      <p><code>/voice/incoming</code> greets and gathers, <code>/voice/respond</code> handles each
+      captured utterance, <code>/voice/status</code> closes the call — saving the conversation,
+      analysing it with Claude, updating the child's stats and texting a summary plus a practice
+      question home.</p></div>
+    <div class="card"><h4>Africa's Talking loop</h4>
+      <p><code>/at/incoming</code> answers and records, <code>/at/recording</code> downloads the clip,
+      transcribes it on Groq Whisper and replies, <code>/at/events</code> mirrors the Twilio status
+      route for AT's event format.</p></div>
+    <div class="card"><h4>Browser rehearsal</h4>
+      <p><code>/api/sabi/voice-chat</code> runs the identical pipeline — Groq Whisper, Claude Haiku,
+      YarnGPT or ElevenLabs — against a microphone in a browser tab, so a lesson can be tested
+      without spending a call.</p></div>
+  </div>
+  <div class="grp"><h3>Voice modules in the web app</h3>
+    <div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it holds</th></tr></thead>
+    <tbody><tr><td class="fp">lib/voice/answer-matcher.ts</td><td class="num">123</td><td>Nigerian-English numeral mishear normalizer for Whisper STT output.</td></tr>
+<tr><td class="fp">lib/voice/at-xml.ts</td><td class="num">132</td><td>Africa&#x27;s Talking Voice XML response builders.</td></tr>
+<tr><td class="fp">lib/voice/audio-storage.ts</td><td class="num">116</td><td>Supabase Storage for voice audio files.</td></tr>
+<tr><td class="fp">lib/voice/call-request.ts</td><td class="num">214</td><td>exports CallRequestOutcome, toE164, requestSabiCall, callRequestReply</td></tr>
+<tr><td class="fp">lib/voice/call-state.ts</td><td class="num">162</td><td>exports getCallState, createCallState, addMessage, setCallStudentId, clearCallState</td></tr>
+<tr><td class="fp">lib/voice/emergency-alert.ts</td><td class="num">235</td><td>Emergency alert dispatch — &quot;it CANNOT fail, so I always see it.&quot;</td></tr>
+<tr><td class="fp">lib/voice/guardrails.ts</td><td class="num">517</td><td>Sabi Safety Guardrails</td></tr>
+<tr><td class="fp">lib/voice/inbound-intent.ts</td><td class="num">45</td><td>What a caregiver or tester meant by the message they just sent.</td></tr>
+<tr><td class="fp">lib/voice/normalize-money-for-speech.ts</td><td class="num">30</td><td>Put currency amounts BEFORE &quot;naira&quot; so TTS reads naturally (&quot;thirty naira&quot;)</td></tr>
+<tr><td class="fp">lib/voice/numeric-grading.ts</td><td class="num">182</td><td>exports extractNumbers, buildNumericGradingHint</td></tr>
+<tr><td class="fp">lib/voice/phone-normalization.ts</td><td class="num">110</td><td>exports normalizePhoneNumber, phoneLookupVariants, looksLikePhoneSystemTranscript, normalizeChildNameForIdentity, sanitizeChildNameForStorage</td></tr>
+<tr><td class="fp">lib/voice/pii.ts</td><td class="num">37</td><td>PII redaction for child data.</td></tr>
+<tr><td class="fp">lib/voice/sabi-hackathon-runtime.ts</td><td class="num">184</td><td>Frozen final-hackathon Sabi phone prompt.</td></tr>
+<tr><td class="fp">lib/voice/sabi-shared.ts</td><td class="num">755</td><td>Shared Sabi tutor logic used by both web chat and voice call routes.</td></tr>
+<tr><td class="fp">lib/voice/safeguarding.ts</td><td class="num">98</td><td>Sabi safeguarding — the async &quot;no real-time human&quot; escalation path + PII redaction.</td></tr>
+<tr><td class="fp">lib/voice/session-persistence.ts</td><td class="num">96</td><td>exports insertSabiSession, updateSabiStudentProgress</td></tr>
+<tr><td class="fp">lib/voice/sms.ts</td><td class="num">392</td><td>exports SmsLogPayload, logSMS, isSMSOptedOut, sendSMS, SmsProviderStatus</td></tr>
+<tr><td class="fp">lib/voice/stt.ts</td><td class="num">111</td><td>Groq Whisper STT client.</td></tr>
+<tr><td class="fp">lib/voice/tts-client.ts</td><td class="num">140</td><td>TTS client — routes to ElevenLabs (primary, Impact Program) → YarnGPT.</td></tr>
+<tr><td class="fp">lib/voice/twilio-audio.ts</td><td class="num">69</td><td>exports createTwilioAudioGatherResponse, createTwilioAudioEndResponse</td></tr>
+<tr><td class="fp">lib/voice/twiml.ts</td><td class="num">185</td><td>exports createGatherResponse, createGatherPlayResponse, createEndCallResponse, createPlayEndCallResponse, createSayResponse</td></tr>
+<tr><td class="fp">lib/voice/yarngpt-client.ts</td><td class="num">65</td><td>YarnGPT TTS client — Nigerian voices, free (beta).</td></tr></tbody></table></div></div>
+  <div class="grp"><h3>Everything else in <code>lib/</code></h3>
+    <div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it holds</th></tr></thead>
+    <tbody><tr><td class="fp">lib/advisor-board.ts</td><td class="num">192</td><td>exports AdvisorStatus, AdvisorRole, AdvisorProfile, AdvisorTask, AdvisorRuntimeState</td></tr>
+<tr><td class="fp">lib/auth/browser.ts</td><td class="num">16</td><td>exports hasSupabaseBrowserConfig, createBrowserSupabaseClient</td></tr>
+<tr><td class="fp">lib/auth/learner-onboarding.ts</td><td class="num">20</td><td>exports PENDING_LEARNER_PROFILE_KEY, LearnerMetadataValue, LearnerMetadata, normalizeLearnerMetadata</td></tr>
+<tr><td class="fp">lib/auth/messages.ts</td><td class="num">103</td><td>exports AuthErrorContext, authErrorMessage</td></tr>
+<tr><td class="fp">lib/auth/server.ts</td><td class="num">43</td><td>exports hasSupabaseServerConfig, createServerSupabaseClient, getCurrentUser</td></tr>
+<tr><td class="fp">lib/auth/url.ts</td><td class="num">30</td><td>exports getAppOrigin, safeRedirectPath, buildAuthCallbackUrl</td></tr>
+<tr><td class="fp">lib/auth/useCurrentUser.ts</td><td class="num">41</td><td>exports useCurrentUser</td></tr>
+<tr><td class="fp">lib/board-access.ts</td><td class="num">106</td><td>exports BoardUserLike, isBoardMemberUser, boardUserDisplayName, boardAccessLabel</td></tr>
+<tr><td class="fp">lib/cambridge-grade4-curriculum.ts</td><td class="num">2110</td><td>Cambridge Primary Stage 4 (Grade 4) Curriculum</td></tr>
+<tr><td class="fp">lib/curriculum.ts</td><td class="num">411</td><td>Curriculum data structure for K3/3rd Grade pilot</td></tr>
+<tr><td class="fp">lib/database.types.ts</td><td class="num">207</td><td>exports Json, Database, Grade, Subject, Unit</td></tr>
+<tr><td class="fp">lib/email/resend.ts</td><td class="num">18</td><td>exports getResendClient, getDefaultFromEmail</td></tr>
+<tr><td class="fp">lib/foundational-literacy.ts</td><td class="num">4053</td><td>exports foundationalLiteracy</td></tr>
+<tr><td class="fp">lib/foundational-numeracy.ts</td><td class="num">4167</td><td>exports foundationalNumeracy</td></tr>
+<tr><td class="fp">lib/monitoring/alert.ts</td><td class="num">72</td><td>exports AlertSeverity, sendAlert</td></tr>
+<tr><td class="fp">lib/monitoring/report.ts</td><td class="num">26</td><td>exports reportUserFacingError</td></tr>
+<tr><td class="fp">lib/notion/client.ts</td><td class="num">86</td><td>exports notionFetch, NotionEnv, plainText</td></tr>
+<tr><td class="fp">lib/notion/docs.ts</td><td class="num">46</td><td>exports listDocs</td></tr>
+<tr><td class="fp">lib/notion/people.ts</td><td class="num">75</td><td>exports listWorkspaceUsers, findUserByEmail, listTeamRoster</td></tr>
+<tr><td class="fp">lib/notion/task-notifications.ts</td><td class="num">103</td><td>exports AssignmentEmailInput, sendTaskAssignmentEmails</td></tr>
+<tr><td class="fp">lib/notion/task-tokens.ts</td><td class="num">42</td><td>exports SignOffTokenPayload, createSignOffToken, verifySignOffToken</td></tr>
+<tr><td class="fp">lib/notion/tasks.ts</td><td class="num">202</td><td>exports ListTasksOptions, listTasks, getTask, CreateTaskInput, createTask</td></tr>
+<tr><td class="fp">lib/notion/types.ts</td><td class="num">64</td><td>exports TaskStatus, TaskPriority, TaskArea, NotionPerson, TaskRecord</td></tr>
+<tr><td class="fp">lib/parent-sms.ts</td><td class="num">187</td><td>Parent / caregiver texting helper for the Sabi pre-pilot.</td></tr>
+<tr><td class="fp">lib/rag/chunk.ts</td><td class="num">260</td><td>Curriculum chunking for RAG system.</td></tr>
+<tr><td class="fp">lib/rag/retrieval.ts</td><td class="num">154</td><td>RAG retrieval for Sabi voice tutor.</td></tr>
+<tr><td class="fp">lib/sabi-evidence.ts</td><td class="num">105</td><td>exports EvidenceChildSnippet, LearningIndicator, RctAdvancementCard, EvidenceCohort, EvidenceSummary</td></tr>
+<tr><td class="fp">lib/sabi-prepilot.ts</td><td class="num">278</td><td>exports CohortStatus, ConsentStatus, AssentStatus, StageStatus, RiskLevel</td></tr>
+<tr><td class="fp">lib/sabi/is-lesson-wrap-up-message.ts</td><td class="num">54</td><td>Detect when Sabi is closing a lesson (&quot;next time we&#x27;ll learn…&quot;) so we can</td></tr>
+<tr><td class="fp">lib/seo.ts</td><td class="num">211</td><td>Canonical hosts and shared structured data.</td></tr>
+<tr><td class="fp">lib/standards/assessment-blueprints.ts</td><td class="num">289</td><td>exports DiagnosticSubject, DiagnosticItemType, DiagnosticItem, PlacementRule, DiagnosticBlueprint</td></tr>
+<tr><td class="fp">lib/standards/foundational-literacy-crosswalk.ts</td><td class="num">381</td><td>exports foundationalLiteracySkills, foundationalLiteracyModuleCrosswalk, foundationalLiteracyLessonCrosswalk, foundationalLiteracyReviewSampleLessonCr</td></tr>
+<tr><td class="fp">lib/standards/foundational-numeracy-crosswalk.ts</td><td class="num">535</td><td>exports foundationalNumeracySkills, foundationalNumeracyModuleCrosswalk, foundationalNumeracyLessonCrosswalk</td></tr>
+<tr><td class="fp">lib/standards/index.ts</td><td class="num">8</td><td></td></tr>
+<tr><td class="fp">lib/standards/literacy-frameworks.ts</td><td class="num">260</td><td>exports cambridgePrimaryEnglishFoundations, cambridgePrimaryEnglishStage4Objectives, nerdcEnglishFoundations, gpfReadingFoundations, foundationalLiter</td></tr>
+<tr><td class="fp">lib/standards/math-frameworks.ts</td><td class="num">309</td><td>exports cambridgePrimaryMathFoundations, cambridgePrimaryMathStage4Objectives, nerdcBasicMathFoundations, tarlNumeracyLevels, foundationalMathStandard</td></tr>
+<tr><td class="fp">lib/standards/review-queue.ts</td><td class="num">254</td><td>exports ReviewQueueCategory, ReviewQueuePriority, ReviewQueueStatus, StandardsReviewQueueItem, standardsReviewQueue</td></tr>
+<tr><td class="fp">lib/standards/types.ts</td><td class="num">65</td><td>exports AlignmentRelation, DeliveryMode, VoiceSuitability, ExternalStandardRef, MasteryCriterion</td></tr>
+<tr><td class="fp">lib/supabase.ts</td><td class="num">20</td><td>exports supabase, createServerClient</td></tr>
+<tr><td class="fp">lib/useProgress.ts</td><td class="num">101</td><td>exports useProgress</td></tr></tbody></table></div></div>
+  <div class="grp"><h3>Sabi API routes</h3><ul class="cols"><li><code>/advisor-board/sabi-evidence/export</code></li><li><code>/api/monitoring/daily-digest</code></li><li><code>/api/monitoring/robot</code></li><li><code>/api/sabi</code></li><li><code>/api/sabi/at/events</code></li><li><code>/api/sabi/at/incoming</code></li><li><code>/api/sabi/at/recording</code></li><li><code>/api/sabi/direct-call</code></li><li><code>/api/sabi/parents</code></li><li><code>/api/sabi/prepilot</code></li><li><code>/api/sabi/session</code></li><li><code>/api/sabi/sms/incoming</code></li><li><code>/api/sabi/stt</code></li><li><code>/api/sabi/student</code></li><li><code>/api/sabi/tts</code></li><li><code>/api/sabi/voice-chat</code></li><li><code>/api/sabi/voice/incoming</code></li><li><code>/api/sabi/voice/llm</code></li><li><code>/api/sabi/voice/respond</code></li><li><code>/api/sabi/voice/status</code></li><li><code>/api/sabi/whatsincoming</code></li></ul></div>
+</section>
+
+<section class="band">
+  <span class="eyebrow">How it was kept honest</span>
+  <h2>The test estate</h2>
+  <p class="lede">Fifty-one of the ninety server modules are regressions. They are not incidental —
+  they are how a prompt or provider change ships without silently breaking a child's lesson.</p>
+  <div class="grp"><h3>Regression modules</h3>
+    <div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it proves</th></tr></thead>
+    <tbody><tr><td class="fp">admin_direct_call_regression.py</td><td class="num">66</td><td>Focused regression checks for the protected admin direct-call control.</td></tr>
+<tr><td class="fp">admin_identity_regression.py</td><td class="num">71</td><td>Regression checks for learner display identities in admin surfaces.</td></tr>
+<tr><td class="fp">admin_pin_regression.py</td><td class="num">36</td><td>Static regression checks for board PIN admin access.</td></tr>
+<tr><td class="fp">admin_review_regression.py</td><td class="num">285</td><td>Regression checks for the protected Sabi board/admin review console.</td></tr>
+<tr><td class="fp">agi_persistence_regression.py</td><td class="num">155</td><td>Regression check that FastAGI calls persist learner state.</td></tr>
+<tr><td class="fp">answer_matcher_regression.py</td><td class="num">187</td><td>Regression checks for spoken answer matching.</td></tr>
+<tr><td class="fp">audio_cleaner_regression.py</td><td class="num">52</td><td>Regression checks for the fail-open STT cleaning front end.</td></tr>
+<tr><td class="fp">call_admin_regression.py</td><td class="num">328</td><td>Regression checks for Sabi call-quality sidecars.</td></tr>
+<tr><td class="fp">curriculum_mastery_regression.py</td><td class="num">109</td><td>Regression checks for Sabi curriculum-aligned mastery classification.</td></tr>
+<tr><td class="fp">curriculum_review_regression.py</td><td class="num">69</td><td>Regression checks for the admin curriculum review map.</td></tr>
+<tr><td class="fp">curriculum_stt_prompt_regression.py</td><td class="num">88</td><td>Prove every live curriculum row receives Naomi&#x27;s universal Gemini prompt.</td></tr>
+<tr><td class="fp">false_barge_call_regression.py</td><td class="num">104</td><td>Replay the August 7 false-barge incident through the learned speech gate.</td></tr>
+<tr><td class="fp">feedback_admin_regression.py</td><td class="num">137</td><td>Regression checks for protected feedback-note review helpers.</td></tr>
+<tr><td class="fp">feedback_capture_regression.py</td><td class="num">572</td><td>Regression checks for optional end-of-call voice feedback capture.</td></tr>
+<tr><td class="fp">feedback_hotkey_regression.py</td><td class="num">340</td><td>Regression checks for the mid-call feedback hotkey.</td></tr>
+<tr><td class="fp">flash_callback_mode_regression.py</td><td class="num">125</td><td>Regression checks for Sabi flash-callback test routing.</td></tr>
+<tr><td class="fp">gemini_live_regression.py</td><td class="num">563</td><td>Focused regressions for the phone-scoped persistent Gemini Live lane.</td></tr>
+<tr><td class="fp">gemini_stt_config_regression.py</td><td class="num">256</td><td>Regression for the Gemini multimodal STT provider.</td></tr>
+<tr><td class="fp">guardrails_integration_regression.py</td><td class="num">183</td><td>Regression checks for Sabi LLM guardrail integration.</td></tr>
+<tr><td class="fp">intron_route_isolation_regression.py</td><td class="num">217</td><td>Regression: prove the Intron STT test route is fully isolated from production.</td></tr>
+<tr><td class="fp">keypad_fallback_regression.py</td><td class="num">272</td><td>Regression checks for noisy-audio keypad numeric fallback.</td></tr>
+<tr><td class="fp">launch_gates_regression.py</td><td class="num">80</td><td>Regression checks for Sabi launch-gate evidence reporting.</td></tr>
+<tr><td class="fp">learner_continuity_regression.py</td><td class="num">265</td><td>Regression checks for Sabi learner-continuity admin review.</td></tr>
+<tr><td class="fp">learning_path_tree_regression.py</td><td class="num">74</td><td>Regression checks for educator branching learning-path trees.</td></tr>
+<tr><td class="fp">learning_state_regression.py</td><td class="num">1631</td><td>Regression checks for Sabi learner identity and adaptive state.</td></tr>
+<tr><td class="fp">mastery_probe_regression.py</td><td class="num">59</td><td>Regression checks for monthly mastery probe capture (Layer C).</td></tr>
+<tr><td class="fp">numeric_grading_regression.py</td><td class="num">261</td><td>Regression checks for Sabi&#x27;s deterministic numeric answer guard.</td></tr>
+<tr><td class="fp">numeric_sidecar_regression.py</td><td class="num">479</td><td>Regressions for the Gemini Live numeric STT sidecar (shadow mode).</td></tr>
+<tr><td class="fp">onedrive_audio_sync_regression.py</td><td class="num">189</td><td>Offline regression checks for the OneDrive call-audio organizer.</td></tr>
+<tr><td class="fp">original_sabi_lane_regression.py</td><td class="num">164</td><td>Regression checks for the isolated Original Sabi + Gemini comparison lane.</td></tr>
+<tr><td class="fp">parallel_stt_consensus_regression.py</td><td class="num">145</td><td>Offline regression for Groq + local Whisper parallel consensus.</td></tr>
+<tr><td class="fp">phone_runtime_config_regression.py</td><td class="num">360</td><td>Regression checks for Sabi phone runtime UX configuration.</td></tr>
+<tr><td class="fp">pilot_evidence_regression.py</td><td class="num">180</td><td>Regression checks for Sabi pilot-proof cohort evidence (Layer C).</td></tr>
+<tr><td class="fp">pilot_research_design_regression.py</td><td class="num">104</td><td>Regression checks for Sabi&#x27;s publishable-grade pilot protocol.</td></tr>
+<tr><td class="fp">rate_limiter_regression.py</td><td class="num">47</td><td>Static checks for internal AI rate-limit bypass wiring.</td></tr>
+<tr><td class="fp">recent_call_dashboard_regression.py</td><td class="num">70</td><td>Offline regression checks for the local recent-call dashboard.</td></tr>
+<tr><td class="fp">sentry_scrub_regression.py</td><td class="num">108</td><td>Regression: Sentry PII scrubbing + fail-open init.</td></tr>
+<tr><td class="fp">sip_provider_regression.py</td><td class="num">109</td><td>Regression checks for Twilio/AT carrier selection around one lesson lane.</td></tr>
+<tr><td class="fp">stt_provider_config_regression.py</td><td class="num">47</td><td>Static checks for optional STT provider wiring.</td></tr>
+<tr><td class="fp">stt_provider_persistence_regression.py</td><td class="num">193</td><td>Regression checks that the STT provider used for each turn is recorded.</td></tr>
+<tr><td class="fp">stt_regression.py</td><td class="num">398</td><td>Regression harness for Sabi phone STT and transcript normalization.</td></tr>
+<tr><td class="fp">teacher_notes_regression.py</td><td class="num">93</td><td>Regression checks for Sabi end-of-call teacher notes.</td></tr>
+<tr><td class="fp">tts_provider_config_regression.py</td><td class="num">197</td><td>Regression: TTS provider chain + Chatterbox canary lane isolation.</td></tr>
+<tr><td class="fp">tts_provider_regression.py</td><td class="num">49</td><td>Static checks for the active Sabi TTS provider chain.</td></tr>
+<tr><td class="fp">turn_assessment_regression.py</td><td class="num">137</td><td>Regression checks for the LLM answer/name gate before lesson grading.</td></tr>
+<tr><td class="fp">turn_taking_regression.py</td><td class="num">96</td><td>Regression probes for Sabi&#x27;s self-hosted managed-turn replacement.</td></tr>
+<tr><td class="fp">whisper_finetune_regression.py</td><td class="num">215</td><td>Regression checks for Sabi&#x27;s full mixed-data/telephony STT pipeline.</td></tr></tbody></table></div></div>
+  <div class="grp"><h3>The fake-child harness</h3>
+    <p class="lede">A synthetic cohort that phones Sabi so real children don't have to be the first
+    ones to find a bug — including a real codec path and audio mixing, so the test hears what a
+    phone hears.</p>
+    <div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it does</th></tr></thead>
+    <tbody><tr><td class="fp">audio_case_builder.py</td><td class="num">252</td><td></td></tr>
+<tr><td class="fp">audio_mixer.py</td><td class="num">103</td><td></td></tr>
+<tr><td class="fp">audio_runner.py</td><td class="num">366</td><td></td></tr>
+<tr><td class="fp">audiosocket_replay.py</td><td class="num">242</td><td></td></tr>
+<tr><td class="fp">audiosocket_replay_regression.py</td><td class="num">134</td><td>Regression checks for the AudioSocket replay harness.</td></tr>
+<tr><td class="fp">child_simulator.py</td><td class="num">212</td><td></td></tr>
+<tr><td class="fp">cohort.py</td><td class="num">154</td><td></td></tr>
+<tr><td class="fp">cost_model.py</td><td class="num">161</td><td></td></tr>
+<tr><td class="fp">evaluator.py</td><td class="num">179</td><td></td></tr>
+<tr><td class="fp">evaluator_regression.py</td><td class="num">89</td><td>Focused regression checks for fake-child turn evaluation.</td></tr>
+<tr><td class="fp">full_course_runner.py</td><td class="num">1191</td><td></td></tr>
+<tr><td class="fp">lesson_rehearsal_runner.py</td><td class="num">465</td><td></td></tr>
+<tr><td class="fp">phone_codec.py</td><td class="num">148</td><td></td></tr>
+<tr><td class="fp">progression_runner.py</td><td class="num">599</td><td></td></tr>
+<tr><td class="fp">report.py</td><td class="num">105</td><td></td></tr>
+<tr><td class="fp">runner.py</td><td class="num">100</td><td></td></tr></tbody></table></div></div>
+  <div class="grp"><h3>Nigerian-accent STT fine-tuning</h3>
+    <div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it does</th></tr></thead>
+    <tbody><tr><td class="fp">audio_augmentation.py</td><td class="num">318</td><td>Phone-channel and real-noise augmentation for Sabi STT fine-tuning.</td></tr>
+<tr><td class="fp">evaluate_gold.py</td><td class="num">163</td><td>Evaluate faster-whisper models on a private, held-out Sabi call manifest.</td></tr>
+<tr><td class="fp">finetune_whisper.py</td><td class="num">678</td><td>Fine-tune Whisper large-v3 on AfriSpeech-200 (Nigerian-accented English).</td></tr>
+<tr><td class="fp">prepare_external_manifests.py</td><td class="num">211</td><td>Prepare auditable manifests for every non-AfriSpeech Sabi STT source.</td></tr>
+<tr><td class="fp">training_data.py</td><td class="num">253</td><td>Consent-, license-, and split-aware data mixing for Sabi STT training.</td></tr></tbody></table></div></div>
+</section>
+
+<section class="band">
+  <span class="eyebrow">For the record</span>
+  <h2>What the August rebuild moved aside</h2>
+  <p class="lede">Three modules were added on top of all of the above. They did not delete anything —
+  the old lane is intact and still serving every caller who is not on the allowlist.</p>
+  <div class="tw"><table><thead><tr><th>File</th><th class="num">Lines</th><th>What it changed</th></tr></thead>
+  <tbody><tr><td class="fp">gemini_live.py</td><td class="num">2226</td><td>The persistent Gemini Live audio bridge. Added 7 Aug 2026 (d74015e).<div class="ds">Persistent Gemini Live audio bridge for the phone-scoped Sabi canary.</div></td></tr>
+<tr><td class="fp">gemini_grading.py</td><td class="num">197</td><td>Grading evidence for the Gemini Live numeracy route.<div class="ds">Authoritative grading evidence for Sabi&#x27;s Gemini Live numeracy route.</div></td></tr>
+<tr><td class="fp">numeric_sidecar.py</td><td class="num">426</td><td>Two extra recognisers re-hearing every numeric turn, in shadow.<div class="ds">Shadow numeric-STT sidecar for Sabi&#x27;s Gemini Live phone lane.</div></td></tr></tbody></table></div>
+  <p class="note">The routing is a single <code>elif</code> in <code>voice_realtime.py</code>: if the
+  caller's number is in <code>SABI_GEMINI_LIVE_PHONES</code>, the call goes to the Gemini runner;
+  otherwise it runs everything on this page. If Gemini fails to connect, it falls back to this lane
+  without dropping the call.</p>
+</section>
+
+</main>
+
+<footer>
+  <span>Compiled 20 August 2026 by reading <code>sabi-server</code> and <code>curriculum-app</code>
+  at commit <code>eccabf0</code>, plus the live container and dialplan on 136.243.8.51.</span>
+  <span>Line counts and docstrings are taken from the files themselves. Nothing here is quoted from
+  memory or from a previous session's notes.</span>
+</footer>
+</div>

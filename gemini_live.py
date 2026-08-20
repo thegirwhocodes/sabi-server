@@ -60,11 +60,6 @@ GEMINI_LIVE_MODEL = (
     os.getenv("SABI_GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview").strip()
     or "gemini-3.1-flash-live-preview"
 )
-# Set SABI_GEMINI_LIVE_VOICE=auto to send no voice at all and let the model pick.
-# Naomi's AI Studio session — where it answered her in a Nigerian woman's voice —
-# had no voice selected, so forcing one may be what blocks that adaptation.
-GEMINI_LIVE_VOICE = os.getenv("SABI_GEMINI_LIVE_VOICE", "Kore").strip() or "Kore"
-GEMINI_LIVE_VOICE_AUTO = GEMINI_LIVE_VOICE.lower() in {"auto", "none", "default", "unset"}
 GEMINI_LIVE_SETUP_TIMEOUT_SECONDS = float(
     os.getenv("SABI_GEMINI_LIVE_SETUP_TIMEOUT_SECONDS", "12")
 )
@@ -868,13 +863,6 @@ def build_live_setup(system_prompt: str) -> dict[str, Any]:
             "model": f"models/{GEMINI_LIVE_MODEL}",
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
-                **({} if GEMINI_LIVE_VOICE_AUTO else {
-                    "speechConfig": {
-                        "voiceConfig": {
-                            "prebuiltVoiceConfig": {"voiceName": GEMINI_LIVE_VOICE}
-                        }
-                    }
-                }),
                 "thinkingConfig": {"thinkingLevel": "minimal"},
             },
             "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -1733,11 +1721,10 @@ class GeminiLiveCallRunner:
             ) from None
 
         logger.info(
-            "Gemini Live call start uuid=%s phone=%s model=%s voice=%s module=%s",
+            "Gemini Live call start uuid=%s phone=%s model=%s module=%s",
             self.call.call_uuid,
             self.call.phone,
             GEMINI_LIVE_MODEL,
-            GEMINI_LIVE_VOICE,
             self.module,
         )
         reader_task = asyncio.create_task(self.call.read_loop())

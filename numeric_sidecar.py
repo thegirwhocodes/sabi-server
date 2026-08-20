@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 import threading
 import time
@@ -32,11 +33,33 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from numeric_grading import extract_numbers
 
 logger = logging.getLogger("sabi.numeric_sidecar")
 
 SIDECAR_VERSION = "shadow-1"
+
+
+def _words(text: str) -> list[str]:
+    """Lowercase word tokens, punctuation dropped, for comparing transcripts."""
+    return re.findall(r"[a-z0-9]+", str(text or "").lower())
+
+
+def _same_words(left: str, right: str) -> bool | None:
+    """Whether two transcripts of the same audio heard the same thing.
+
+    One containing the other counts as agreement: the re-hearers return "thirty"
+    where Gemini returns "thirty naira", and that is the same hearing, not a
+    mis-hear. A word one side has and the other lacks - "Oluwaseun" against
+    "Louis Sean" - is a real disagreement. Punctuation and casing are ignored.
+
+    None when either side has no words, because silence is an abstention rather
+    than a disagreement.
+    """
+    a, b = set(_words(left)), set(_words(right))
+    if not a or not b:
+        return None
+    return a <= b or b <= a
+
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -145,6 +168,7 @@ class NumericSidecar:
         self._pending = 0
         self._lock = threading.Lock()
         self._records: list[dict[str, Any]] = []
+        self._corrections: list[dict[str, Any]] = []
         self._dropped_capacity = 0
 
     # -- turn lifecycle -------------------------------------------------
@@ -237,6 +261,15 @@ class NumericSidecar:
         record = self._build_record(job, result, current_turn, started)
         with self._lock:
             self._records.append(record)
+            # Naomi's rule: both re-hearers agreed and Sabi heard something
+            # else, so Sabi should go with theirs. Queued rather than applied,
+            # because this lands ~2s after Sabi has already answered.
+            if record["rehearers_agreed"] and record["sabi_heard_it_right"] is False:
+                self._corrections.append({
+                    "turn_index": record["turn_index"],
+                    "heard": record["consensus_text"],
+                    "sabi_heard": record["gemini_text"],
+                })
         self._write_record(record)
         logger.info(
             "Numeric sidecar uuid=%s turn=%s status=%s heard_right=%s groq=%r %s=%r "
@@ -273,14 +306,21 @@ class NumericSidecar:
         agreement_matches_expected = (
             consensus is not None and expected is not None and int(consensus) == int(expected)
         )
-        # The thing Naomi actually wants to see: did Sabi hear what the child
-        # said? Both re-hearers agreeing on a number that Gemini did not hear is
-        # a mis-hear, whether or not the number was the right answer.
-        gemini_numbers = extract_numbers(job["gemini_text"])
-        if consensus is None or not gemini_numbers:
-            sabi_heard_it_right: bool | None = None
+        # Naomi's rule, and nothing more than it: if Groq and Azure heard the
+        # same thing and Sabi heard something else, Sabi goes with theirs.
+        # Otherwise Sabi's own hearing stands. No scores, no thresholds - two
+        # transcripts either say the same thing or they do not.
+        gemini_text = job["gemini_text"]
+        groq_text = groq.get("text", "")
+        second_text = local.get("text", "")
+        rehearers_agreed = _same_words(groq_text, second_text)
+        if rehearers_agreed:
+            consensus_text = " ".join(str(groq_text).split())
+            sabi_heard_it_right: bool | None = _same_words(gemini_text, groq_text) is True
         else:
-            sabi_heard_it_right = int(consensus) in {int(n) for n in gemini_numbers}
+            consensus_text = ""
+            sabi_heard_it_right = None
+
         return {
             "sidecar_version": SIDECAR_VERSION,
             "mode": self.mode,
@@ -297,7 +337,8 @@ class NumericSidecar:
             "consensus_numeric_value": consensus,
             "agreement_matches_expected": agreement_matches_expected,
             "sabi_heard_it_right": sabi_heard_it_right,
-            "gemini_numeric_candidates": gemini_numbers,
+            "rehearers_agreed": bool(rehearers_agreed),
+            "consensus_text": consensus_text,
             "hypothetical_action": result.get("hypothetical_action", ""),
             "selection_reason": result.get("selection_reason", ""),
             "decision_deadline_seconds": result.get("decision_deadline_seconds"),
@@ -321,6 +362,11 @@ class NumericSidecar:
             "applied_to_grading": False,
             "ensemble_results": votes,
         }
+
+    def take_correction(self) -> dict[str, Any] | None:
+        """Hand back one pending mis-hear, or None. Each is returned once."""
+        with self._lock:
+            return self._corrections.pop(0) if self._corrections else None
 
     def _write_record(self, record: dict[str, Any]) -> None:
         try:

@@ -1520,6 +1520,37 @@ class GeminiLiveCallRunner:
                 return result
         return {}
 
+    async def _apply_hearing_correction(self) -> None:
+        """Tell Sabi what the child actually said, when both re-hearers agree.
+
+        Naomi's rule: if Groq and Azure heard the same thing and Sabi heard
+        something else, Sabi goes with theirs; otherwise Sabi's own hearing
+        stands. The re-hearers finish about two seconds after Sabi has already
+        replied, so this is a correction on the following turn rather than a
+        rewrite of the one it belongs to - which is what a person does when they
+        realise they misheard.
+        """
+        sidecar = getattr(self, "sidecar", None)
+        if not sidecar or not sidecar.enabled or self.websocket is None or self.call.hungup:
+            return
+        correction = sidecar.take_correction()
+        if not correction or not correction.get("heard"):
+            return
+        logger.warning(
+            "Gemini Live hearing corrected uuid=%s turn=%s sabi=%r actually=%r",
+            self.call.call_uuid,
+            correction.get("turn_index"),
+            correction.get("sabi_heard"),
+            correction["heard"],
+        )
+        await self._send_json({"realtimeInput": {"text": (
+            "[HEARING CORRECTION] Two independent transcriptions of what the child "
+            f"just said both give: \"{correction['heard']}\". You heard "
+            f"\"{correction.get('sabi_heard') or ''}\", which was wrong. Go with "
+            "theirs. If you already replied to the wrong thing, say so simply the "
+            "way a person would and carry on. Never mention transcription."
+        )}})
+
     def _submit_numeric_sidecar(self, user_path: Path | None, raw_user: str) -> bool:
         """Queue the shadow Groq/local comparison for a numeric-answer turn.
 
@@ -1736,6 +1767,9 @@ class GeminiLiveCallRunner:
             await self._send_json(
                 {"realtimeInput": {"text": str(followup_enforcement["instruction"])}}
             )
+
+        # Last, so a correction is never swallowed by the branch above it.
+        await self._apply_hearing_correction()
 
     async def _receiver(self) -> None:
         async for raw in self.websocket:

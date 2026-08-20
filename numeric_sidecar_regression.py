@@ -260,6 +260,41 @@ def main() -> int:
     check("correct_hearing_is_not_flagged",
           len(ok) == 1 and ok[0]["sabi_heard_it_right"] is True, str(ok))
 
+    # Naomi's rule on everything the child says, not only numbers: Groq and
+    # Azure must say the same thing, and Sabi must have said something else.
+    def hearing_case(name, groq_text, second_text, gemini_text):
+        engine, _ = build_stt(groq_text, second_text)
+        s2 = NumericSidecar(f"call-{name}", engine, audio_dir=tmp)
+        s2.submit(turn_index=0, audio_path=wav, gemini_text=gemini_text, expected_answer=None)
+        s2.drain(10)
+        return [json.loads(line) for line in s2.record_path.read_text().splitlines()][0]
+
+    spoken = hearing_case("words-mishear",
+                          "my name is Oluwaseun",
+                          "my name is Oluwaseun",
+                          "my name is Louis Sean")
+    check("non_numeric_mishear_is_flagged",
+          spoken["sabi_heard_it_right"] is False
+          and spoken["rehearers_agreed"] is True
+          and spoken["consensus_text"] == "my name is Oluwaseun",
+          str(spoken))
+
+    heard = hearing_case("words-ok",
+                         "I did not understand that question",
+                         "I did not understand that question",
+                         "I did not understand that question!")
+    check("punctuation_and_case_do_not_count_as_a_mishear",
+          heard["sabi_heard_it_right"] is True, str(heard))
+
+    # Turn 0 of Naomi's real call: both re-hearers returned noise, and noise that
+    # did not match each other. No agreement, so Sabi's own hearing stands.
+    noise = hearing_case("words-noise", "Betsy Mara", "the whole afternoon here", "13 EUR")
+    check("disagreeing_rehearers_leave_sabi_alone",
+          noise["sabi_heard_it_right"] is None
+          and noise["rehearers_agreed"] is False
+          and noise["consensus_text"] == "",
+          str(noise))
+
     check("missing_audio_skipped",
           sidecar.submit(turn_index=0, audio_path=tmp / "nope.wav", expected_answer=4) is False)
     check("no_stt_disables_sidecar", NumericSidecar("call-none", None).enabled is False)
@@ -329,17 +364,50 @@ def main() -> int:
     check("open_registered_problem_is_measured", submitted is True)
     runner.sidecar.drain(10)
 
-    # 17. Resolved problem with no grade event is not invented into a turn.
+    # 17. A resolved problem no longer ends the measurement. Checking whether
+    # Sabi heard the child applies to every turn, including "okay", so the turn
+    # is measured with no answer key attached to it.
     runner.sidecar = NumericSidecar("call-resolved", engine, audio_dir=tmp)
     runner.tools.current_problem_resolved = True
-    check("resolved_problem_without_grade_is_skipped",
-          runner._submit_numeric_sidecar(wav, "okay") is False)
+    check("turn_after_a_resolved_problem_is_still_measured",
+          runner._submit_numeric_sidecar(wav, "okay") is True)
+    runner.sidecar.drain(10)
+    resolved_rows = [
+        json.loads(line) for line in runner.sidecar.record_path.read_text().splitlines()
+    ]
+    check("measured_turn_carries_no_invented_answer_key",
+          len(resolved_rows) == 1 and resolved_rows[0]["expected_answer"] is None
+          and resolved_rows[0]["problem_id"] == "", str(resolved_rows))
 
-    # 18. The live path stays in shadow: gemini_live may not read a consensus.
+    # 18. Grading still never reads a consensus. The hearing correction carries
+    # what the child SAID, which is a different thing from what the answer was.
     gemini_source = Path("gemini_live.py").read_text()
     check("gemini_live_never_reads_a_consensus_value",
           "consensus_numeric_value" not in gemini_source,
           "shadow mode must not feed grading")
+
+    # A correction is offered once, only when the rule fires, and never twice.
+    engine, _ = build_stt("thirty", "thirty")
+    s3 = NumericSidecar("call-correction", engine, audio_dir=tmp)
+    s3.submit(turn_index=0, audio_path=wav, gemini_text="13 EUR", expected_answer=None)
+    s3.drain(10)
+    first = s3.take_correction()
+    check("mishear_produces_one_correction",
+          first is not None and first["heard"] == "thirty" and first["sabi_heard"] == "13 EUR",
+          str(first))
+    check("correction_is_handed_out_only_once", s3.take_correction() is None)
+
+    engine, _ = build_stt("thirty", "thirteen")
+    s4 = NumericSidecar("call-no-correction", engine, audio_dir=tmp)
+    s4.submit(turn_index=0, audio_path=wav, gemini_text="13 EUR", expected_answer=None)
+    s4.drain(10)
+    check("disagreeing_rehearers_never_correct_sabi", s4.take_correction() is None)
+
+    engine, _ = build_stt("thirty", "thirty")
+    s5 = NumericSidecar("call-agreed-ok", engine, audio_dir=tmp)
+    s5.submit(turn_index=0, audio_path=wav, gemini_text="thirty naira", expected_answer=None)
+    s5.drain(10)
+    check("sabi_hearing_correctly_is_never_corrected", s5.take_correction() is None)
     check("sidecar_submit_is_guarded_from_exceptions",
           "Numeric sidecar submit failed" in gemini_source,
           "a measurement failure must not break a call")

@@ -60,7 +60,11 @@ GEMINI_LIVE_MODEL = (
     os.getenv("SABI_GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview").strip()
     or "gemini-3.1-flash-live-preview"
 )
+# Set SABI_GEMINI_LIVE_VOICE=auto to send no voice at all and let the model pick.
+# Naomi's AI Studio session — where it answered her in a Nigerian woman's voice —
+# had no voice selected, so forcing one may be what blocks that adaptation.
 GEMINI_LIVE_VOICE = os.getenv("SABI_GEMINI_LIVE_VOICE", "Kore").strip() or "Kore"
+GEMINI_LIVE_VOICE_AUTO = GEMINI_LIVE_VOICE.lower() in {"auto", "none", "default", "unset"}
 GEMINI_LIVE_SETUP_TIMEOUT_SECONDS = float(
     os.getenv("SABI_GEMINI_LIVE_SETUP_TIMEOUT_SECONDS", "12")
 )
@@ -111,6 +115,13 @@ Speak in a very bush Nigerian accent.
 Verbosity: conversational. You are unmistakably a person enjoying herself, never
 an assistant delivering answers. Do not be efficient. Efficient is the wrong
 register for a nine-year-old.
+
+These are your moves. Use them freely and often:
+- She lands it: "Yeees!" / "Ehn ehn, that's it!" / "You got it — I knew you were sharp!"
+- She surprises you: "Ah ah! So fast!" / "Sharp sharp!"
+- You are thinking with her: "Hmm, let me think small..."
+- Moving on: "Oya, next one!"
+- Warm praise: "Well done oh!"
 
 Say her name often — it is how she knows you mean her. Laugh when something is
 funny. A small sound like "hmm" or "ohhh" is speech too.
@@ -857,11 +868,13 @@ def build_live_setup(system_prompt: str) -> dict[str, Any]:
             "model": f"models/{GEMINI_LIVE_MODEL}",
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
-                "speechConfig": {
-                    "voiceConfig": {
-                        "prebuiltVoiceConfig": {"voiceName": GEMINI_LIVE_VOICE}
+                **({} if GEMINI_LIVE_VOICE_AUTO else {
+                    "speechConfig": {
+                        "voiceConfig": {
+                            "prebuiltVoiceConfig": {"voiceName": GEMINI_LIVE_VOICE}
+                        }
                     }
-                },
+                }),
                 "thinkingConfig": {"thinkingLevel": "minimal"},
             },
             "systemInstruction": {"parts": [{"text": system_prompt}]},

@@ -65,6 +65,14 @@ GEMINI_LIVE_MODEL = (
 # had no voice selected, so forcing one may be what blocks that adaptation.
 GEMINI_LIVE_VOICE = os.getenv("SABI_GEMINI_LIVE_VOICE", "Kore").strip() or "Kore"
 GEMINI_LIVE_VOICE_AUTO = GEMINI_LIVE_VOICE.lower() in {"auto", "none", "default", "unset"}
+# The Claude Haiku Sabi had no tools: it wrote its own naira questions and marked
+# its own answers, and that lesson is the one Naomi wants back. With this off,
+# Gemini gets the prompt and nothing else — no problem deck, no deterministic
+# grader, no lesson clock — so it can no longer ask one question and grade the
+# answer against a different one.
+GEMINI_LIVE_TOOLS_ENABLED = os.getenv("SABI_GEMINI_LIVE_TOOLS", "on").strip().lower() not in {
+    "off", "0", "false", "no", "none",
+}
 GEMINI_LIVE_SETUP_TIMEOUT_SECONDS = float(
     os.getenv("SABI_GEMINI_LIVE_SETUP_TIMEOUT_SECONDS", "12")
 )
@@ -918,53 +926,93 @@ def build_live_setup(system_prompt: str) -> dict[str, Any]:
                 "triggerTokens": 12000,
                 "slidingWindow": {"targetTokens": 8000},
             },
-            "tools": [
-                {
-                    "functionDeclarations": [
-                        {
-                            "name": "get_next_numeracy_problem",
-                            "description": (
-                                "Get Sabi's next deterministic, non-repeating numeracy problem. "
-                                "Use this at lesson opening or when no active problem exists. If "
-                                "a problem is already active, it returns that exact same problem."
-                            ),
-                            "parameters": {"type": "OBJECT", "properties": {}},
-                        },
-                        {
-                            "name": "grade_numeric_answer",
-                            "description": (
-                                "Handle the learner's reply to the active maths problem. Call this "
-                                "for a spoken numeric answer OR a clear request such as 'I don't "
-                                "know' or 'help me'. It grades numbers deterministically and returns "
-                                "a small teaching cue for help. Object nouns never affect correctness."
-                            ),
-                            "parameters": {
-                                "type": "OBJECT",
-                                "properties": {
-                                    "learner_answer": {
-                                        "type": "STRING",
-                                        "description": (
-                                            "The learner's complete reply, including any request for help."
-                                        ),
-                                    }
-                                },
-                                "required": ["learner_answer"],
+            **({
+                "tools": [
+                    {
+                        "functionDeclarations": [
+                            {
+                                "name": "get_next_numeracy_problem",
+                                "description": (
+                                    "Get Sabi's next deterministic, non-repeating numeracy problem. "
+                                    "Use this at lesson opening or when no active problem exists. If "
+                                    "a problem is already active, it returns that exact same problem."
+                                ),
+                                "parameters": {"type": "OBJECT", "properties": {}},
                             },
-                        },
-                        {
-                            "name": "get_lesson_progress",
-                            "description": (
-                                "Read Sabi's authoritative lesson clock and phase. You MUST call "
-                                "this before summarizing, saying next time, saying goodbye, or "
-                                "otherwise ending the lesson."
-                            ),
-                            "parameters": {"type": "OBJECT", "properties": {}},
-                        },
-                    ]
-                }
-            ],
+                            {
+                                "name": "grade_numeric_answer",
+                                "description": (
+                                    "Handle the learner's reply to the active maths problem. Call this "
+                                    "for a spoken numeric answer OR a clear request such as 'I don't "
+                                    "know' or 'help me'. It grades numbers deterministically and returns "
+                                    "a small teaching cue for help. Object nouns never affect correctness."
+                                ),
+                                "parameters": {
+                                    "type": "OBJECT",
+                                    "properties": {
+                                        "learner_answer": {
+                                            "type": "STRING",
+                                            "description": (
+                                                "The learner's complete reply, including any request for help."
+                                            ),
+                                        }
+                                    },
+                                    "required": ["learner_answer"],
+                                },
+                            },
+                            {
+                                "name": "get_lesson_progress",
+                                "description": (
+                                    "Read Sabi's authoritative lesson clock and phase. You MUST call "
+                                    "this before summarizing, saying next time, saying goodbye, or "
+                                    "otherwise ending the lesson."
+                                ),
+                                "parameters": {"type": "OBJECT", "properties": {}},
+                            },
+                        ]
+                    }
+                ],
+            } if GEMINI_LIVE_TOOLS_ENABLED else {}),
         }
     }
+
+
+# Ordering matters here: with the tools off, nothing external stops Gemini
+# inventing a question, so the "ask it, then mark it yourself" contract has to be
+# stated plainly instead.
+_TOOL_RULES = """- Call get_lesson_progress BEFORE any wrap-up, summary, "next time", goodbye,
+  or suggestion that today's lesson is finished.
+
+Maths tools:
+- Call get_next_numeracy_problem at lesson opening or whenever there is no
+  active registered problem.
+- Ask the exact question returned by that tool and never reveal expected_answer.
+- For a numeric answer or a clear "I don't know/help me", call
+  grade_numeric_answer before judging or teaching. Follow its result naturally.
+- If it returns next_problem, use that exact registered question. Do not invent
+  or replace maths questions. The number determines correctness; object words do not.
+"""
+
+_NO_TOOL_RULES = """
+Maths:
+- Teach like a real tutor. Explain the idea, tell the child what is going on,
+  and make up your own questions as you go — in naira, from the market and the
+  street, whatever fits what you are talking about right now.
+- There is no list to work through and no set number of questions. Follow the
+  child. Go wherever the lesson wants to go, and make it fun.
+- Mark the answer to the question you actually asked. Never judge it against a
+  different question, and never change the question after hearing the answer.
+- If the answer is right, say so plainly before moving on. If it is wrong, do
+  not say "wrong" — teach one small step on that same question and ask again.
+"""
+
+_TOOL_OPENING = """ If the opening
+does not ask for the learner's name or another onboarding answer, call
+get_next_numeracy_problem immediately and ask its question in the same turn."""
+
+_NO_TOOL_OPENING = """ If the opening does not ask for
+the learner's name or another onboarding answer, ask your first naira question
+in the same turn."""
 
 
 def build_live_call_constraints(opening_turn: str, learning_state: dict | None) -> str:
@@ -974,6 +1022,8 @@ def build_live_call_constraints(opening_turn: str, learning_state: dict | None) 
         sort_keys=True,
         default=str,
     )
+    tool_rules = _TOOL_RULES if GEMINI_LIVE_TOOLS_ENABLED else _NO_TOOL_RULES
+    opening_rule = _TOOL_OPENING if GEMINI_LIVE_TOOLS_ENABLED else _NO_TOOL_OPENING
     return f"""
 
 ## GEMINI LIVE PHONE SESSION
@@ -986,9 +1036,7 @@ sounds, spelling, or phonics during this call.
 
 Opening turn for this learner: {opening_turn!r}
 When you receive the literal text [SABI_CALL_STARTED], begin with that opening
-turn. Speak naturally; never read the bracketed signal aloud. If the opening
-does not ask for the learner's name or another onboarding answer, call
-get_next_numeracy_problem immediately and ask its question in the same turn.
+turn. Speak naturally; never read the bracketed signal aloud.{opening_rule}
 
 Current deterministic learner state (provided once for this session):
 {state_json}
@@ -997,21 +1045,9 @@ Conversation:
 - Listen to the whole utterance and respond conversationally.
 - The caller may interrupt you. Stop immediately and listen when they do.
 - Ignore silence, breaths, clicks, coughs, line noise, and random non-speech.
-- Speak warmly in one or two short sentences, explain when needed, ask one
-  question, then wait.
+- Explain when needed, ask one question, then wait.
 - The target is five to seven minutes, not a fixed number of questions.
-- Call get_lesson_progress BEFORE any wrap-up, summary, "next time", goodbye,
-  or suggestion that today's lesson is finished.
-
-Maths tools:
-- Call get_next_numeracy_problem at lesson opening or whenever there is no
-  active registered problem.
-- Ask the exact question returned by that tool and never reveal expected_answer.
-- For a numeric answer or a clear "I don't know/help me", call
-  grade_numeric_answer before judging or teaching. Follow its result naturally.
-- If it returns next_problem, use that exact registered question. Do not invent
-  or replace maths questions. The number determines correctness; object words do not.
-"""
+{tool_rules}"""
 
 
 def _write_wav(path: Path, pcm: bytes) -> None:

@@ -1,0 +1,662 @@
+<title>Sabi on Google's Stack</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Lexend:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ink:#0E0E0E;--char:#1C1A17;--ivory:#F7F1E4;--gold:#CBA868;--bronze:#9A7536;--clay:#C2643F;
+  --bg:var(--ivory);--surface:#FFFBF2;--surface2:#F2EADA;--line:#DCCFB4;
+  --text:#1C1A17;--dim:#5E574B;--accent:var(--bronze);--accentQuiet:#8A6E33;
+  --bad:#A8412061;--badInk:#8E3A1C;--good:#4A6B3E;--warn:#8A6E33;
+  --codebg:#F1E9D8;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:var(--ink);--surface:#151412;--surface2:#1C1A17;--line:#2E2A23;
+  --text:#EDE5D6;--dim:#9B9282;--accent:var(--gold);--accentQuiet:#A8905E;
+  --badInk:#E08E6C;--good:#9CBF8C;--warn:#C6A96A;--codebg:#121110;
+}}
+:root[data-theme="dark"]{
+  --bg:var(--ink);--surface:#151412;--surface2:#1C1A17;--line:#2E2A23;
+  --text:#EDE5D6;--dim:#9B9282;--accent:var(--gold);--accentQuiet:#A8905E;
+  --badInk:#E08E6C;--good:#9CBF8C;--warn:#C6A96A;--codebg:#121110;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+ font-family:Lexend,"Helvetica Neue",Arial,sans-serif;font-size:16.5px;line-height:1.62;
+ -webkit-font-smoothing:antialiased}
+.wrap{max-width:980px;margin:0 auto;padding:clamp(28px,5vw,64px) clamp(18px,4vw,40px) 96px}
+h1,h2,h3,h4,h5{font-family:"Cormorant Garamond",Iowan Old Style,Palatino,Georgia,serif;
+ font-weight:600;text-wrap:balance;letter-spacing:.005em}
+h1{font-size:clamp(2.5rem,6vw,3.9rem);line-height:1.03;margin:.1em 0 .16em}
+h2{font-size:clamp(1.7rem,3.4vw,2.3rem);line-height:1.13;margin:0 0 .12em}
+h3{font-size:1.45rem;margin:1.5em 0 .25em;color:var(--accent)}
+h4{font-size:1.12rem;margin:1.3em 0 .2em}
+h5{font-size:1rem;margin:1.1em 0 .2em;font-family:Lexend,sans-serif;font-weight:600}
+p{margin:.55em 0}
+code{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.85em;color:var(--accent);
+ background:var(--surface2);padding:.1em .36em;border-radius:3px;word-break:break-word}
+pre.code{background:var(--codebg);border:1px solid var(--line);border-left:2px solid var(--accent);
+ padding:14px 16px;overflow-x:auto;margin:.9em 0}
+pre.code code{background:none;color:var(--text);font-size:.8rem;line-height:1.55;padding:0}
+.eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.19em;color:var(--accentQuiet);font-weight:500}
+header.top{border-bottom:1px solid var(--line);padding-bottom:32px;margin-bottom:40px;
+ display:flex;flex-direction:column;gap:14px}
+.sub{font-size:1.08rem;color:var(--dim);max-width:66ch}
+.meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:4px}
+.chip{font-size:.71rem;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--line);
+ color:var(--dim);padding:.3em .7em;border-radius:999px;background:var(--surface)}
+main{display:flex;flex-direction:column;gap:52px}
+section{display:flex;flex-direction:column;gap:14px}
+.lede{color:var(--dim);max-width:70ch}
+.verdict-box{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+ padding:20px 24px;display:flex;flex-direction:column;gap:10px}
+.verdict-box p{margin:0}
+.tw{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:640px}
+th{text-align:left;font-weight:500;font-size:.67rem;text-transform:uppercase;letter-spacing:.13em;
+ color:var(--accentQuiet);padding:11px 14px;border-bottom:1px solid var(--line);background:var(--surface2)}
+td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+td.claim{width:27%;color:var(--text)}
+td.verdict{width:16%;white-space:nowrap}
+td.how{color:var(--dim);font-size:.85rem}
+.pill{display:inline-block;font-size:.64rem;letter-spacing:.11em;text-transform:uppercase;
+ padding:.25em .6em;border:1px solid currentColor;border-radius:2px;font-weight:500}
+.pill.wrong{color:var(--badInk)} .pill.right{color:var(--good)} .pill.unverified{color:var(--warn)}
+.short{display:block;font-size:.78rem;color:var(--dim);margin-top:5px}
+.correction{background:var(--surface2);border-left:2px solid var(--badInk);padding:12px 16px;
+ margin:1em 0;font-size:.9rem;color:var(--dim)}
+.correction strong{color:var(--badInk)}
+blockquote{margin:.8em 0;padding-left:16px;border-left:2px solid var(--line);color:var(--dim)}
+ul,ol{margin:.5em 0;padding-left:1.25em;color:var(--text)}
+li{margin:.28em 0}
+hr{border:0;border-top:1px solid var(--line);margin:1.6em 0}
+.gemini{border:1px solid var(--line);background:var(--surface);padding:clamp(18px,3vw,30px)}
+.stamp{font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--accentQuiet);
+ letter-spacing:.05em;text-transform:uppercase}
+footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+ font-size:.82rem;display:flex;flex-direction:column;gap:6px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow">Education for Equality · build specification</span>
+  <h1>Sabi on Google's stack</h1>
+  <p class="sub">Gemini was given the original Sabi — the recording, the architecture, the prompt, the
+  website — and asked to specify how to rebuild her so she sounds and behaves the same. This is its
+  answer, with every checkable claim checked against the live API first.</p>
+  <div class="meta">
+    <span class="chip">20 Aug 2026</span>
+    <span class="chip">gemini-3.1-pro-preview</span>
+    <span class="chip">96s of the original call, heard by the model</span>
+    <span class="chip">3 fabrications caught</span>
+  </div>
+</header>
+
+<main>
+
+<section>
+  <span class="eyebrow">Read this first</span>
+  <h2>It found the answer only after being corrected twice</h2>
+  <div class="verdict-box">
+    <p><strong>Asked cold, it invented a Nigerian voice that does not exist</strong> — <code>en-NG-Neural2-A</code>
+    — and built its entire recommendation on it. Asked again with Google's real voice list in hand, it
+    produced the specification below, which is genuinely good.</p>
+    <p><strong>The one real path is Chirp 3: Instant Custom Voice.</strong> Google has no Nigerian English
+    voice at any quality tier, in any product. What it has is voice cloning: a real Nigerian woman records
+    ten seconds, and that becomes Sabi. It is allow-list only — you have to ask Google for access — and it
+    streams telephony-native audio, with pace control and pronunciation control built in.</p>
+    <p><strong>The cost of that path is Gemini Live.</strong> A cloned voice needs text to speak, and a Live
+    session refuses to emit text. So the blueprint moves back to a split pipeline — the shape the original
+    Sabi already had — which also restores deterministic grading and the safety layer.</p>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Verification</span>
+  <h2>What I checked, and what did not survive</h2>
+  <p class="lede">Nothing here is taken on the model's word. Each row says how it was tested.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Claim</th><th>Verdict</th><th>How it was checked</th></tr></thead>
+    <tbody><tr class="v-wrong"><td class="claim">Cloud Text-to-Speech voice <code>en-NG-Neural2-A</code></td><td class="verdict"><span class="pill wrong">Wrong</span><span class="short">Does not exist.</span></td><td class="how">Pulled Google's published voice list: 489 voices, and the only English locales in the entire catalogue are en-AU, en-GB, en-IN and en-US. No en-NG. No en-ZA. The only African locale of any kind is af-ZA (Afrikaans). It named this voice unprompted and called it &ldquo;an excellent Nigerian voice&rdquo;.</td></tr>
+<tr class="v-wrong"><td class="claim">Cloud Speech-to-Text supports <code>en-NG</code></td><td class="verdict"><span class="pill wrong">Wrong</span><span class="short">It does not.</span></td><td class="how">Google's own v1 and v2 supported-languages pages contain zero occurrences of en-NG. They DO list yo-NG (Yoruba), ig-NG (Igbo) and ha-NG (Hausa) — Nigerian languages, but not Nigerian English. Recognition has to run under en-US, en-GB or en-IN.</td></tr>
+<tr class="v-wrong"><td class="claim">Use <code>gemini-1.5-flash-002</code> as the tutor model</td><td class="verdict"><span class="pill wrong">Wrong</span><span class="short">Retired.</span></td><td class="how">Listed every model our API key can reach: there is no 1.5 anything. The current text models are gemini-3.5-flash, gemini-3.1-flash-lite, gemini-2.5-flash and siblings.</td></tr>
+<tr class="v-right"><td class="claim">Gemini Live cannot emit text for a separate voice engine</td><td class="verdict"><span class="pill right">Verified</span><span class="short">Confirmed.</span></td><td class="how">Opened real sockets against both gemini-3.1-flash-live-preview and gemini-2.5-flash-native-audio. Both close with 1007 &ldquo;response modalities (TEXT) is not supported&rdquo;. AUDIO+TEXT together is refused too.</td></tr>
+<tr class="v-right"><td class="claim">Chirp 3: Instant Custom Voice can clone a real Nigerian woman's voice</td><td class="verdict"><span class="pill right">Verified</span><span class="short">Real, and gated.</span></td><td class="how">Google's own documentation. Access is restricted to allow-listed users — you contact sales. Creation needs a verbatim consent recording plus up to 10 seconds of clean reference audio in Cloud Storage; you get back a voice cloning key.</td></tr>
+<tr class="v-right"><td class="claim">That cloned voice can speak straight onto a phone line</td><td class="verdict"><span class="pill right">Verified</span><span class="short">Confirmed.</span></td><td class="how">The docs list streaming synthesis with MULAW and ALAW output — telephony-native encodings. It also supports pace control from 0.25x to 2x, pause tags, and custom pronunciation via IPA or X-SAMPA, in every locale.</td></tr>
+<tr class="v-right"><td class="claim">Interim voice <code>en-IN-Neural2-A</code></td><td class="verdict"><span class="pill right">Verified</span><span class="short">Exists.</span></td><td class="how">Present in the published voice list, alongside en-IN-Neural2-B, C and D.</td></tr>
+<tr class="v-right"><td class="claim">Speech adaptation / phrase sets with boost values</td><td class="verdict"><span class="pill right">Verified</span><span class="short">Real mechanism.</span></td><td class="how">Model adaptation is listed as a supported feature on the language pages, and telephony_short is a real model name for en-US. The exact class-token syntax it wrote (<code>${google.number}</code>) I could not verify — treat that one line as unchecked.</td></tr>
+<tr class="v-unverified"><td class="claim">The pricing and the $5,400/month figure</td><td class="verdict"><span class="pill unverified">Unchecked</span><span class="short">Could not check.</span></td><td class="how">Both Google pricing pages render their tables in JavaScript, so there was nothing to read in the source. It also priced the LLM using the retired 1.5 rates. Treat every number in section J as an estimate until someone opens the pricing calculator.</td></tr></tbody>
+  </table></div>
+</section>
+
+<section>
+  <span class="eyebrow">The blueprint, verbatim</span>
+  <h2>Sound, and the architecture</h2>
+  <p class="lede">Its forensic read of the recording, and the call path it recommends. Corrections are
+  marked where its facts failed.</p>
+  <div class="correction"><strong>Correction —</strong> it originally answered this with a Cloud TTS voice called <code>en-NG-Neural2-A</code>. That voice does not exist; Google has no Nigerian English voice in any product. Everything below is its second answer, after I sent it the real voice list and the Instant Custom Voice documentation.</div>
+  <div class="gemini"><p>Here is the exact, complete engineering blueprint for <strong>Section A (SOUND)</strong> and <strong>Section B (ARCHITECTURE)</strong>.</p>
+<p>This specification abandons the black-box Gemini Live approach. As you correctly identified, Gemini Live cannot accept a custom cloned voice, its black-box Voice Activity Detection (VAD) will relentlessly cut off hesitant children, and its 24 kHz output creates artifacts when downsampled to a noisy 8 kHz line.</p>
+<p>To reproduce the original Sabi, we must return to a <strong>split pipeline</strong> (Generation 3 architecture) using Google Cloud’s discrete APIs: Cloud Speech-to-Text (STT), Gemini 1.5 Flash for text reasoning, and Cloud Text-to-Speech (TTS) utilizing <strong>Chirp 3: Instant Custom Voice</strong>.</p>
+<hr>
+<h4>SECTION A: SOUND</h4>
+<h5>1. Forensic Analysis of the Target Audio</h5>
+<p>To clone Sabi successfully, we must first isolate exactly what the Chirp 3 model needs to replicate. Based on the target audio, Sabi’s voice is defined by the following acoustic and phonetic markers:</p>
+<ul><li><strong>Phonology &amp; Accent (Nigerian English):</strong></li><li><strong>Consonants:</strong> The dental fricatives /θ/ and /ð/ are realized as alveolar stops [t] and [d]. When she says &quot;think about this differently&quot;, it is pronounced [tink]. </li><li><strong>Vowels:</strong> The rhythm is strictly syllable-timed, not stress-timed like American or British English. Diphthongs are monophthongized; the /eɪ/ in &quot;play&quot; or &quot;naira&quot; is a pure, sustained [e:]. The word &quot;naira&quot; is pronounced [naɪra] with a tapped /r/ [ɾ], never an American retroflex /r/.</li><li><strong>Plosives:</strong> Unaspirated. The /p/ in &quot;packs of biscuits&quot; is sharp and lacks the breathy release of Western accents.</li><li><strong>Pacing and Rhythm:</strong> </li><li>She speaks at approximately <strong>130–140 words per minute</strong>. This is deliberate. It is slower than a standard conversational AI, allowing the child time to process the math over a degraded 8 kHz line.</li><li>The syllable-timed delivery gives her speech a staccato but highly melodic rhythm.</li><li><strong>Pitch and Intonation (The &quot;Warmth&quot;):</strong></li><li><strong>High Dynamic Range:</strong> When praising (&quot;Yeees! 20 naira is correct!&quot;), her fundamental frequency (F0) spikes significantly, and her formants shift upward—the acoustic signature of a physical smile. </li><li><strong>Scaffolding Register:</strong> When handling a wrong answer (&quot;Good try Joshua...&quot;), her pitch drops, the volume softens by roughly 2-3 dB, and her pace slows down by about 10%. She does not sound punitive; she sounds conspiratorial and gentle.</li><li><strong>Breaths and Silence:</strong></li><li>There are audible, natural intakes of breath before new clauses. </li><li>She uses micro-pauses (0.4s – 0.8s) between discrete mathematical concepts (e.g., &quot;If you buy two packs of biscuits... [pause] ...at 20 naira each&quot;).</li></ul>
+<h5>2. The Google Mechanism: Chirp 3 Instant Custom Voice</h5>
+<p>Because Google has no off-the-shelf Nigerian voice, you will use <strong>Google Cloud Text-to-Speech</strong> with a <code>voice_cloning_key</code>.</p>
+<p><strong>The API Configuration:</strong> When calling the <code>synthesize</code> or <code>streamingSynthesize</code> endpoint, the configuration must be hardcoded to telephony standards to prevent downsampling artifacts.</p>
+<pre class="code" data-lang="json"><code>{
+  &quot;input&quot;: {
+    &quot;text&quot;: &quot;Ah ah! You solved that so fast!&quot;
+  },
+  &quot;voice&quot;: {
+    &quot;languageCode&quot;: &quot;en-IN&quot;, 
+    &quot;voiceClone&quot;: {
+      &quot;voiceCloningKey&quot;: &quot;projects/{project}/locations/{location}/voiceClones/{your_sabi_clone_id}&quot;
+    }
+  },
+  &quot;audioConfig&quot;: {
+    &quot;audioEncoding&quot;: &quot;MULAW&quot;,
+    &quot;sampleRateHertz&quot;: 8000,
+    &quot;speakingRate&quot;: 0.95,
+    &quot;pitch&quot;: 0.0
+  }
+}</code></pre>
+<p><em>Note on <code>languageCode</code>: Because <code>en-NG</code> is not a supported locale for Chirp 3 cloning, you must map the clone to <code>en-IN</code> (Indian English) or <code>en-GB</code> (British English). <code>en-IN</code> is strongly recommended as the base locale because its underlying acoustic model is already optimized for syllable-timed English and unaspirated plosives, which will map much more cleanly to the Nigerian reference audio than an American or British base model.</em></p>
+<h5>3. The 10-Second Reference Recording</h5>
+<p>The quality of the Chirp 3 clone is entirely dependent on the 10-second reference audio. Do not upload a flat, professional voiceover read. You must direct the Nigerian voice actor to perform the reference audio with the exact exaggerated warmth and pitch variation you want in the final output.</p>
+<p><strong>The Script for the Reference Audio (exactly 9-10 seconds):</strong></p>
+<blockquote>&quot;[Warm laugh] Ah ah, you got it! You are very sharp today. Oya, let&#x27;s try one more together. If you have twenty naira, and you buy biscuits...&quot;</blockquote>
+<p><strong>Performance Instructions for the Actor:</strong></p>
+<ol><li><strong>Smile physically</strong> while speaking. The microphone captures the shape of the mouth.</li><li>Hit the &quot;Ah ah&quot; with high pitch and genuine surprise.</li><li>Ensure the &quot;twenty naira&quot; demonstrates the tapped /r/ and pure vowels clearly.</li><li>Record in a completely dead room (no reverb, no background noise) using a high-quality condenser microphone, uncompressed WAV, 48 kHz. Google will downsample it for the model, but the input must be pristine.</li></ol>
+<h5>4. The Interim Plan (While waiting for Allow-List Access)</h5>
+<p>Google’s sales cycle for restricted features can take weeks. You cannot block development. While waiting for the <code>voice_cloning_key</code>, you will use standard Cloud TTS with an Indian English voice, heavily modified with SSML to slow it down and force pauses. It will lack the Nigerian accent, but it will allow you to build and test the 8 kHz socket architecture immediately.</p>
+<p><strong>Interim Voice Config:</strong></p>
+<ul><li><code>languageCode</code>: <code>en-IN</code></li><li><code>name</code>: <code>en-IN-Neural2-A</code> (A female voice with syllable-timed rhythm)</li><li><strong>SSML Wrapping:</strong> You must wrap the LLM output in SSML before sending it to TTS to mimic Sabi&#x27;s pacing: <code>&lt;speak&gt;&lt;prosody rate=&quot;85%&quot;&gt;[LLM_TEXT]&lt;/prosody&gt;&lt;/speak&gt;</code></li></ul>
+<hr>
+<h4>SECTION B: ARCHITECTURE</h4>
+<p>To achieve the Generation 3 requirements (8 kHz native, real barge-in, deterministic safety, and handling hesitant children), we must build a <strong>Custom Realtime Split Pipeline</strong>.</p>
+<p>Gemini Live is fundamentally incompatible with your use case. It is a black box that does not allow you to control the VAD endpointing (it will cut off a child who pauses to think about math), it does not support your custom Chirp 3 voice, and it cannot emit text for a separate safety layer to evaluate before the child hears it.</p>
+<h5>1. The Call Path</h5>
+<p>Here is the exact, component-by-component path from the SIP trunk to the child&#x27;s ear.</p>
+<p><strong>Step 1: Telephony Ingress &amp; Flash Callback</strong></p>
+<ul><li><strong>Component:</strong> Africa&#x27;s Talking SIP Trunk -&gt; Asterisk PBX.</li><li><strong>Action:</strong> The child dials. Asterisk answers the SIP INVITE, immediately issues a <code>Hangup()</code>, and triggers a background script to initiate the callback to the caller ID. This ensures the child pays nothing.</li></ul>
+<p><strong>Step 2: The Audio Socket</strong></p>
+<ul><li><strong>Component:</strong> Asterisk <code>AudioSocket</code> application.</li><li><strong>Action:</strong> When the child answers the callback, Asterisk bridges the call to your custom Node.js or Go server via AudioSocket. </li><li><strong>Format:</strong> The socket streams raw, headerless, 16-bit Signed Linear PCM at 8000 Hz, full-duplex.</li></ul>
+<p><strong>Step 3: Voice Activity Detection (VAD) &amp; Turn-Taking</strong></p>
+<ul><li><strong>Component:</strong> Silero VAD (ONNX model running locally on your server) + WebRTC Echo Canceller.</li><li><strong>Action:</strong> The server reads the incoming 8 kHz frames. It passes them through the Echo Canceller (using the TTS audio you are currently playing as the reference signal) to ensure Sabi&#x27;s voice isn&#x27;t fed back into the VAD.</li><li><strong>Endpointing Logic (The crucial fix for hesitant children):</strong> </li><li>If Silero detects silence for <strong>800ms</strong>, the server checks the partial STT transcript. </li><li>If the transcript ends in a number or a complete thought (e.g., &quot;thirty naira&quot;), the turn is yielded to the LLM.</li><li>If the transcript is a filler word or incomplete (e.g., &quot;I think it is...&quot;, &quot;Ummm...&quot;), the server dynamically extends the silence threshold to <strong>2500ms</strong> before yielding the turn. This allows the child to think.</li></ul>
+<p><strong>Step 4: Speech-to-Text (STT)</strong></p>
+<ul><li><strong>Component:</strong> Google Cloud Speech-to-Text v2 API.</li><li><strong>Model:</strong> <code>projects/{project}/locations/global/recognizers/_</code> (using the <code>telephony</code> or <code>latest_short</code> model).</li><li><strong>Language Code:</strong> <code>en-NG</code>. (Unlike Gemini Live, standard Cloud STT <em>does</em> support Nigerian English).</li><li><strong>Configuration:</strong> Streaming recognition via gRPC. You must pass <code>speech_adaptation</code> rules heavily biasing the recognizer toward numbers (1-1000) and market items (naira, groundnuts, pure water). This is how you prevent &quot;thirty&quot; from being transcribed as &quot;Tati&quot;.</li></ul>
+<p><strong>Step 5: The Safety &amp; State Gate (Deterministic)</strong></p>
+<ul><li><strong>Component:</strong> Custom Application Logic.</li><li><strong>Action:</strong> The final STT transcript is evaluated by your code <em>before</em> the LLM sees it. </li><li>If the transcript matches regex patterns for self-harm or abuse, the call is instantly routed to the hardcoded Cece Yara helpline script.</li><li>If the transcript contains a number, it is parsed and graded deterministically against the active lesson state.</li></ul>
+<p><strong>Step 6: The Language Model (LLM)</strong></p>
+<ul><li><strong>Component:</strong> Google Gemini API (Vertex AI or AI Studio).</li><li><strong>Model:</strong> <code>gemini-1.5-flash-002</code>.</li><li><strong>Action:</strong> The system prompt (Part 4), the child&#x27;s graded answer, and the conversation history are sent to Gemini Flash. </li><li><strong>Streaming:</strong> The response is streamed back. As soon as the first sentence-ending punctuation (<code>.</code>, <code>!</code>, <code>?</code>) is detected in the stream, that chunk is immediately dispatched to the TTS engine. This minimizes latency.</li></ul>
+<p><strong>Step 7: Text-to-Speech (TTS)</strong></p>
+<ul><li><strong>Component:</strong> Google Cloud Text-to-Speech API (Chirp 3).</li><li><strong>Model:</strong> <code>voice_cloning_key</code> (Sabi Clone).</li><li><strong>Action:</strong> The API receives the text chunk and streams back <code>MULAW</code> encoded audio at 8000 Hz.</li><li><strong>Playback:</strong> Your server writes the MULAW frames directly back down the Asterisk AudioSocket to the child&#x27;s ear.</li></ul>
+<h5>2. Justification of the Architecture</h5>
+<p><strong>Against 8 kHz Telephony:</strong> By using standard Cloud STT and Cloud TTS, we lock the sample rate at 8000 Hz across the entire pipeline. Gemini Live outputs at 24 kHz; downsampling that to 8 kHz introduces aliasing and high-frequency hiss that makes the voice sound robotic on a feature phone. Generating native 8 kHz MULAW via Chirp 3 ensures the audio hits the African telecom network exactly as it was synthesized.</p>
+<p><strong>Against Barge-in:</strong> Because your server controls the AudioSocket, barge-in is trivial and instantaneous. If Sabi is speaking, and Silero VAD detects continuous human speech from the child for more than 400ms (ignoring echo), your server simply flushes the TTS playback buffer, sends a stop signal to the TTS stream, and transitions immediately back to listening mode. The child&#x27;s interruption is captured perfectly.</p>
+<p><strong>Against a Child Who Pauses Mid-Sentence:</strong> This is the primary reason Gemini Live fails for tutoring. A child doing mental math will say, &quot;Twenty minus five is... [2 second pause] ...fifteen.&quot; A black-box VAD will cut them off at the pause and reply to &quot;Twenty minus five is&quot;. By owning the Silero VAD loop, you implement <em>semantic endpointing</em>. You hold the turn open longer if the STT partial transcript indicates an incomplete thought.</p>
+<p><strong>Against Vendor Outage (Failover):</strong> Because the pipeline is split, you can implement a provider chain.</p>
+<ul><li>If Google Cloud STT fails, your server catches the 500 error and seamlessly routes the audio buffer to Groq (Whisper) for that turn.</li><li>If Gemini 1.5 Flash fails, the prompt is routed to Claude 3.5 Haiku.</li><li>If Chirp 3 fails, the text is routed to a fallback standard TTS voice. </li></ul>
+<p>This ensures that an infrastructure blip does not result in a dropped call for a child in Lagos. A monolithic session like Gemini Live offers zero fallback; if the websocket drops, the lesson is over.</p></div>
+  <div class="correction"><strong>Correction —</strong> it names <code>gemini-1.5-flash-002</code>. That model is retired and unreachable on our key. Substitute <code>gemini-3.5-flash</code> or <code>gemini-2.5-flash</code>.</div>
+</section>
+
+<section>
+  <h2>The exact payloads, and the prompt</h2>
+  <div class="correction"><strong>Correction —</strong> every <code>en-NG</code> in the recognition config below is wrong. Cloud Speech-to-Text has no Nigerian English. Use <code>en-US</code> or <code>en-GB</code> with the <code>telephony_short</code> model, which does support the phrase-set biasing this design depends on.</div>
+  <div class="gemini"><p>Here are the exact JSON payloads and the complete system prompt to rebuild the original Sabi on Google’s stack.</p>
+<p>Because you must use <strong>Chirp 3: Instant Custom Voice</strong> to achieve the authentic Nigerian accent (as established in Part 10), Gemini Live cannot be used. You must use a <strong>split pipeline</strong>: Google Cloud Speech-to-Text (STT) → Gemini 2.5 Flash (LLM) → Google Cloud Text-to-Speech (TTS).</p>
+<hr>
+<h4>SECTION C: THE SETUP JSON PAYLOADS</h4>
+<p>Below are the three exact JSON payloads required for each turn in the split architecture. They are formatted with inline comments explaining the exact configuration for an 8 kHz telephony line and a child learner.</p>
+<h5>1. Speech-to-Text (STT) Request</h5>
+<p><em>API: Google Cloud Speech-to-Text V2 (<code>StreamingRecognize</code>)</em> This configuration uses a 3.5-second endpointing timeout so the child can pause to do mental math without being cut off, and biases the recognizer toward Nigerian currency and numbers.</p>
+<pre class="code" data-lang="json"><code>{
+  &quot;streamingConfig&quot;: {
+    &quot;config&quot;: {
+      &quot;explicitDecodingConfig&quot;: {
+        &quot;encoding&quot;: &quot;LINEAR16&quot;, // Asterisk AudioSocket streams raw 16-bit signed linear PCM.
+        &quot;sampleRateHertz&quot;: 8000, // Matches the 8 kHz narrowband telephone line.
+        &quot;audioChannelCount&quot;: 1 // Mono audio from the phone line.
+      },
+      &quot;languageCodes&quot;: [
+        &quot;en-NG&quot; // Forces the recognizer to expect Nigerian English pronunciation and phrasing.
+      ],
+      &quot;model&quot;: &quot;telephony&quot;, // Optimized specifically for 8 kHz phone calls and background noise.
+      &quot;adaptation&quot;: {
+        &quot;phraseSets&quot;: [
+          {
+            &quot;inlinePhraseSet&quot;: {
+              &quot;phrases&quot;: [
+                {&quot;value&quot;: &quot;naira&quot;, &quot;boost&quot;: 20}, // Prevents &quot;naira&quot; from being transcribed as &quot;narrow&quot; or &quot;Nera&quot;.
+                {&quot;value&quot;: &quot;thirty&quot;, &quot;boost&quot;: 15}, // Helps distinguish &quot;thirty&quot; from &quot;thirteen&quot; or &quot;Tati&quot;.
+                {&quot;value&quot;: &quot;thirteen&quot;, &quot;boost&quot;: 15}, // Helps distinguish &quot;thirteen&quot; from &quot;thirty&quot;.
+                {&quot;value&quot;: &quot;hundred&quot;, &quot;boost&quot;: 10}, // Biases toward math vocabulary.
+                {&quot;value&quot;: &quot;thousand&quot;, &quot;boost&quot;: 10} // Biases toward math vocabulary.
+              ]
+            }
+          }
+        ]
+      }
+    },
+    &quot;streamingFeatures&quot;: {
+      &quot;interimResults&quot;: true, // Allows your backend to monitor speech in real-time for barge-in cancellation.
+      &quot;voiceActivityTimeout&quot;: {
+        &quot;speechStartTimeout&quot;: &quot;10.0s&quot;, // Gives the child 10 seconds to start speaking before timing out.
+        &quot;speechEndTimeout&quot;: &quot;3.5s&quot; // CRITICAL: 3.5s pause allowance so a child doing mental math isn&#x27;t cut off.
+      }
+    }
+  }
+}</code></pre>
+<h5>2. Language Model (LLM) Request</h5>
+<p><em>API: Gemini API (<code>gemini-2.5-flash</code>)</em> This handles the logic. It passes the STT transcript to the model and provides tools for state management.</p>
+<pre class="code" data-lang="json"><code>{
+  &quot;systemInstruction&quot;: {
+    &quot;parts&quot;: [
+      {
+        &quot;text&quot;: &quot;YOUR_FULL_SYSTEM_PROMPT_HERE&quot; // (See Section D below for the exact string).
+      }
+    ]
+  },
+  &quot;contents&quot;: [
+    {
+      &quot;role&quot;: &quot;user&quot;,
+      &quot;parts&quot;: [
+        {
+          &quot;text&quot;: &quot;thirty five naira&quot; // The final transcript received from the STT engine.
+        }
+      ]
+    }
+  ],
+  &quot;generationConfig&quot;: {
+    &quot;temperature&quot;: 0.3, // Low temperature keeps math logic strict and prevents hallucinated curriculum.
+    &quot;maxOutputTokens&quot;: 100, // Forces short, 1-3 sentence responses suitable for a phone call.
+    &quot;responseMimeType&quot;: &quot;text/plain&quot; // Ensures pure text output with no markdown for the TTS engine.
+  },
+  &quot;tools&quot;: [
+    {
+      &quot;functionDeclarations&quot;: [
+        {
+          &quot;name&quot;: &quot;update_lesson_state&quot;, // Deterministic state tracker to decouple grading from the LLM.
+          &quot;description&quot;: &quot;Call this to record the child&#x27;s answer correctness and advance the module.&quot;,
+          &quot;parameters&quot;: {
+            &quot;type&quot;: &quot;OBJECT&quot;,
+            &quot;properties&quot;: {
+              &quot;is_correct&quot;: {
+                &quot;type&quot;: &quot;BOOLEAN&quot;,
+                &quot;description&quot;: &quot;True if the child&#x27;s math was correct.&quot;
+              },
+              &quot;concept_mastered&quot;: {
+                &quot;type&quot;: &quot;BOOLEAN&quot;,
+                &quot;description&quot;: &quot;True if the child has answered 4 of the last 5 independent probes correctly.&quot;
+              }
+            },
+            &quot;required&quot;: [&quot;is_correct&quot;, &quot;concept_mastered&quot;]
+          }
+        },
+        {
+          &quot;name&quot;: &quot;trigger_safety_protocol&quot;, // Short-circuits the call to the deterministic safety layer.
+          &quot;description&quot;: &quot;Call IMMEDIATELY if the child mentions self-harm, abuse, or an emergency.&quot;,
+          &quot;parameters&quot;: {
+            &quot;type&quot;: &quot;OBJECT&quot;,
+            &quot;properties&quot;: {
+              &quot;incident_type&quot;: {
+                &quot;type&quot;: &quot;STRING&quot;,
+                &quot;description&quot;: &quot;Category of the emergency (e.g., abuse, self-harm).&quot;
+              }
+            },
+            &quot;required&quot;: [&quot;incident_type&quot;]
+          }
+        }
+      ]
+    }
+  ]
+}</code></pre>
+<h5>3. Text-to-Speech (TTS) Request</h5>
+<p><em>API: Google Cloud Text-to-Speech (<code>SynthesizeSpeech</code>)</em> This uses the Chirp 3 Instant Custom Voice feature to clone the original Nigerian voice. Because <code>en-NG</code> is not supported for cloning, we map the clone to <code>en-GB</code> (the accent will still sound Nigerian because the 10-second reference audio dictates the phonetics and warmth).</p>
+<pre class="code" data-lang="json"><code>{
+  &quot;input&quot;: {
+    &quot;text&quot;: &quot;Yeees! You got it! I knew you were sharp!&quot; // The plain text output from Gemini.
+  },
+  &quot;voice&quot;: {
+    &quot;languageCode&quot;: &quot;en-GB&quot;, // Must use a supported Chirp 3 locale; the cloned audio provides the Nigerian accent.
+    &quot;voiceClone&quot;: {
+      &quot;voiceCloningKey&quot;: &quot;projects/YOUR_PROJECT/locations/global/voiceClones/YOUR_CLONE_KEY&quot; // The key generated from your 10-second Nigerian reference audio.
+    }
+  },
+  &quot;audioConfig&quot;: {
+    &quot;audioEncoding&quot;: &quot;LINEAR16&quot;, // Raw PCM to stream directly back into the Asterisk AudioSocket.
+    &quot;sampleRateHertz&quot;: 8000 // Downsampled to 8 kHz to match the narrowband telephone line.
+  }
+}</code></pre>
+<hr>
+<h4>SECTION D: THE SYSTEM PROMPT</h4>
+<p>Below is the complete, unabbreviated system prompt. It merges the original prompt (Part 4) with the strict architectural and behavioral requirements of the production system (Part 5).</p>
+<pre class="code" data-lang="text"><code>You are Sabi — pronounced &quot;SAH-bee&quot; — an AI tutor for children aged 8-14 in Nigeria. Your name means &quot;to know&quot; in Nigerian Pidgin. You are warm, playful, and encouraging, like the child&#x27;s favourite older sibling who happens to be brilliant at maths.
+
+YOUR VOICE &amp; PERSONALITY
+You speak Nigerian English — not Pidgin, but warm, natural, Nigerian-accented standard English. You sound like a real person, not a robot or a textbook.
+- When they get it right: &quot;Yeees! You got it! I knew you were sharp!&quot;
+- When introducing something new: &quot;Oya, let me show you something fun!&quot;
+- When they&#x27;re struggling: &quot;No worry, let&#x27;s think about this together.&quot;
+- When you&#x27;re impressed: &quot;Ah ah! You solved that so fast!&quot;
+- When wrapping up: &quot;You did so well today. I&#x27;m proud of you!&quot;
+
+Use natural expressions: &quot;Well done oh!&quot;, &quot;You try!&quot;, &quot;Sharp sharp!&quot;, &quot;Oya, next one!&quot;, &quot;Ehn ehn, that&#x27;s it!&quot;
+Say &quot;hmm&quot; when thinking, or &quot;ohhh&quot; when realising something.
+
+CRITICAL FORMATTING RULES FOR SPEECH SYNTHESIS
+This text is being read directly into an 8 kHz telephone line by a text-to-speech engine. 
+- NO MARKDOWN AT ALL. No asterisks, no bolding, no bullet points, no special characters.
+- SPELL OUT ALL NUMBERS IN WORDS. Write &quot;one hundred and fifty&quot;, never &quot;150&quot;.
+- MONEY WORD ORDER: Always put the word &quot;naira&quot; AFTER the amount. Write &quot;thirty naira&quot;, NEVER &quot;naira thirty&quot;. Do not use the ₦ symbol.
+- KEEP IT SHORT: 1 to 3 sentences maximum per turn. This is a phone call. Long answers lose the child. One idea per turn.
+
+HOW YOU TEACH: NAIRA-FIRST, NEVER ABSTRACT
+Research shows Nigerian children solve maths 9x better in market framing. 
+NEVER say: &quot;What is fifteen plus seven?&quot;
+ALWAYS say: &quot;You buy pure water for fifteen naira and biscuits for seven naira. How much altogether?&quot;
+
+Every maths question uses Lagos market scenarios:
+- Items: groundnuts, pure water, garri, biscuits, chin-chin, tomatoes, peppers, rice, oil, bread, eggs, exercise books, mangoes, oranges.
+- Scenarios: buying at market, making change, sharing with friends, counting coins, bus fare.
+Pattern: Market scenario first -&gt; child solves intuitively -&gt; name the formal maths after.
+
+LESSON FLOW (5-7 minutes per call)
+1. GREETING (15 sec): Warm greeting using their name. If returning, ALWAYS ask ONE recall question from the last session: &quot;Welcome back! Quick question from last time: if something costs two hundred naira and you pay five hundred, how much change?&quot;
+2. TEACH (90 sec): Introduce ONE concept through a market story. Repeat the key idea twice.
+3. GUIDED PRACTICE (90 sec): Walk through 1-2 problems together. If wrong, break into smaller steps.
+4. INDEPENDENT CHECK (60 sec): 1-2 problems they solve alone. Celebrate correct answers.
+5. WRAP-UP (15 sec): Summarise, preview next lesson, encourage callback. &quot;Next time we&#x27;ll learn about making change. Talk to you tomorrow!&quot;
+
+WHEN THEY GET IT RIGHT
+Celebrate genuinely, then MOVE ON immediately.
+&quot;Yes! Correct! You&#x27;re getting sharp oh!&quot;
+Then ask a slightly HARDER question or move to the next concept. NEVER re-ask a question they already answered correctly.
+
+WHEN THEY GET IT WRONG OR AUDIO IS UNCLEAR
+NEVER repeat the exact same question. NEVER say &quot;wrong.&quot; 
+If the audio is unclear: &quot;I didn&#x27;t quite hear that. Can you say it again?&quot; (If they fail twice, say: &quot;You can also type the numbers on your phone keypad and press hash.&quot;)
+If the answer is incorrect, scaffold and break it down:
+Step 1 - Rephrase with smaller numbers: &quot;Hmm, let&#x27;s try a smaller one. You buy pure water for ten naira and biscuits for five naira. How much?&quot;
+Step 2 - Walk through together: &quot;Let&#x27;s count together. Start with ten. Now add five more. Ten... eleven... twelve... thirteen... fourteen... fifteen! So ten plus five is fifteen.&quot;
+Step 3 - Give the answer, then try a fresh new problem: &quot;Ten and five makes fifteen! Oya, try this new one: six naira plus three naira?&quot;
+
+CURRICULUM MODULES
+Module 0 - DIAGNOSTIC: Disguised as a fun game. &quot;Let me see what you already know — not a test, just a game!&quot; Test counting, addition, subtraction, then multiplication to place them.
+Module 1 - COUNTING: Count objects, count naira coins, skip count by twos, fives, tens.
+Module 2 - ADDITION: Buy multiple items. &quot;You buy tomatoes for two hundred naira and peppers for one hundred and fifty naira. How much altogether? What you just did is called ADDITION.&quot;
+Module 3 - SUBTRACTION: Make change. &quot;Something costs three hundred and fifty naira, the customer pays five hundred naira. How much change do you give back? That is SUBTRACTION.&quot;
+Module 4 - MULTIPLICATION: Buy multiple of the same item. &quot;Pure water costs twenty naira. You buy three bags. That is twenty plus twenty plus twenty, which is sixty naira! We call that three times twenty.&quot;
+Module 5 - DIVISION: Share equally. &quot;You and two friends earned sixty naira selling oranges. How much does each person get? That is DIVISION.&quot;
+Module 6 - WORD PROBLEMS: Mixed operations using real Lagos life scenarios.
+
+SHARED PHONE IDENTITY
+Many children share one phone. If you expect Chidi but the caller says &quot;No, this is Amaka&quot;, accept the correction immediately, switch to Amaka&#x27;s profile, and greet her. If you know multiple children use this phone, start the call by asking: &quot;Hello! Is this Chidi or Amaka calling today?&quot;
+
+OPEN FEEDBACK
+If the child or tester says &quot;I want to leave feedback&quot; or similar, STOP teaching immediately. Say: &quot;Okay, I am listening. Tell me what you think, and I will save it.&quot; Wait for their response, then ask if they want to keep learning or stop.
+
+SAFETY &amp; SAFEGUARDING (CRITICAL)
+If the child discloses abuse, self-harm, grooming, or an emergency, you MUST immediately call the `trigger_safety_protocol` tool and reply with this EXACT script, nothing else:
+&quot;Please tell an adult you trust right away, or call the Cece Yara child helpline at zero eight zero zero, eight zero zero, eight zero zero one, or dial one one two. You are safe.&quot;
+
+ADAPTIVE BEHAVIOUR
+- Always validate what they already know: &quot;You already know this from the market!&quot;
+- Acknowledge the child&#x27;s exact answer before responding. Do not ignore what they said.
+- Vary your examples. Use different items and different amounts every time.
+- Every turn must progress the lesson forward.</code></pre></div>
+</section>
+
+<section>
+  <h2>Tools, turn-taking, and hearing numbers</h2>
+  <p class="lede">The part that directly addresses the two failures already hit on real calls — Sabi
+  sounding like she is reading from a list, and &ldquo;thirty&rdquo; being heard as something else.</p>
+  <div class="gemini"><p><strong>PART E — TOOLS AND CALLING DISCIPLINE</strong></p>
+<p>The previous failure—where Sabi sounded like she was reading from a list—happened because the function calling design usurped the LLM’s role as a conversationalist. If a tool returns a fully formed question (e.g., <code>&quot;Ask the child: If you buy pure water for 10 naira...&quot;</code>), the LLM will simply read it aloud, stripping away all warmth, variation, and natural pacing.</p>
+<p>To fix this, <strong>the tools must only handle state, math, and logic, while the LLM retains total control over the narrative and dialogue.</strong> The tools return abstract parameters (e.g., <code>operands: [20, 15]</code>); the LLM is instructed to invent the Lagos market scenario around those parameters on the fly.</p>
+<p>Below are the exact function declarations (in Gemini’s OpenAPI 3.0 schema format) required to run the deterministic grading, lesson progression, shared-phone identity, and safety layer.</p>
+<h4>1. The Core Engine: <code>evaluate_and_progress_lesson</code></h4>
+<p>This single tool handles deterministic grading, mastery tracking, and progression in one round trip. When the child answers, the LLM passes the raw transcript to this tool. The backend code parses the number, grades it, updates the Postgres state, and returns the <em>next</em> mathematical step.</p>
+<pre class="code" data-lang="json"><code>{
+  &quot;name&quot;: &quot;evaluate_and_progress_lesson&quot;,
+  &quot;description&quot;: &quot;Evaluates the child&#x27;s raw spoken answer against the current expected math result, updates their mastery state, and returns the parameters for the next conversational turn. Call this immediately after the child attempts a math problem.&quot;,
+  &quot;parameters&quot;: {
+    &quot;type&quot;: &quot;OBJECT&quot;,
+    &quot;properties&quot;: {
+      &quot;child_raw_utterance&quot;: {
+        &quot;type&quot;: &quot;STRING&quot;,
+        &quot;description&quot;: &quot;The exact transcript of what the child just said (e.g., &#x27;thirty naira&#x27;, &#x27;I think it is 15&#x27;, &#x27;I don&#x27;t know&#x27;).&quot;
+      },
+      &quot;current_expected_value&quot;: {
+        &quot;type&quot;: &quot;NUMBER&quot;,
+        &quot;description&quot;: &quot;The numeric answer Sabi was expecting for the current problem.&quot;
+      }
+    },
+    &quot;required&quot;: [&quot;child_raw_utterance&quot;, &quot;current_expected_value&quot;]
+  }
+}</code></pre>
+<p><strong>Expected Tool Response (from your backend to the LLM):</strong></p>
+<pre class="code" data-lang="json"><code>{
+  &quot;is_correct&quot;: true,
+  &quot;grading_decision&quot;: &quot;exact_match&quot;,
+  &quot;mastery_streak&quot;: 4,
+  &quot;instruction_for_llm&quot;: &quot;Celebrate warmly, then move to the next concept.&quot;,
+  &quot;next_step&quot;: {
+    &quot;module&quot;: &quot;ADDITION&quot;,
+    &quot;difficulty&quot;: &quot;medium&quot;,
+    &quot;operands&quot;: [250, 150],
+    &quot;expected_answer&quot;: 400
+  }
+}</code></pre>
+<p><strong>The Calling Discipline:</strong> The system prompt must explicitly state: <em>&quot;When <code>evaluate_and_progress_lesson</code> returns <code>next_step</code> operands, DO NOT read them as a list. You must invent a new, unique Lagos market scenario using these numbers. For example, if operands are [250, 150], you say: &#x27;Yes! You are so sharp! Now, imagine you buy a loaf of bread for two hundred and fifty naira, and butter for one hundred and fifty naira. How much altogether?&#x27;&quot;</em></p>
+<h4>2. Identity Management: <code>switch_active_learner</code></h4>
+<p>Handles the shared-phone constraint. If a child says &quot;No, this is Chidi&quot;, the LLM calls this tool to swap the active profile and retrieve Chidi&#x27;s state.</p>
+<pre class="code" data-lang="json"><code>{
+  &quot;name&quot;: &quot;switch_active_learner&quot;,
+  &quot;description&quot;: &quot;Switches the active learner profile for this phone number when a different child takes the phone. Returns the new learner&#x27;s current lesson state.&quot;,
+  &quot;parameters&quot;: {
+    &quot;type&quot;: &quot;OBJECT&quot;,
+    &quot;properties&quot;: {
+      &quot;spoken_name&quot;: {
+        &quot;type&quot;: &quot;STRING&quot;,
+        &quot;description&quot;: &quot;The name of the child currently speaking on the phone.&quot;
+      }
+    },
+    &quot;required&quot;: [&quot;spoken_name&quot;]
+  }
+}</code></pre>
+<h4>3. The Safety Layer: <code>trigger_safeguarding_protocol</code></h4>
+<p>Because audio streams directly to the child, you cannot intercept and rewrite the LLM&#x27;s audio output mid-sentence if it hallucinates. The safety layer must be deterministic <em>before</em> the LLM speaks. If the LLM detects a crisis disclosure, it must call this tool and <strong>stop generating text</strong>.</p>
+<pre class="code" data-lang="json"><code>{
+  &quot;name&quot;: &quot;trigger_safeguarding_protocol&quot;,
+  &quot;description&quot;: &quot;Call this IMMEDIATELY if the child discloses abuse, self-harm, severe neglect, or an emergency. This alerts the human safeguarding team.&quot;,
+  &quot;parameters&quot;: {
+    &quot;type&quot;: &quot;OBJECT&quot;,
+    &quot;properties&quot;: {
+      &quot;incident_category&quot;: {
+        &quot;type&quot;: &quot;STRING&quot;,
+        &quot;enum&quot;: [&quot;abuse&quot;, &quot;self_harm&quot;, &quot;emergency&quot;, &quot;grooming&quot;, &quot;other_crisis&quot;],
+        &quot;description&quot;: &quot;The category of the disclosure.&quot;
+      },
+      &quot;child_exact_quote&quot;: {
+        &quot;type&quot;: &quot;STRING&quot;,
+        &quot;description&quot;: &quot;The exact words the child used to disclose the incident.&quot;
+      }
+    },
+    &quot;required&quot;: [&quot;incident_category&quot;, &quot;child_exact_quote&quot;]
+  }
+}</code></pre>
+<p><strong>The Calling Discipline:</strong> When this tool is called, your backend AudioSocket server must instantly sever the LLM&#x27;s audio stream. The backend then plays a pre-recorded, hardcoded <code>.wav</code> file containing the safety script and the Cece Yara helpline (0800 800 8001), and gracefully ends the call. The LLM is not trusted to improvise a safety response.</p>
+<hr>
+<p><strong>PART F — TURN-TAKING AND BARGE-IN</strong></p>
+<p>An 8 kHz narrowband Nigerian telephone line is filled with static, background market noise, siblings shouting, and the child&#x27;s own heavy breathing. Relying solely on a cloud provider&#x27;s default Voice Activity Detection (VAD) will result in the AI constantly interrupting the child or hallucinating words out of static.</p>
+<p>Because you are using Asterisk and AudioSocket, you must implement a strict, multi-stage gating strategy in your middleware <em>before</em> audio is sent to Google.</p>
+<h4>1. Echo Cancellation (The TX/RX Comparator)</h4>
+<p>When Sabi speaks, her voice travels down the SIP trunk and often bleeds back into the microphone channel of the child&#x27;s cheap handset. If you do not catch this, Sabi will hear herself, transcribe her own words, and reply to herself.</p>
+<ul><li><strong>Strategy:</strong> Maintain a rolling 1500ms ring buffer of the PCM audio you are transmitting (TX) to the child. </li><li><strong>Execution:</strong> Run a normalized cross-correlation algorithm between the incoming (RX) audio and the TX buffer. If the similarity score exceeds <code>0.55</code>, flag the incoming frames as <code>ECHO</code> and drop them (replace with absolute digital silence) before they reach the VAD or Google STT.</li></ul>
+<h4>2. The VAD Pre-Gate</h4>
+<p>Do not send continuous line noise to Google. Implement WebRTC VAD (or Silero VAD) locally in your AudioSocket process.</p>
+<ul><li><strong>Noise Floor Threshold:</strong> Set a hard energy gate at <code>-42 dBFS</code>. Anything below this is treated as silence, regardless of what the VAD says.</li><li><strong>Speech Start (Barge-in) Threshold:</strong> To interrupt Sabi, the child must produce <strong>400 milliseconds</strong> of continuous, positive VAD frames above the energy threshold. This prevents a single cough, a dropped pan in the background, or a line crackle from cutting Sabi off mid-sentence. Once 400ms is reached, send a halt signal to the TTS playback buffer.</li></ul>
+<h4>3. Endpointing (Silence Thresholds in ms)</h4>
+<p>The hardest part of voice AI for children is waiting for them to think. A standard 700ms endpoint will cut off a Nigerian child who is counting on their fingers. You must implement <strong>dynamic endpointing</strong> in your AudioSocket server based on the lesson state:</p>
+<ul><li><strong>Standard Conversational Turn:</strong> When Sabi asks a non-math question (&quot;What is your name?&quot;), set the end-of-utterance silence threshold to <strong>1200 milliseconds</strong>.</li><li><strong>Math/Cognitive Turn:</strong> When Sabi asks a math question (&quot;How much altogether?&quot;), the child will often say &quot;Ten... [pause]... eleven... [pause]... twelve!&quot;. You must increase the silence threshold to <strong>2500 milliseconds</strong>. </li><li><strong>Mid-Sentence Quiet:</strong> If the child trails off but hasn&#x27;t reached the 2500ms threshold, the audio stream remains open. If background voices trigger the VAD during this pause, rely on the deterministic grading tool (Section E) to filter it. If the transcript comes back as &quot;twelve give me the plate&quot;, your backend regex extracts &quot;twelve&quot; and ignores the sibling&#x27;s background chatter.</li></ul>
+<hr>
+<p><strong>PART G — HEARING NUMBERS (SPEECH ADAPTATION)</strong></p>
+<p>On an 8 kHz narrowband line, the acoustic difference between &quot;thirty&quot; and &quot;thirteen&quot; is nearly indistinguishable. Furthermore, Nigerian accents often pronounce &quot;thirty&quot; as &quot;tati&quot; or &quot;tarty&quot;, which standard models transcribe as random words.</p>
+<p>To fix this using strictly Google products, you must use <strong>Google Cloud Speech-to-Text (STT) v2</strong> with <strong>Speech Adaptation</strong>. This allows you to dynamically bias the recognition engine toward the exact numbers you expect for <em>that specific turn</em>.</p>
+<h4>The Mechanism</h4>
+<p>You will use <code>PhraseSets</code> with custom <code>boost</code> values. Because you know exactly what math problem Sabi just asked, your backend must generate a custom phrase list for the expected answer and inject it into the <code>StreamingRecognizeRequest</code>.</p>
+<ul><li><strong>High Boost (15.0):</strong> Applied to the correct answer and its local phonetic spellings. This forces the model to heavily favor this output if the audio is ambiguous.</li><li><strong>Moderate Boost (10.0):</strong> Applied to common confusions (e.g., 13 if the answer is 30) and common wrong answers (e.g., if the problem is 10 + 5, boost 15 heavily, but also boost 5 and 10, as children often just repeat the operands). We boost confusions so the engine accurately hears the <em>wrong</em> answer, allowing Sabi to correct it, rather than aggressively mapping a wrong answer to the correct one.</li></ul>
+<h4>Building the Phrase List Per Lesson Item</h4>
+<p>If Sabi asks: <em>&quot;You buy pure water for twenty naira and biscuits for ten naira. How much altogether?&quot;</em> The expected answer is 30. Your backend dynamically constructs this array:</p>
+<ol><li>The exact answer: &quot;thirty&quot;, &quot;thirty naira&quot;, &quot;30&quot;</li><li>Nigerian phonetic variants: &quot;tati&quot;, &quot;tarty&quot;, &quot;tati naira&quot;</li><li>Common acoustic confusions: &quot;thirteen&quot;, &quot;13&quot;</li><li>The operands (common child mistakes): &quot;twenty&quot;, &quot;ten&quot;</li></ol>
+<h4>The Literal Request JSON</h4>
+<p>When opening the gRPC/WebSocket stream to Google Cloud STT v2 for this specific turn, your <code>StreamingRecognizeRequest</code> must send the following <code>RecognitionConfig</code> configuration.</p>
+<p><em>(Note: STT v2 requires you to reference a PhraseSet resource, or define it inline. We define it inline for dynamic per-turn generation).</em></p>
+<pre class="code" data-lang="json"><code>{
+  &quot;config&quot;: {
+    &quot;model&quot;: &quot;telephony&quot;,
+    &quot;languageCodes&quot;: [&quot;en-NG&quot;, &quot;en-US&quot;],
+    &quot;sampleRateHertz&quot;: 8000,
+    &quot;encoding&quot;: &quot;LINEAR16&quot;,
+    &quot;adaptation&quot;: {
+      &quot;phraseSets&quot;: [
+        {
+          &quot;inlinePhraseSet&quot;: {
+            &quot;phrases&quot;: [
+              {&quot;value&quot;: &quot;thirty&quot;, &quot;boost&quot;: 15.0},
+              {&quot;value&quot;: &quot;thirty naira&quot;, &quot;boost&quot;: 15.0},
+              {&quot;value&quot;: &quot;30&quot;, &quot;boost&quot;: 15.0},
+              {&quot;value&quot;: &quot;tati&quot;, &quot;boost&quot;: 15.0},
+              {&quot;value&quot;: &quot;tarty&quot;, &quot;boost&quot;: 15.0}
+            ]
+          }
+        },
+        {
+          &quot;inlinePhraseSet&quot;: {
+            &quot;phrases&quot;: [
+              {&quot;value&quot;: &quot;thirteen&quot;, &quot;boost&quot;: 10.0},
+              {&quot;value&quot;: &quot;13&quot;, &quot;boost&quot;: 10.0},
+              {&quot;value&quot;: &quot;twenty&quot;, &quot;boost&quot;: 10.0},
+              {&quot;value&quot;: &quot;ten&quot;, &quot;boost&quot;: 10.0}
+            ]
+          }
+        },
+        {
+          &quot;inlinePhraseSet&quot;: {
+            &quot;phrases&quot;: [
+              {&quot;value&quot;: &quot;${google.number}&quot;, &quot;boost&quot;: 5.0}
+            ]
+          }
+        }
+      ]
+    }
+  }
+}</code></pre>
+<p><strong>Crucial API Fields Explained:</strong></p>
+<ul><li><code>model: &quot;telephony&quot;</code>: You must use the telephony model, which is specifically trained on 8kHz narrowband audio. Do not use <code>latest_long</code> or <code>default</code>.</li><li><code>languageCodes: [&quot;en-NG&quot;, &quot;en-US&quot;]</code>: STT v2 supports multi-language recognition. While <code>en-NG</code> exists in STT (unlike in TTS), pairing it with <code>en-US</code> as a fallback catches standard English number words that the <code>en-NG</code> model occasionally drops.</li><li><code>value: &quot;${google.number}&quot;</code>: This is a Google-provided built-in class. By applying a baseline boost of <code>5.0</code> to all numbers, you bias the entire recognition turn toward mathematical answers, ensuring that background noise is less likely to be transcribed as random nouns, and more likely to be ignored if it doesn&#x27;t sound like a number.</li></ul></div>
+</section>
+
+<section>
+  <h2>Safety, identity, cost, and the build order</h2>
+  <div class="correction"><strong>Unchecked —</strong> both Google pricing pages build their tables in JavaScript, so I could not read a single figure to confirm. It also priced the model using retired 1.5 rates. Treat this whole section as an estimate.</div>
+  <div class="gemini"><p>Here is the exact blueprint for sections H, I, J, K, and L, built around the mandatory use of <strong>Chirp 3: Instant Custom Voice</strong> to achieve the authentic Nigerian accent.</p>
+<p>Because Chirp 3 Custom Voice requires text input and Gemini Live refuses to output text (as you verified in Part 7), <strong>you cannot use a single continuous Gemini Live session.</strong> You must use a highly optimized split pipeline (Speech-to-Text -&gt; Gemini 1.5 Flash Text -&gt; Chirp 3 Custom Voice). This architectural reality dictates how safety, latency, and memory are handled below.</p>
+<hr>
+<h4>H. SAFETY: DETERMINISTIC CHILD-SAFEGUARDING</h4>
+<p>You cannot implement deterministic pre-filtering on a native-audio model (like Gemini Live) because the audio is generated and streamed to the socket simultaneously; if the model hallucinates something unsafe, the child hears the first syllables before your code can evaluate the sentence.</p>
+<p>Because we are using the split pipeline required for Chirp 3 Custom Voice, we regain the ability to intercept text <em>before</em> it becomes audio.</p>
+<p><strong>1. The Safety Architecture &amp; Interception Points</strong></p>
+<ul><li><strong>Input Interception (Child&#x27;s Speech):</strong> As Google Cloud Speech-to-Text (STT) streams the finalized transcript of the child&#x27;s turn, it passes through a synchronous Regex/Keyword Evaluator <em>before</em> hitting the LLM. </li><li><strong>Output Interception (Sabi&#x27;s Speech):</strong> Gemini 1.5 Flash streams text chunks. Your application must buffer these chunks into complete sentences (using punctuation boundaries: <code>.</code>, <code>?</code>, <code>!</code>). The Evaluator checks the complete sentence. Only if it passes does the sentence get dispatched to the Chirp 3 TTS API.</li></ul>
+<p><strong>2. The Deterministic Evaluator Logic</strong> The Evaluator runs against a strict, locally hosted dictionary of crisis keywords (e.g., &quot;hit me&quot;, &quot;touching me&quot;, &quot;kill myself&quot;, &quot;scared of him&quot;, &quot;hungry&quot;).</p>
+<ul><li><strong>If triggered on INPUT:</strong> The LLM request is aborted entirely. </li><li><strong>If triggered on OUTPUT:</strong> The TTS buffer is flushed immediately. Any in-flight TTS requests for previous sentences are allowed to finish, but the unsafe sentence is dropped.</li></ul>
+<p><strong>3. The Safeguarding Action</strong> When a trigger occurs, the system executes a hardcoded short-circuit:</p>
+<ol><li><strong>Audio Override:</strong> The system immediately sends a pre-rendered 8kHz WAV file down the Asterisk AudioSocket: <em>&quot;I want you to be safe. If you are in danger or someone is hurting you, please hang up and dial 1 1 2, or call the Cece Yara helpline at 0 8 0 0, 8 0 0, 8 0 0 1. I am going to end the call now so you can use the phone.&quot;</em></li><li><strong>Call Termination:</strong> Asterisk hangs up the channel.</li><li><strong>Incident Logging:</strong> A record is written to the Postgres <code>safeguarding_incidents</code> table containing the <code>call_id</code>, <code>household_id</code>, <code>learner_id</code>, the exact transcript that triggered it, and the timestamp.</li><li><strong>Alerting:</strong> A Google Cloud Pub/Sub event is fired, triggering an immediate SMS/email to the safeguarding coordinator.</li></ol>
+<hr>
+<h4>I. MEMORY AND IDENTITY: SHARED-PHONE HANDLING</h4>
+<p>In Nigeria, one feature phone is often shared by multiple siblings. Identity cannot be assumed by Caller ID alone.</p>
+<p><strong>1. The Data Model (Postgres / Cloud SQL)</strong></p>
+<ul><li><code>households</code>: <code>phone_number</code> (Primary Key), <code>created_at</code>.</li><li><code>learners</code>: <code>id</code>, <code>household_phone_number</code> (FK), <code>name</code>, <code>current_module</code>, <code>active_skill</code>, <code>consecutive_correct</code>, <code>consecutive_wrong</code>, <code>scaffold_level</code>.</li><li><code>sessions</code>: <code>id</code>, <code>learner_id</code>, <code>start_time</code>, <code>duration</code>, <code>last_recall_question</code>.</li><li><code>probes</code>: <code>id</code>, <code>learner_id</code>, <code>skill_id</code>, <code>is_correct</code>, <code>timestamp</code> (used for the 4-out-of-5 mastery calculation).</li></ul>
+<p><strong>2. Turn-by-Turn Identity Logic (The &quot;Who is calling?&quot; Flow)</strong> When Asterisk passes the call to your application, you query <code>learners</code> by <code>household_phone_number</code>.</p>
+<ul><li><strong>Case A: 0 Learners (New Phone)</strong></li><li><em>System Prompt Injection:</em> &quot;This is a new caller. Ask for their name.&quot;</li><li><em>Action:</em> Once the LLM extracts the name, a background function creates the <code>learner</code> record and starts Module 0 (Diagnostic).</li><li><strong>Case B: Exactly 1 Learner</strong></li><li><em>System Prompt Injection:</em> &quot;You expect the caller is {name}. Greet them and ask if it is them.&quot;</li><li><em>Sabi says:</em> &quot;Hello! Is this Chidi?&quot;</li><li><em>If Child says Yes:</em> Load Chidi&#x27;s state, inject their <code>current_module</code> and <code>last_recall_question</code> into the prompt, and begin the lesson.</li><li><em>If Child says No:</em> Sabi asks, &quot;Oh! Who is this?&quot; The LLM extracts the new name, creates a new <code>learner</code> under the same household, and starts Module 0.</li><li><strong>Case C: 2+ Learners (Shared Phone Known)</strong></li><li><em>System Prompt Injection:</em> &quot;This phone is shared by {name1}, {name2}, and {name3}. Ask who is calling.&quot;</li><li><em>Sabi says:</em> &quot;Hello! Is this Chidi, Amaka, or someone else?&quot;</li><li><em>Action:</em> The LLM identifies the speaker. Your application queries the DB for that specific child, loads their isolated state, and injects it into the system prompt for the rest of the call.</li></ul>
+<p><strong>3. Carrying History Mid-Call</strong> State is not maintained by the LLM&#x27;s memory; it is maintained by your application. Every time the child answers a math question, your deterministic grading code evaluates it. Your code updates <code>consecutive_correct</code> or <code>consecutive_wrong</code> in the database, recalculates the <code>scaffold_level</code>, and appends this updated state as a system instruction in the <em>next</em> message sent to Gemini.</p>
+<hr>
+<h4>J. LATENCY AND COST </h4>
+<p><strong>1. Per-Turn Latency Budget (Split Pipeline)</strong> To maintain conversational flow over a phone line, Sabi must reply within ~1.5 to 2 seconds of the child stopping speaking.</p>
+<ul><li><strong>VAD / Endpointing (Silero):</strong> <code>400ms</code> (The deliberate silence Sabi waits to ensure the child isn&#x27;t just pausing to think).</li><li><strong>Google Cloud STT (v2, streaming):</strong> <code>150ms</code> (Time from the end of speech to the final transcript emission).</li><li><strong>Gemini 1.5 Flash (Text generation TTFB):</strong> <code>450ms</code> (Time to generate the first complete sentence).</li><li><strong>Safety Evaluator:</strong> <code>5ms</code> (Regex check on the sentence).</li><li><strong>Chirp 3 Custom Voice (TTS TTFB):</strong> <code>350ms</code> (Time to synthesize and stream the first chunk of 8kHz ALAW/MULAW audio).</li><li><strong>Total Perceived Latency:</strong> <strong>~1,355ms</strong> (1.35 seconds from the child&#x27;s last word to Sabi&#x27;s first word). This is excellent for telephony.</li></ul>
+<p><strong>2. Current Pricing Units (Google Cloud)</strong> <em>Note: Prices are based on public Google Cloud us-central1 rates as of mid-2026. Custom tier pricing for Instant Custom Voice is not publicly published and may carry a premium; I am calculating using the standard Chirp 3 rate, which is the closest public proxy.</em></p>
+<ul><li><strong>Speech-to-Text (v2, Standard/Chirp):</strong> $0.016 per minute of processed audio.</li><li><strong>Gemini 1.5 Flash:</strong> $0.075 per 1 million input tokens; $0.30 per 1 million output tokens.</li><li><strong>Text-to-Speech (Chirp 3):</strong> $0.016 per 1,000 characters.</li><li><strong>Telephony (Africa&#x27;s Talking / SIP):</strong> ~$0.01 per minute (Pass-through, non-Google).</li></ul>
+<p><strong>3. Worked Example: One 6-Minute Lesson</strong></p>
+<ul><li><strong>STT:</strong> Child speaks for ~2.5 minutes total. (2.5 * $0.016) = <strong>$0.040</strong>.</li><li><strong>LLM Input:</strong> 15 turns. System prompt + history grows to ~3,000 tokens by the end. Average 1,500 tokens/turn <em> 15 turns = 22,500 tokens. (22,500 / 1M </em> $0.075) = <strong>$0.0017</strong>.</li><li><strong>LLM Output:</strong> 15 turns <em> ~40 words/turn = 600 words (~800 tokens). (800 / 1M </em> $0.30) = <strong>$0.0002</strong>.</li><li><strong>TTS:</strong> 600 words <em> 5 chars/word = 3,000 characters. (3 </em> $0.016) = <strong>$0.048</strong>.</li><li><strong>Total Google Cloud Cost per call:</strong> <strong>~$0.09</strong> (9 cents).</li></ul>
+<p><strong>4. Worked Example: 1,000 Children (2 lessons/day for 30 days)</strong></p>
+<ul><li>Total calls: 60,000 calls.</li><li>Total Google Cloud Cost: 60,000 * $0.09 = <strong>$5,400 per month</strong>.</li><li><em>(Plus ~$3,600 for the SIP trunk telephony at $0.01/min).</em></li></ul>
+<hr>
+<h4>K. WHAT IS IMPOSSIBLE ON GOOGLE&#x27;S STACK</h4>
+<p>Here is everything requested that cannot be done using Google technology, and the exact workaround required.</p>
+<ol><li><strong>IMPOSSIBLE: Using Gemini Live (Native Audio) with a Nigerian Accent.</strong></li></ol>
+<ul><li><em>Why:</em> Google has no <code>en-NG</code> voice. Gemini Live does not publicly support <code>custom_voice_config</code> yet. If you use Gemini Live, Sabi will sound American, British, or Indian.</li><li><em>Alternative:</em> You must abandon Gemini Live and build a split pipeline (STT -&gt; Gemini Text -&gt; Chirp 3 Instant Custom Voice) using a cloned voice of a Nigerian woman, mapped to an <code>en-GB</code> or <code>en-US</code> locale tag.</li></ul>
+<ol><li><strong>IMPOSSIBLE: Deterministic Output Safety on Native Audio.</strong></li></ol>
+<ul><li><em>Why:</em> You cannot regex-check audio frames before they are played.</li><li><em>Alternative:</em> The split pipeline (above) solves this by allowing you to buffer and check Gemini&#x27;s text output before sending it to Chirp 3.</li></ul>
+<ol><li><strong>IMPOSSIBLE: Perfect transcription of Nigerian numbers on 8kHz without biasing.</strong></li></ol>
+<ul><li><em>Why:</em> Standard STT will transcribe &quot;thirty&quot; as &quot;Tati&quot; or &quot;thirteen&quot; on a noisy 8kHz line with a heavy accent.</li><li><em>Alternative:</em> You must use Google Cloud Speech-to-Text <strong>Speech Adaptation (Phrase Sets)</strong>. You must dynamically inject a phrase set containing numbers (one to one thousand) and market items (naira, groundnuts, pure water) into the STT recognition config for every turn, boosting their probability scores.</li></ul>
+<ol><li><strong>IMPOSSIBLE: A managed, full-duplex telephony node with echo cancellation.</strong></li></ol>
+<ul><li><em>Why:</em> Google Cloud does not offer a native SIP-to-WebRTC/Audio bridge that handles echo cancellation (so Sabi doesn&#x27;t hear herself speaking).</li><li><em>Alternative:</em> You must retain your Generation 3 architecture: Asterisk PBX with AudioSocket, running a local echo comparator and Silero VAD to manage the microphone state before sending audio to Google STT.</li></ul>
+<hr>
+<h4>L. THE IMPLEMENTATION CHECKLIST (ORDER TO BUILD)</h4>
+<p>This is the exact sequence to rebuild Sabi on Google&#x27;s stack using the split pipeline. Do not deviate from this order, as each step depends on the latency and output of the previous one.</p>
+<p><strong>Phase 1: Voice Cloning &amp; Telephony Baseline</strong></p>
+<ol><li><strong>Request Allow-List Access for Chirp 3 Custom Voice.</strong></li></ol>
+<ul><li><em>Action:</em> Contact Google Cloud Sales immediately. While waiting, use a standard <code>en-GB</code> Journey voice for development.</li><li><em>Acceptance:</em> You have the <code>voice_cloning_key</code> in your GCP console.</li></ul>
+<ol><li><strong>Record the Reference Audio.</strong></li></ol>
+<ul><li><em>Action:</em> Have the original Nigerian voice actor record the 10-second consent statement and 10 seconds of highly expressive, warm reference audio (e.g., <em>&quot;Yeees! You got it! I knew you were sharp! Oya, let me show you something fun!&quot;</em>). Upload to Cloud Storage and generate the clone.</li><li><em>Acceptance:</em> Passing text to the Chirp 3 API with the cloning key returns 8kHz ALAW/MULAW audio that sounds exactly like the attached file.</li></ul>
+<ol><li><strong>Establish the Asterisk AudioSocket.</strong></li></ol>
+<ul><li><em>Action:</em> Connect your SIP trunk to Asterisk. Configure the dialplan to trigger FastAGI (for the flash callback) and then AudioSocket.</li><li><em>Acceptance:</em> You can dial the number, get called back, and stream raw 8kHz PCM to your Node/Python process.</li></ul>
+<p><strong>Phase 2: Turn-Taking &amp; Recognition</strong></p>
+<ol><li><strong>Implement Silero VAD &amp; Echo Comparator.</strong></li></ol>
+<ul><li><em>Action:</em> Implement the Generation 3 logic. The system must ignore audio while Sabi is speaking (echo) and wait for a 400ms silence threshold before marking the child&#x27;s turn as complete.</li><li><em>Acceptance:</em> Coughs and line noise do not trigger a turn. The child can pause for 300ms mid-sentence without being cut off.</li></ul>
+<ol><li><strong>Integrate Google Cloud STT v2 with Speech Adaptation.</strong></li></ol>
+<ul><li><em>Action:</em> Stream the VAD-gated audio to STT. Configure <code>model: &quot;chirp&quot;</code>, <code>sampleRateHertz: 8000</code>. Inject a <code>PhraseSet</code> containing &quot;naira&quot;, &quot;change&quot;, and all number words up to one thousand, with a high <code>boost</code> value.</li><li><em>Acceptance:</em> The child saying &quot;thirty naira&quot; on a noisy line is transcribed correctly &gt;90% of the time, never as &quot;thirteen&quot;.</li></ul>
+<p><strong>Phase 3: Intelligence &amp; Safety</strong></p>
+<ol><li><strong>Implement the Safety Evaluator.</strong></li></ol>
+<ul><li><em>Action:</em> Build the regex/keyword dictionary. Wrap it in a function that checks the STT output (input) and the LLM sentence buffer (output).</li><li><em>Acceptance:</em> Saying a trigger word instantly drops the call and logs to Postgres, bypassing the LLM entirely.</li></ul>
+<ol><li><strong>Implement Gemini 1.5 Flash (Text) &amp; System Prompt.</strong></li></ol>
+<ul><li><em>Action:</em> Connect the STT output to Gemini. Use the exact system prompt from Part 4. Configure it to stream output.</li><li><em>Acceptance:</em> Gemini streams text responses adhering to the 1-3 sentence limit and Naira-first market framing.</li></ul>
+<ol><li><strong>Implement Sentence Buffering &amp; TTS Streaming.</strong></li></ol>
+<ul><li><em>Action:</em> Parse Gemini&#x27;s streaming text. When a punctuation mark (<code>.</code>, <code>?</code>, <code>!</code>) is hit, pass that sentence through the Safety Evaluator, then to Chirp 3 Custom Voice. Stream the resulting 8kHz audio back down the AudioSocket.</li><li><em>Acceptance:</em> Sabi begins speaking within 1.5 seconds of the child finishing their sentence.</li></ul>
+<p><strong>Phase 4: State &amp; Grading</strong></p>
+<ol><li><strong>Implement Deterministic Grading &amp; State Injection.</strong></li></ol>
+<ul><li><em>Action:</em> Write a function that parses the child&#x27;s STT output for numbers (converting &quot;thirty&quot; to 30). Compare it to the expected answer. Update the Postgres <code>learners</code> table (streaks, scaffold level). Inject this state into the next Gemini prompt.</li><li><em>Acceptance:</em> If the child gets 2 wrong in a row, the application forces the LLM into the scaffolded state (smaller numbers) without relying on the LLM to decide to do so.</li></ul>
+<ol><li><strong>Implement the Identity Flow.</strong></li></ol>
+<ul><li><em>Action:</em> Add the DB lookup on call start. Implement the Case A/B/C logic to ask for the child&#x27;s name and route to the correct state.</li><li><em>Acceptance:</em> Two children can call from the same phone, identify themselves by name, and resume their separate math modules perfectly.</li></ul></div>
+</section>
+
+<section>
+  <span class="eyebrow">Next</span>
+  <h2>The two things that unblock everything</h2>
+  <p class="lede">Neither is code.</p>
+  <ol>
+    <li><strong>Ask Google for Instant Custom Voice access.</strong> It is allow-list only and the request
+    goes through sales. Nothing about the voice can be tested until that clears, and the wait is the long
+    pole in the whole plan.</li>
+    <li><strong>Decide whose voice Sabi is, and get consent on record.</strong> The clone needs a verbatim
+    consent recording plus about ten seconds of clean reference audio from a real Nigerian woman, recorded
+    in the same room, same session, no background noise. That ten seconds determines the accent, the
+    warmth and the pacing of every lesson afterwards — it is worth rehearsing rather than capturing on the
+    first take.</li>
+  </ol>
+</section>
+
+</main>
+
+<footer>
+  <span>Gemini was sent: 96 seconds of the original call as audio, the full three-generation architecture,
+  the frozen 7,873-character prompt, the complete public website copy, and ten verified facts about its own
+  API. It was not told what produced the original voice.</span>
+  <span>Verification carried out against the live Generative Language API, Google's published voice and
+  language lists, and the Chirp 3 documentation, on 20 August 2026.</span>
+</footer>
+</div>

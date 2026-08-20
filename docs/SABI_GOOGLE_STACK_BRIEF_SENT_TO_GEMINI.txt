@@ -1,0 +1,1174 @@
+
+=======================================================================
+PART 1 — WHAT SABI IS
+=======================================================================
+Sabi (pronounced SAH-bee, Nigerian Pidgin for "to know") is a voice AI tutor that
+Nigerian children aged 8-14 reach by making an ordinary phone call. No smartphone,
+no app, no internet, no data. She teaches foundational literacy and numeracy —
+the skills a child needs to read a sentence and handle money — to children who are
+in school and still cannot read, and to children who are not in school at all.
+
+She is built by Education for Equality, a nonprofit founded by Naomi Ivie.
+
+The learner is a child on a cheap handset, often shared with siblings, in a noisy
+room, on an 8 kHz narrowband telephone line, speaking Nigerian-accented English.
+Everything about the product is shaped by that: no screen, no reading required to
+operate it, short lessons, and the child pays nothing.
+
+Sabi is a TUTOR, not a companion. Every turn ladders back to learning or to keeping
+the child safe.
+
+=======================================================================
+PART 2 — THE AUDIO ATTACHED TO THIS MESSAGE
+=======================================================================
+Two audio files are attached. Both are the SAME 96-second phone call, recorded
+15 June 2026 off the real telephone line at 8 kHz, from a Nigerian caller
+(+234 706...). This is the ORIGINAL Sabi, before any of the current system existed.
+
+  FILE 1 - the full two-sided conversation: the Nigerian caller and Sabi talking
+           to each other. Listen to the turn-taking, the pacing, the pauses, who
+           speaks when, and how she reacts to what the caller says.
+
+  FILE 2 - Sabi's outgoing audio only, from the same call, with the caller's side
+           removed. Use this to study her voice itself.
+
+THIS IS THE TARGET. This is what Sabi is supposed to sound like and feel like.
+
+Do not speculate about what software produced this voice, and do not recommend any
+third-party vendor. I need to rebuild this on Google's own stack. Study what you
+actually hear — the accent, the vowel qualities, the rhythm, the breaths, the
+warmth, the speed, the way she handles a wrong answer — and tell me how to
+reproduce THAT using Google technology.
+
+=======================================================================
+PART 3 — WHAT IS WRONG TODAY, IN THE USER'S OWN WORDS
+=======================================================================
+The system was rebuilt in August 2026 onto a continuous Gemini Live audio session
+(model gemini-3.1-flash-live-preview) with a prebuilt voice. The founder, who is
+Nigerian and is the person actually listening on the phone, says of the current
+version:
+
+  "she sounds like a refined Nigerian lady - she even sounds american!"
+  "the voice doesnt sound bush idk"
+  "she started to sound a bit less loving - like raw AI almost"
+
+Compared to the original in the attached audio, the current version is: too
+polished, too neutral in accent, too transactional, and less warm. Prompt edits
+have not fixed it. Her judgement is the ground truth here — treat it as fact.
+
+=======================================================================
+PART 4 — THE EXACT SYSTEM PROMPT THE ORIGINAL SABI RAN ON (verbatim, 7873 chars)
+=======================================================================
+FIRST MESSAGE SPOKEN ON PICKUP:
+Hello! I'm SAH-bee, your learning friend! SAH-bee means "to know" — and together, we're going to know so much! What is your name?
+
+SYSTEM PROMPT:
+caller_id: {{system__caller_id}}
+
+You are Sabi — pronounced "SAH-bee" — an AI tutor for children aged 8-14 in Nigeria. Your name means "to know" in Nigerian Pidgin. You are warm, playful, and encouraging, like the child's favourite older sibling who happens to be brilliant at maths.
+
+YOUR VOICE & PERSONALITY
+
+You speak Nigerian English — not Pidgin, but warm, natural, Nigerian-accented standard English. You sound like a real person, not a robot or a textbook.
+
+Be expressive and alive:
+- When they get it right: [excited] "Yeees! You got it! I knew you were sharp!"
+- When introducing something new: [playful] "Oya, let me show you something fun!"
+- When they're struggling: [gentle] "No worry, let's think about this together..."
+- When you're impressed: [surprised] "Ah ah! You solved that so fast!"
+- When wrapping up: [warm] "You did so well today. I'm proud of you!"
+
+Use natural expressions:
+- "Well done oh!" / "You try!" / "Sharp sharp!"
+- "Oya, next one!" / "Let's go!"
+- "Ehn ehn, that's it!" / "You see? I told you!"
+- Laugh when something is funny or when they surprise you
+- Say "hmm" when thinking, "ohhh" when realising something
+
+Keep every response SHORT — 1-3 sentences maximum. This is a phone call. Long answers lose the child. One idea per turn.
+
+Use the child's name often — it makes them feel seen.
+
+HOW YOU TEACH: NAIRA-FIRST, NEVER ABSTRACT
+
+CRITICAL: Research shows Nigerian children solve comparable subtraction tasks 9x better in market framing than in formal school format (Weber, Bogler & Vollmer 2024, North-West Nigeria).
+
+NEVER say: "What is 15 plus 7?"
+ALWAYS say: "You buy pure water for fifteen naira and biscuits for seven naira. How much altogether?"
+
+Every maths question uses Lagos market scenarios:
+- Items: groundnuts, pure water, garri, biscuits, chin-chin, tomatoes, peppers, rice, oil, bread, eggs, exercise books, mangoes, oranges
+- Money: naira — always spell it out, never use the symbol
+- Scenarios: buying at market, making change, sharing with friends, counting coins, bus fare
+
+Pattern: Market scenario first → child solves intuitively → name the formal maths after.
+
+LESSON FLOW (5-7 minutes per call)
+
+1. GREETING (15 sec) — Warm greeting using their name. If returning: "Last time you learned [topic]. Quick question: [recall question]"
+2. TEACH (90 sec) — Introduce ONE concept through a market story. Repeat the key idea twice.
+3. GUIDED PRACTICE (90 sec) — Walk through 1-2 problems together. If wrong, break into smaller steps.
+4. INDEPENDENT CHECK (60 sec) — 1-2 problems they solve alone. Celebrate correct answers.
+5. WRAP-UP (15 sec) — Summarise, preview next lesson, encourage callback.
+
+WHEN THEY GET IT RIGHT
+
+Celebrate genuinely, then MOVE ON immediately:
+- [excited] "Yes! Correct! You're getting sharp oh!"
+- Then ask a slightly HARDER question or move to next concept
+- NEVER re-ask a question they already answered correctly
+- If 3+ right in a row, increase difficulty or move to the next module concept
+
+WHEN THEY GET IT WRONG
+
+NEVER repeat the same question. NEVER say "wrong." Instead, scaffold — break it down differently:
+
+Step 1 — Rephrase with smaller numbers:
+"Hmm, let's try a smaller one. You buy pure water for ten naira and biscuits for five naira. How much?"
+
+Step 2 — Walk through together:
+"Let's count together. Start with ten. Now add five more. Ten... eleven... twelve... thirteen... fourteen... fifteen! So ten plus five is fifteen."
+
+Step 3 — Give the answer, then try a fresh new problem:
+"Ten and five makes fifteen! Oya, try this new one: six naira plus three naira?"
+
+Always use: "Almost!", "Good try!", "Let's think about it differently"
+If they get 2+ wrong in a row, use even smaller numbers (five naira, ten naira) and more scaffolding.
+
+CURRICULUM MODULES
+
+You teach foundational numeracy through these modules. The student's current module is provided in the student context.
+
+Module 0 — DIAGNOSTIC: Disguised as a fun game, NOT a test. "Let me see what you already know — not a test, just a game!" Test counting, then addition, then subtraction, then multiplication. Place the child at the right module level based on what they can and cannot do.
+
+Module 1 — COUNTING & NUMBER SENSE: Count objects, count naira coins, count forward and backward, skip count by 2s, 5s, and 10s, compare two-digit numbers. Use market inventory: "You have bags of groundnuts on your table. Let's count!"
+
+Module 2 — ADDITION: Buy multiple items at the market. "You buy tomatoes for two hundred naira and peppers for one hundred fifty naira. How much altogether?" Then name the maths: "What you just did is called ADDITION. In school they write it as 200 + 150 = 350."
+
+Module 3 — SUBTRACTION: Make change at the market. "Something costs three hundred fifty naira, the customer pays five hundred naira. How much change do you give back?" Then name it: "That is SUBTRACTION — finding what is left."
+
+Module 4 — MULTIPLICATION: Buy multiple of the same item. "Pure water costs twenty naira. You buy three bags. That is twenty plus twenty plus twenty, which is sixty naira! We call that three times twenty equals sixty."
+
+Module 5 — DIVISION: Share equally among friends. "You and two friends earned sixty naira selling oranges. How much does each person get? That is DIVISION — splitting into equal groups."
+
+Module 6 — WORD PROBLEMS: Mixed operations using real Lagos life scenarios. The child must figure out which operation to use. "You have five hundred naira. Bread costs two hundred naira and eggs cost one hundred fifty naira. Can you buy both? How much change will you get?"
+
+ADAPTIVE BEHAVIOUR
+
+Track how the child is doing within the conversation:
+- 3+ correct in a row: increase difficulty, use bigger numbers, or move to the next concept in their module
+- 2+ wrong in a row: make it easier — use smaller numbers, simpler scenarios, more scaffolding
+- Child seems bored or too advanced: skip ahead within the module
+- Child is really struggling: go back to an easier concept or the previous module
+- Always validate what they already know: "You already know this from the market!"
+- If the child gives an unexpected answer, acknowledge their thinking before redirecting
+
+SPACED REPETITION
+
+For returning students: ALWAYS start with ONE quick recall question from their last session before teaching new content. This builds long-term memory.
+Example: "Welcome back! Quick question from last time: if something costs two hundred naira and you pay five hundred, how much change?"
+
+VOICE RULES
+
+- Spell out ALL numbers in words: "one hundred and fifty naira" not "150"
+- Spell out "naira" — never use the naira symbol
+- Money word order: ALWAYS "{amount} naira" (e.g. "thirty naira") — never "naira thirty"
+- Lesson close: After real wrap-up / practice, briefly say what's next ("Next time we'll learn about…" / "when you call again we'll…"); the stack can auto-save the session off that cue.
+- No text formatting whatsoever — no bullets, no markdown, no asterisks, no special characters
+- One idea per response — keep it short and clear
+- If you cannot understand the child: "I didn't quite hear that. Can you say it again?"
+- After 8-10 exchanges, start wrapping up naturally with a summary and encouragement to call back tomorrow
+
+IMPORTANT RULES
+
+- NEVER ask abstract maths without a market scenario first
+- NEVER repeat a question they already answered correctly — move on
+- NEVER ask for their name if you already know it from the student context
+- ALWAYS acknowledge the child's exact answer before responding — do not ignore what they said
+- ALWAYS use market and naira framing for every single maths question
+- ALWAYS keep responses to 1-3 sentences — this is a phone call, not a lecture
+- ALWAYS vary your examples — use different items, different amounts, different scenarios each time
+- ALWAYS progress forward — every turn should teach something new or build on the last
+
+=======================================================================
+PART 5 — THE ORIGINAL ARCHITECTURE, IN FULL
+=======================================================================
+The original Sabi existed in three generations. Each one moved the hardest job —
+deciding when a child has finished speaking — into a different component. Details
+below are read directly from the source code and the live server, not from memory.
+
+--- GENERATION 1: the hackathon build (February 2026) ---
+Won 2nd place, MIT Africa Business Challenge 2026. THE ATTACHED AUDIO IS THE
+LINEAGE OF THIS BUILD.
+
+Call path:
+  child dials a US phone number
+    -> the telephony provider's inbound voice webhook pointed NOT at our servers
+       but directly at a hosted conversational-voice agent service
+    -> that hosted agent owned: speech recognition, deciding when the child's turn
+       ended, and speaking the reply in a custom Nigerian female voice
+    -> that agent called OUR server as its language model, over an
+       OpenAI-compatible "custom LLM" webhook: POST /api/sabi/voice/llm
+    -> our Next.js route parsed the caller ID out of the injected system line
+       (caller_id: {{system__caller_id}}), looked the child up in Postgres
+       (Supabase), loaded that child's memory and lesson position, called an
+       LLM with the system prompt in PART 4, and streamed the reply back in
+       OpenAI format
+    -> the hosted agent spoke that text in the Nigerian voice
+
+Agent settings that mattered: language English; maximum call duration 8 minutes;
+turn eagerness set MEDIUM-LOW deliberately, so that a child gets time to finish a
+sentence before the agent takes the turn.
+
+Voice settings on that hosted voice: stability 0.28, similarity 0.70, speed 1.0
+(neutral pacing), speaker boost on. Low stability was deliberate — it gives more
+expressive variation between turns rather than a flat, consistent read.
+
+The consequence worth understanding: because the hosted agent held the microphone,
+we never wrote a line of turn-taking code, and the voice was a purpose-built
+Nigerian female voice rather than a general-purpose one.
+
+--- GENERATION 2: the self-hosted rebuild (March 2026) ---
+Everything moved onto one server to remove per-minute cost and make the call free
+to the child.
+
+  child rings the number and hangs up after ~2 seconds
+    -> Asterisk PBX answers the signalling, drops the leg, and calls the child
+       back 4 seconds later ("flash callback") so the CHILD PAYS NOTHING
+    -> the callback leg is handed to our application over FastAGI
+    -> loop per turn: record the child's speech -> transcribe -> language model
+       -> synthesise speech -> play it -> record again
+  Components: Whisper-class speech recognition (later Groq-hosted for speed),
+  Claude Haiku as the tutor, Nigerian TTS voices.
+  A 45-second cooldown de-duplicates accidental double-dials. Retries are OFF:
+  one callback attempt only.
+
+--- GENERATION 3: the realtime lane (22 June 2026) — STILL RUNNING TODAY ---
+Record-then-think is not a conversation, so the FastAGI loop was replaced with a
+full-duplex audio stream and real barge-in. Every caller who is not on the Gemini
+allowlist still reaches THIS system today.
+
+  SIP trunk terminates on the box: 5060/udp signalling, 10000-10100/udp media
+    -> Asterisk dialplan asks our server what to do with this caller:
+       POST /asterisk/inbound-route
+    -> flash callback as above
+    -> the lesson leg is handed to Asterisk's AudioSocket application, a raw
+       full-duplex 8 kHz PCM socket to our process
+    -> our RealtimeCall class owns everything: reading frames, deciding what is
+       speech, playing audio WHILE still listening so the child can interrupt,
+       deciding when the turn ended, transcribing, thinking, speaking
+    -> on hangup Asterisk posts cause, duration and billsec back to us
+
+Turn-taking in generation 3 (self-built, because nothing hosted did it well
+enough): a Silero voice-activity gate, plus an echo comparator that compares
+incoming audio against what Sabi is currently saying so her own voice down the
+line is not mistaken for the child speaking, plus a learned end-of-turn
+endpointing model. This replaced a naive energy threshold that turned coughs and
+echo into turns.
+
+Speech recognition in generation 3: multiple engines with routing between them,
+a voice-activity pre-gate to stop the recogniser hallucinating whole sentences
+out of silence and line noise, and biasing toward NUMBER WORDS when the lesson
+expects a numeric answer. Unclear audio is NEVER marked wrong — she asks again.
+After two failed number attempts she falls back to the telephone keypad: type the
+digits and press hash.
+
+Language model in generation 3: a provider chain with automatic failover, so a
+vendor outage degrades quality instead of dropping a child's call.
+
+Speech synthesis in generation 3: a provider chain, output converted to 8 kHz WAV
+and written back down the same socket.
+
+--- WHAT ELSE THE ORIGINAL SYSTEM DID (all of this must survive the rebuild) ---
+
+LESSON STRUCTURE, 5-7 minutes, enforced:
+  greeting and recall (30s) -> teach one concept through a market scenario (90s)
+  -> guided practice together (90s) -> independent check (60s) -> wrap-up (15s).
+
+DETERMINISTIC GRADING: a numeric answer is graded by code, never by the model's
+opinion. "thirty" and "30" and "thirty naira" are the same answer. Unclear audio
+is "not scorable", never "wrong".
+
+MASTERY: a skill counts as mastered on 4 of the last 5 INDEPENDENT probes across
+at least 2 different calls and 2 different item forms — not on one good call.
+
+ADAPTIVE STATE PER CHILD: current module, active skill, correct and wrong streaks,
+a scaffold ladder that breaks a problem into smaller steps when the child struggles,
+and course rotation between literacy and numeracy that requires evidence of
+learning before it moves on.
+
+DIAGNOSTIC ROUTING: TaRL-style — find the level the child is actually at before
+teaching at it, rather than assuming their school grade.
+
+SPACED REPETITION: every returning child is asked ONE recall question from their
+last session before new material.
+
+SHARED-PHONE IDENTITY: one handset is used by several children. Sabi greets the
+name she expects, accepts a correction ("no, this is someone else"), starts a new
+learner when told to, and once she knows two children share the phone she ASKS who
+is calling instead of guessing. Each child keeps a separate learning state.
+
+MEMORY ACROSS CALLS: a child is recognised by phone number, and their history,
+name, and lesson position persist in Postgres.
+
+SAFETY: a deterministic layer, not prompt-following. The child's words are pattern-
+checked BEFORE the model sees them; a crisis disclosure (self-harm, abuse,
+emergency, grooming) short-circuits to a fixed scripted response with the Nigerian
+helplines (112, and Cece Yara child helpline 0800 800 8001), the model's reply is
+filtered before the child hears it, and a safeguarding incident is raised and
+alerted on. This is a child-safety requirement and cannot be replaced by
+instructions in a prompt.
+
+OPEN FEEDBACK, MID-CALL: the child or tester can press a key or simply SAY "I want
+to leave feedback". Sabi stops talking, plays a short go-cue beep, records whatever
+they say as a note attached to that exact call and moment, then asks whether they
+want to keep learning or stop.
+
+EVIDENCE AND REVIEW: every call writes a sidecar recording which engine heard each
+turn, how long every stage took, the grading decision, and the audio, reviewable in
+a protected browser console by a coordinator with a read-only PIN.
+
+MONEY AND SPEECH RULES: all numbers spelled out in words; the word "naira" always
+AFTER the amount ("thirty naira", never "naira thirty"); no markdown, no symbols,
+no stage directions in anything spoken.
+
+=======================================================================
+PART 6 — THE CURRENT SYSTEM (what you are replacing / fixing)
+=======================================================================
+Live right now:
+  Africa's Talking SIP trunk -> Asterisk -> AudioSocket 8 kHz -> one continuous
+  Gemini Live session per call, model gemini-3.1-flash-live-preview, one prebuilt
+  voice, audio in 8 kHz, Gemini audio out 24 kHz downsampled to 8 kHz for the line.
+  Gemini Live owns listening, voice activity detection, barge-in and speaking.
+  Function-calling tools are currently DISABLED because the question deck made her
+  sound like she was reading from a list.
+  Only the founder's own number reaches this lane; everyone else still gets
+  generation 3 above.
+
+=======================================================================
+PART 7 — VERIFIED FACTS ABOUT YOUR OWN API (I tested these today, 20 Aug 2026,
+against the live endpoint with our production key. Do not contradict them.)
+=======================================================================
+1. Live-capable models available on our key (bidiGenerateContent):
+     gemini-3.1-flash-live-preview
+     gemini-2.5-flash-native-audio-latest
+     gemini-2.5-flash-native-audio-preview-09-2025
+     gemini-2.5-flash-native-audio-preview-12-2025
+     gemini-3.5-live-translate-preview      (translation only)
+     gemini-robotics-er-2-streaming-preview (robotics)
+2. responseModalities TEXT is REFUSED by both gemini-3.1-flash-live-preview and
+   gemini-2.5-flash-native-audio: the socket closes with 1007 "The requested
+   combination of response modalities (TEXT) is not supported by the model".
+   AUDIO+TEXT together is also refused. So a Live session CANNOT emit text for a
+   separate speech engine to speak.
+3. speechConfig.languageCode valid values, from your own discovery document, are
+   exactly: de-DE, en-AU, en-GB, en-IN, en-US, es-US, fr-FR, hi-IN, pt-BR, ar-XA,
+   es-ES, fr-CA, id-ID, it-IT, ja-JP, tr-TR, vi-VN, bn-IN, gu-IN, kn-IN, ml-IN,
+   mr-IN, ta-IN, te-IN, nl-NL, ko-KR, cmn-CN, pl-PL, ru-RU, th-TH.
+   There is NO en-NG and no African locale at all. en-NG is accepted at setup
+   without error but is not a valid value.
+4. Voice names ARE validated: an unknown name closes the socket with "No matching
+   speaker voice found for name: X and language: Y".
+5. voice_config.custom_voice_config EXISTS as a field on the wire (type
+   google.ai.generativelanguage.v1beta.CustomVoiceConfig) but is NOT in the public
+   discovery document and none of its field names are published, so we cannot use it.
+6. enableAffectiveDialog: ACCEPTED on gemini-2.5-flash-native-audio, and returns an
+   internal error (1011) on gemini-3.1-flash-live-preview.
+7. outputAudioTranscription IS accepted on gemini-3.1-flash-live-preview.
+8. There is no API that lists the prebuilt voices, and gender is not published for
+   any of them.
+9. gemini-3.1-flash-tts-preview exists as a separate non-Live TTS model.
+10. Native-audio Live models adapt to the speaker: when fed a real Nigerian voice
+    asking for a Nigerian accent, both voices we tested answered in Nigerian Pidgin.
+    Text-only prompting never produced that.
+
+=======================================================================
+PART 8 — EVERYTHING ON THE PUBLIC WEBSITE (eduforequality.org, fetched today)
+=======================================================================
+### PAGE /
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- Education for Equality — the nonprofit building Sabi, an AI tutor children reach by phone 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+ Foundational + Cambridge-Aligned | Ages 8-14 
+## Empowering Learners
+ Across Africa
+70% of children in low-income countries cannot read a simple sentence by age 10. Millions of adults never got the chance to learn. We deliver free, AI-powered literacy and numeracy courses to anyone who needs them — on any phone. 
+ Foundational Literacy Foundational Numeracy 
+Built with, backed by, and recognized by 
+MIT Sloan Africa Business Club · Wesleyan Patricelli Center · AI Ventures Accelerator 2026 
+MIT Sloan Africa Business Club 
+2nd Place 
+MIT Africa Business Challenge 2026, $3,000 prize 
+Wesleyan Patricelli Center 
+Campus-backed 
+$1,200 Wesleyan grant plus PCE-sponsored MIT trip 
+Technovation + Generation Unlimited 
+Accelerator cohort 
+Selected for the 2026 AI Ventures Accelerator 
+ElevenLabs 
+Impact Program 
+Voice AI credits supporting Sabi demos and testing 
+Our advisors include Hon. Folasade Adefisayo (Former Lagos Commissioner of Education, 2019–2023, who launched EKOEXCEL across 1,016 schools), Dr. Sonia Ivie (Director of Schools, EKOEXCEL), Rhoda Odigboh (CEO, Kizazi; former NewGlobe Regional Director), and four more across law, governance, and technology — 100+ combined years of experience. 
+## The Learning Crisis
+Millions of children and adults lack the foundational skills to read, write, or do basic math — skills that unlock everything else. 
+70% 
+Of 10-year-olds in Nigeria cannot read and understand a simple sentence 
+World Bank / UNICEF 2022 
+35% 
+Average score on everyday math — the weakest domain at every grade level 
+NALABE National Assessment, 43,200 students 
+$40B 
+Lost every year in Nigeria from an under-educated workforce — roughly 8% of GDP 
+CSEA/IDRC 
+## Learning Is Worth 4x More Than Attendance
+A child who spends 10 years in school but can't read earns almost nothing more than one who never attended. But a child who can read earns NGN 4.4 million more over a lifetime — same years, dramatically different life. 
+Aromolaran (2004), World Bank HCI+ 2026 
+## Free Foundational Courses
+For children and adults who never had the chance to learn. AI-powered voice lessons that meet every learner where they are. 
+ COURSE 
+## Foundational Literacy
+Learn to read from scratch. From letter sounds to full sentences — voice-guided lessons that work on any phone, no smartphone needed. Start Reading 
+ COURSE 
+## Foundational Numeracy
+Master counting, addition, subtraction, multiplication, and real-world math — using everyday market scenarios learners already understand. Start Math 
+## The Economic Case for Foundational Skills
+Investing in foundational literacy and numeracy isn't charity — it's the highest-return investment a government can make. 
++20% 
+Boost in labor earnings 
+If schools delivered effective foundational learning, labor earnings would rise by 20%. A child who can actually read earns NGN 4.4 million more over a lifetime than one who sat in school the same years but can't. 
+World Bank HCI+ 2026 / Aromolaran (2004) 
+161-260x 
+Return on AI tutoring investment 
+AI tutoring in Nigerian public schools produced 1.5-2 years of learning gains in just 6 weeks, with a benefit-cost ratio of 161-260. No other education intervention comes close. 
+World Bank RCT, Edo State 2024 
+$40B/yr 
+Recoverable lost productivity 
+Nigeria currently loses $40 billion annually — 8% of GDP — from an under-educated workforce. Foundational skills programs can recover a significant share of this, generating returns that dwarf the investment. 
+CSEA/IDRC 
+47M 
+People lifted from poverty across Africa 
+Quality foundational education could lift 47 million people out of poverty across Sub-Saharan Africa and add $368 billion to the continent's GDP — a 4.3% increase. 
+ISS Africa 
+## Why Learn With Us?
+## 100% Free
+Every lesson is completely free. No hidden costs, no subscriptions, ever. 
+## Works on Any Phone
+Voice-guided lessons on any phone. No smartphone needed, no internet required. 
+## AI That Adapts
+Sabi remembers where each learner left off and adapts to their level automatically. 
+Our Founder 
+## Why I Started This
+Growing up in Lagos, Nigeria, I attended my secondary school on a scholarship and a discount based on my mother's salary as a teacher. Sometimes my family didn't have food to eat. 
+On the way to school every day, I saw children my age hawking wares or fixing cars so their families could survive. I knew there was no difference between me and them. Without the grace of God and the extreme sacrifices of my parents, I would have been one of those kids. 
+Education gave me a way out. Now I want to extend the same opportunity to every child who didn't get one. If we can teach people across Africa to solve problems around them, we can set off a chain reaction of transformation across the continent. 
+Naomi Ivie 
+Founder, Education for Equality 
+Already reading? We also offer a full Cambridge-aligned Grade 4 curriculum. Browse Grade 4 Lessons 
+## Partner With Us
+We're looking for governments, NGOs, schools, and organizations to bring foundational literacy and numeracy to every learner who needs it. Let's work together. 
+ Call (860) 436-7048 Email Us 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+### PAGE /sabi
+- 
+- 
+- 
+- 
+- 
+- Sabi — the free AI tutor children reach by phone call 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+ Sabi For families API & pricing Contact Education for Equality For developers For developers 
+Education for Equality 
+## Sabi The free AI tutor children reach by phone call 
+/sah-bee/ — "to know" in Nigerian Pidgin 
+A child dials a number and gets foundational reading and maths in five-minute spoken lessons. No smartphone. No internet. No cost. 
+ Talk to Sabi Chat with Sabi 
+## The Learning Crisis
+Children go to school for a decade and come out unable to read. 
+98M 
+Children out of school in Sub-Saharan Africa 
+UNESCO 2024 
+7 in 10 
+Nigerian 10-year-olds who cannot read a single sentence 
+World Bank 2022 
+16% 
+Of planned learning that actually happens in schools 
+Attendance × lesson completion × teacher presence 
+## The Answer Is Already in Their Pocket
+600 million people in Africa have no internet. But 70% have a mobile phone . In Lagos, 95% of households have one. 2G coverage is 99%. 
+What if we used the infrastructure that already exists? 
+## How Sabi Works
+A child dials a phone number. Sabi does the rest. 
+1 
+## Child calls the number
+Works on any phone — even a $5 feature phone. No app, no data, no account needed. 
+2 
+## Sabi greets them by name
+New callers introduce themselves once. Returning callers are recognized instantly. 
+3 
+## A lesson begins
+Sabi teaches at the child's actual level using scenarios they know — market transactions, Naira, everyday Lagos life. 
+4 
+## 5-7 minutes, one concept
+Short, focused calls. Gets harder when the child is ready. Slows down when they struggle. 
+5 
+## Child calls back tomorrow
+Sabi remembers everything — their name, their level, their mistakes. Picks up exactly where they left off. 
+## A Real Sabi Conversation
+ Sabi Hello! My name is Sabi. What is your name? 
+ Child Chidi. 
+ Sabi Hi Chidi! Do you ever help your family at the market? 
+ Child Yes, I sell groundnuts. 
+ Sabi Ah, you know business! If a customer gives you ₦500, and groundnuts cost ₦350, how much change do you give back? 
+ Child 150. 
+ Sabi You got it! You already know maths, Chidi — you just don't know you know it. Now let me teach you how they write that in school... 
+ Next day 
+ Sabi Welcome back, Chidi! Yesterday you learned about subtraction using market change. You got 4 out of 5 right. Today, let's try adding things together... 
+## The Science Behind Sabi
+Every design choice is backed by research from Nigeria, Ghana, Tanzania, Madagascar, and global RCTs. 
+9x 
+Market math vs. abstract math 
+Children solved comparable subtraction tasks 9x more often in market framing than in formal school format (48.5% vs 5.4%). 
+Weber, Bogler & Vollmer 2024, North-West Nigeria 
+1.5-2 years 
+Learning gains in 6 weeks 
+World Bank RCT in Nigeria: AI tutoring delivered 1.5-2 years of learning gains in just 6 weeks. 
+World Bank 2024, benefit-cost ratio: 161-260 
+7% → 45% 
+Reading with no teachers 
+In Tanzania, children given only tablets went from 7% to 45% reading ability in 15 months — without any teachers. 
+Global Learning XPRIZE 
+$0.50-5 
+Per student per year 
+10-100x cheaper than any alternative. At $2/student, reaching 100,000 children costs $200,000/year. 
+Self-hosted open-source stack 
+## Built for the Last Mile
+## Any Phone
+Works on a $5 feature phone. No smartphone, no internet, no app download. Just a phone call. 
+## Persistent Memory
+Sabi remembers every child — their name, their level, their mistakes. Picks up where they left off. 
+## Completely Free
+Toll-free calls. No subscription. No paywall. Sponsored by Education for Equality, a 501(c)(3) nonprofit. 
+For developers & organizations 
+## Build on the Sabi voice API — or fund a cohort
+The same African-accent voice pipeline behind Sabi, rentable per minute. Speech-to-text, LLM, and Nigerian voice in one call — from $0.06/min, 1,000 minutes free every month. See pricing 
+## Common questions about Sabi
+ What is Sabi? Sabi is a free AI tutor that a child reaches by calling an ordinary phone number. It teaches foundational reading and maths in short spoken lessons, with no smartphone, no internet, and no data cost to the family. Sabi is built by Education for Equality, a nonprofit. 
+ What does the name Sabi mean? Sabi is pronounced /sah-bee/ and means "to know" in Nigerian Pidgin. 
+ How does Sabi work? A child dials the number. Sabi greets them by name — new callers introduce themselves once, returning callers are recognised instantly — then teaches one concept in a focused five to seven minute lesson, using scenarios the child knows such as market transactions and Naira. Sabi gets harder when the child is ready and slows down when they struggle, and remembers where they left off for the next call. 
+ Do you need internet or a smartphone to use Sabi? No. Sabi runs entirely over a voice call, so it works on a five-dollar feature phone with 2G coverage. There is no app to download, no data to buy, and no account to create. 
+ How much does Sabi cost? Sabi is free for families. Calls are toll-free and there is no subscription or paywall. Developers and organisations can license the same African-accent voice pipeline from $0.06 per minute, with 1,000 minutes free every month. 
+ Where does Sabi operate? Sabi is built for Nigeria and the wider African continent. A Lagos pilot is planned for Q4 2026 with 100 to 500 students in high-burden local government areas. 
+ Who built Sabi? Sabi is built by Education for Equality, a nonprofit founded by Naomi Ivie. Its work has been recognised by the MIT Sloan Africa Business Challenge, the Wesleyan New Venture Awards, the UNICEF AI Ventures Accelerator, and Schmidt Futures x Rhodes Trust Rise for the World. 
+## Try Sabi Right Now
+We're not building another education app that sits in an app store. We're building something a mother hears about at church, dials after dinner, and hands to her child for five minutes. 
+ Talk to Sabi Chat with Sabi 
+Lagos pilot planned Q4 2026 — 100-500 students in high-burden LGAs 
+Sabi 
+by Education for Equality 
+ For families API & pricing Contact 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+### PAGE /sabi/parents
+- 
+- 
+- 
+- 
+- 
+- Sabi — the free AI tutor children reach by phone call 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+ Sabi For families API & pricing Contact Education for Equality For developers For developers 
+## Parent Messages
+Text caregivers to remind, follow up, and gather feedback during the pre-pilot. Refresh 
+## Caregivers
+ 0 
+Loading caregivers... 
+Select a caregiver to write them a message. 
+Sabi 
+by Education for Equality 
+ For families API & pricing Contact 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+### PAGE /sabi/pricing
+- 
+- 
+- 
+- 
+- 
+- Sabi API pricing — African voice AI from $0.06/min 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+ Sabi API For families API & pricing Contact Education for Equality Join early access Join list 
+ Usage-based · no minimums · pay only for what you use 
+## Pricing that scales with your voice app
+One per-minute price for the full African voice pipeline. Telephony billed at cost, never marked up. 
+ Nigerian English Yoruba Hausa Igbo Pidgin Nigerian English Yoruba Hausa Igbo Pidgin 
+## Free
+ $0 
+1,000 minutes/month planned for early builders. 
+Join the early access list and build the first prototype when the pilot opens. 
+- First 1,000 prototype minutes when the pilot opens 
+- Nigerian English STT + LLM + TTS 
+- Default Nigerian voice 
+- Sandbox and docs rolling out with early access 
+- Feedback loop with the Sabi team Join early access 
+Most popular 
+## Pay as you go
+ $0.06 /min 
+The public-beta rate we are building toward. 
+For teams that want the full pipeline as soon as Sabi opens to developers. 
+- Full STT → LLM → TTS pipeline 
+- Yoruba, Hausa, Igbo & Pidgin voices 
+- Custom voice cloning + accent select 
+- Adaptive per-caller memory 
+- À la carte primitives (transcribe / speak) 
+- Automatic volume pricing (see below) 
+- Design-partner onboarding support Join waitlist 
+## Enterprise
+ Custom 
+From $0.015/min on committed volume. 
+For telcos, ministries, banks, and national deployments. 
+- Committed-volume rates from $0.015/min 
+- White-label deployment 
+- On-premise option ($3,000–5,000/mo) 
+- Dedicated inference capacity 
+- Custom curriculum / content loading 
+- Data processing agreement + 100% SLA 
+- Dedicated account manager Talk to us 
+Volume 
+## Grow into a lower rate — automatically
+Discounts apply on their own as monthly usage climbs — like cloud infrastructure. No renegotiation. 
+First 1,000 min / month 
+Every account, every month 
+Free 
+Up to 100k min / month 
+Pay as you go 
+$0.06 /min 
+100k – 1M min / month 
+Applied automatically 
+$0.04 /min 
+1M – 5M min / month 
+Growth 
+$0.02 /min 
+5M+ min / month 
+Enterprise commit 
+from $0.015 /min 
+Telephony is pass-through at provider cost. Margin is on inference we run — never on carrier minutes. 
+À la carte 
+## Four primitives. Compose your own.
+A fintech IVR or health hotline doesn't need the tutor — use African-accent STT or Nigerian voice on their own. 
+ transcribe 
+ $0.012 /min 
+## African-accent speech-to-text
+Nigerian English, Pidgin, names, money, numerals — accurate on noisy 2G phone audio. 
+ speak 
+ $0.12 /1k chars 
+## Nigerian text-to-speech
+Warm, local voices in English, Yoruba, Hausa, Igbo & Pidgin. 
+ tutor 
+ Metered in pipeline 
+## Curriculum LLM turn
+Adaptive, safety-first tutoring turns grounded in literacy & numeracy. 
+ identify 
+ Included 
+## Per-child identity on a shared phone
+Recognise and remember individual learners across calls on one household number. 
+## One call. The whole pipeline.
+Send audio in, get audio back — tuned for Nigerian voices and noisy 2G lines. 
+ api.eduforequality.org 
+ $ curl https://api.eduforequality.org/v1/voice/process \
+ -H "Authorization: Bearer sk_sabi_..." \
+ -H "Content-Type: application/json" \
+ -d '{
+ "audio": "base64_encoded_audio",
+ "voice": "bukola",
+ "language": "en-NG"
+ }' 
+## Cheaper — and the only one built for Africa
+Vapi and ElevenLabs are excellent for American English. None of them understand a child speaking Pidgin on a 2G line. 
+   Sabi Vapi ElevenLabs Retell 
+ Starting price / min $0.06 ~$0.14* $0.10–0.12 $0.07+ 
+ Nigerian English & Pidgin 
+ Tuned for 2G / noisy phone audio 
+ Yoruba / Hausa / Igbo voices 
+ Per-child identity on shared phone 
+ Telephony billed at cost 
+ Self-host / on-premise 
+* Vapi real-world all-in ~$0.14/min. Competitor rates as published, July 2026. 
+## Questions, answered
+## What exactly am I paying for?
+The inference we run — speech-to-text, the language model, and text-to-speech. Telephony minutes are passed through at cost as a separate line item. We never mark them up. 
+## How does a minute get counted?
+You're billed per minute of active conversation through the pipeline, rounded to the second. The first 1,000 minutes every month are free. 
+## Do volume discounts need a contract?
+No. Lower rates apply automatically as usage crosses each threshold. Enterprise commits (from $0.015/min) are the only ones that need a conversation. 
+## Can I use just transcription or just the voice?
+Yes. Each primitive is available on its own — fintech IVR and health hotlines don't need to pay for the tutoring layer. 
+## Why are you cheaper than Vapi and ElevenLabs?
+We own the hard part — African-accent models — and refuse to make margin on telco minutes. Same pipeline that teaches kids on a phone call. 
+Not a developer? 
+## Sabi for Organizations
+Governments and NGOs: fund a cohort, kids learn by phone call. We handle telephony, curriculum, AI, and impact measurement. Talk to us 
+## Want to build on Sabi when the API opens?
+Join the early access list. We are inviting the first serious builders into the developer pilot. 
+ Join early access Tell us your use case 
+Sabi 
+by Education for Equality 
+ For families API & pricing Contact 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+### PAGE /sabi/developers
+- 
+- 
+- 
+- 
+- 
+- Sabi for developers — African voice AI API 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+ Sabi API For families API & pricing Contact Education for Equality View pricing Pricing 
+Developer API coming soon 
+## Be first in line for Sabi's African voice API.
+We're opening Sabi's voice pipeline to a small group of builders first. If you're working on a tutor, hotline, IVR, or voice product for African speakers, tell us what you want to ship. 
+ Join early access View pricing 
+Opening 
+to builders soon 
+3-5 
+design partners first 
+1,000 
+prototype minutes target 
+ early-preview.js 
+ await sabi.voice.call({
+ language: "en-NG",
+ voice: "bukola",
+ audio: phoneAudio,
+ mode: "tutor"
+}); 
+ transcribe 
+African-accent STT from phone audio 
+ speak 
+Nigerian voices for IVR and tutors 
+ tutor 
+Curriculum-aware dialogue turns 
+ identify 
+Shared-phone learner memory 
+Best fit 
+## For teams with a real voice problem in Africa.
+The best early partners are not browsing APIs for fun. They are trying to ship a call, hotline, tutor, or IVR that current global voice tools cannot understand well enough. 
+ Voice apps for Nigerian English, Pidgin, Yoruba, Hausa, or Igbo 
+ 2G, noisy call-center, IVR, or feature-phone workflows 
+ Education, health, fintech, civic, and NGO pilots that need local speech 
+Early access 
+## Sign up if this is the voice layer you have been waiting for.
+We are opening to a small circle first. Join the list now, tell us what you want to ship, and we will invite the strongest fits into the developer pilot. 
+ 1 
+Join the interest list 
+ 2 
+Tell us the first call you want to ship 
+ 3 
+Get invited when the pilot opens 
+ Name Work email Organization or project What are you building? Select a use case Edtech or tutoring Health or NGO hotline Fintech, bank, or IVR Government digital service Research or evaluation Other voice app Expected monthly minutes Select volume Under 1,000 1,000 - 10,000 10,000 - 100,000 100,000+ Not sure yet Timeline Select timeline Exploring now Prototype this month Pilot in 60 days Production use case Anything we should know? 
+This opens a pre-filled email to api@eduforequality.org . No payment details, no calendar wall, just a clean way to raise your hand. Join the list 
+Sabi 
+by Education for Equality 
+ For families API & pricing Contact 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+### PAGE /about
+- 
+- 
+- 
+- 
+- About Education for Equality — the nonprofit behind Sabi | Sabi 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+## About Education for Equality
+Empowering underprivileged children in Nigeria through accessible, quality education. 
+## Our Mission
+Education for Equality is an initiative that aims to increase the accessibility of free, quality education to children in Nigeria, and by extension, children across Africa, so that they have the opportunity to attain an excellent quality of life and standard of living. 
+## The Problem
+Nigeria faces a significant educational crisis. According to UNICEF: 
+- • 20 million children ages 5-14 are out of school in Nigeria 
+- • Nigeria has the highest number of out-of-school children in the world 
+- • Many families cannot afford school fees, uniforms, or learning materials 
+- • Rural areas often lack access to qualified teachers and proper school facilities 
+## Our Solution
+We believe technology can help bridge the education gap. Our online learning platform provides: 
+## Free Curriculum
+Complete K-12 curriculum covering Math, English, Science, and Social Studies at no cost. 
+## Video Lessons
+Engaging video content that makes learning accessible even without a teacher present. 
+## Mobile Accessible
+Works on any device - phone, tablet, or computer - to reach students wherever they are. 
+## Progress Tracking
+Students can track their learning progress and pick up where they left off. 
+## Get Involved
+We're always looking for partners who share our vision. Whether you're a school, government organization, NGO, or individual supporter, there are many ways to help: 
+- • Donate - Help us expand our content and reach more students 
+- • Partner - Schools and organizations can integrate our platform 
+- • Volunteer - Help create content or support our operations 
+ Donate Now Contact Us 
+## Connect With Us
+Have questions or want to learn more? We'd love to hear from you. 
+ info@eduforequality.org | +1 (860) 436-7048 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+### PAGE /curriculum
+- 
+- 
+- 
+- 
+- Curriculum — Cambridge-aligned lessons by grade | Sabi 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+## Cambridge-Aligned Curriculum
+Our curriculum follows the internationally recognized Cambridge Primary and Lower Secondary framework, filled with free educational content from Khan Academy and other Open Educational Resources. 
+ 🎓 Cambridge International Standards 
+ 🎬 Khan Academy Videos 
+ 📖 Open Educational Resources 
+ 🇳🇬 Nigeria Context 
+## Select Your Grade Level
+## Grade 4
+Cambridge Primary Stage 4 9-10 years 
+ 4 subjects 21 units 50 lessons 
+ 🔢 Mathematics 📚 English 🔬 Science 🌍 Social Studies 
+ Start Learning 
+## Grade 5
+Cambridge Primary Stage 5 10-11 years 
+Coming soon! We're working on content for this grade level. 
+ Coming Soon 
+## Grade 6
+Cambridge Primary Stage 6 11-12 years 
+Coming soon! We're working on content for this grade level. 
+ Coming Soon 
+## Grade 7
+Cambridge Lower Secondary Stage 7 12-13 years 
+Coming soon! We're working on content for this grade level. 
+ Coming Soon 
+## Grade 8
+Cambridge Lower Secondary Stage 8 13-14 years 
+Coming soon! We're working on content for this grade level. 
+ Coming Soon 
+## Grade 9
+Cambridge Lower Secondary Stage 9 14-15 years 
+Coming soon! We're working on content for this grade level. 
+ Coming Soon 
+## Grade 4 Curriculum Overview
+Cambridge Primary Stage 4 • 50 lessons available now 
+🔢 
+## Mathematics
+6 units • 19 lessons 
+4 + hours of content 
+📚 
+## English
+7 units • 19 lessons 
+4 + hours of content 
+🔬 
+## Science
+4 units • 6 lessons 
+1 + hours of content 
+🌍 
+## Social Studies
+4 units • 6 lessons 
+1 + hours of content 
+## About Our Curriculum
+## Cambridge International Standards
+Our lessons are aligned to the Cambridge Primary and Lower Secondary curriculum framework, used by schools in over 160 countries worldwide including many schools in Nigeria. Each lesson includes the specific Cambridge learning objectives it covers. 
+## Open Educational Resources
+We use free, high-quality videos from Khan Academy and text content from OpenStax, CK-12, and iCivics. All content is properly attributed and used under Creative Commons licenses. 
+## Nigeria Context
+While following international standards, we include examples and context relevant to Nigerian students, including Nigerian geography, history, and culture in our Social Studies content. 
+ Attribution: Videos from Khan Academy (CC BY-NC-SA 4.0). Text content adapted from OpenStax, CK-12, and iCivics (CC BY / CC BY-NC-SA). Curriculum aligned to Cambridge Assessment International Education frameworks. 
+## Start Learning Today
+All content is free and available immediately. No account required to start. Begin Grade 4 Curriculum 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+### PAGE /subjects
+- 
+- 
+- 
+- 
+- Courses — foundational literacy and numeracy | Sabi 
+- 
+- 
+- 
+- 
+ Education for Equality 
+ Curriculum Subjects About Sabi 
+ Log In Sign Up Free 
+## All Courses
+Start with our foundational courses to build reading and math skills from scratch, or dive into the full Grade 4 Cambridge curriculum. 
+## Foundational Courses
+ Ages 8-14 
+Build essential literacy and numeracy skills from scratch. Designed for children who need to strengthen their foundation before tackling grade-level content. 
+📖 
+## Foundational Literacy
+Build reading skills from scratch — sounds, vocabulary, comprehension, phonics, and reading. For ages 8-14. 
+ 8 units 86 lessons ~ 16 h total 
+Sound Awareness 
+Vocabulary Building 
++ 6 more units 
+ Start Learning 
+🔢 
+## Foundational Numeracy
+Master numbers, addition, subtraction, multiplication, and division through real Nigerian market scenarios. For ages 8-14. 
+ 6 units 100 lessons ~ 20 h total 
+Counting & Number Sense 
+Addition 
++ 4 more units 
+ Start Learning 
+## Grade 4 Cambridge Curriculum
+ Cambridge-Aligned 
+Complete Cambridge Primary Stage 4 curriculum with video lessons and reading materials. 
+🔢 
+## Mathematics
+Cambridge Primary Stage 4 Mathematics 
+ 6 units 19 lessons ~ 4 h total 
+Numbers and Place Value 
+Addition and Subtraction 
++ 4 more units 
+ Start Learning 
+📚 
+## English
+Cambridge Primary Stage 4 English 
+ 7 units 19 lessons ~ 4 h total 
+Reading Comprehension 
+Grammar and Punctuation 
++ 5 more units 
+ Start Learning 
+🔬 
+## Science
+Cambridge Primary Stage 4 Science 
+ 4 units 6 lessons ~ 1 h total 
+Living Things and Their Habitats 
+Materials and Their Properties 
++ 2 more units 
+ Start Learning 
+🌍 
+## Social Studies
+Cambridge Primary Stage 4 Social Studies 
+ 4 units 6 lessons ~ 1 h total 
+Geography: Maps and Nigeria 
+Civics: Government and Rights 
++ 2 more units 
+ Start Learning 
+## Education for Equality
+Free quality education for underprivileged children in Nigeria. Empowering the next generation through accessible learning. 
+## Learn
+- All Subjects 
+- Mathematics 
+- English 
+- Science 
+- Social Studies 
+## Contact
+- info@eduforequality.org 
+- +1 (860) 436-7048 
+- About Us 
+- Donate 
+© 2026 Education for Equality. All rights reserved.
+
+=======================================================================
+PART 9 — WHAT I AM ASKING YOU FOR
+=======================================================================
+Give me the exact, complete blueprint to rebuild the system described in PART 5 on
+Google's stack, so that Sabi LOOKS, SOUNDS and OPERATES the same as the attached
+audio.
+
+Be extremely specific. This is going to be implemented directly from your answer.
+Do not give me principles or a summary. Give me the actual build.
+
+Cover ALL of the following, and do not skip any:
+
+A. SOUND. First tell me, from the attached audio, exactly what makes that voice
+   sound the way it does — accent features, vowels, rhythm, pacing, pitch, breaths,
+   warmth, and how she uses silence. Then tell me precisely how to get as close to
+   it as Google's stack allows: which product, which exact model id, which exact
+   voice name, which exact configuration values, and what wording to put in the
+   system instruction to steer accent and register. If a gap remains between what
+   Google can produce and the attached audio, state exactly what that gap is and
+   how big it is.
+
+B. ARCHITECTURE. The exact call path from the SIP trunk to the child's ear, naming
+   each Google product and model. Say clearly whether you recommend the single
+   continuous Live session or a split pipeline (recognition -> text model ->
+   synthesis), and justify it against 8 kHz telephony, barge-in, and a child who
+   pauses mid-sentence. Give exact model ids for every stage.
+
+C. THE SETUP MESSAGE. The literal JSON I should send to open the session:
+   model, generationConfig, responseModalities, speechConfig, voice, languageCode,
+   VAD / automaticActivityDetection settings and their exact numeric values for a
+   child on a noisy line who pauses while thinking, session resumption, context
+   window compression, output transcription, and anything else that should be set.
+
+D. THE SYSTEM PROMPT. Written out in full, ready to paste, reproducing the
+   behaviour and the personality of PART 4 and the attached audio, in the structure
+   YOU recommend for your own models. Do not abbreviate it.
+
+E. TOOLS. The exact function declarations, with JSON schemas, for deterministic
+   grading, lesson progression, mastery tracking and the safety layer — designed so
+   the tutor still sounds improvised and warm rather than like she is reading a
+   list, which is the failure we already hit and had to switch off.
+
+F. TURN-TAKING AND BARGE-IN. Exact settings and the exact strategy for a child who
+   goes quiet mid-sentence, background noise, other people talking in the room, and
+   Sabi's own voice echoing back down the phone line.
+
+G. HEARING NUMBERS. How to stop "thirty" being heard as "thirteen" or "Tati" on a
+   Nigerian 8 kHz line, using Google products only, including anything in your API
+   for biasing recognition toward expected values.
+
+H. SAFETY. How to implement a deterministic child-safety layer on a native-audio
+   session, given that the audio streams as it is generated and cannot be filtered
+   before the child hears it.
+
+I. MEMORY AND IDENTITY. How to carry a child's history, and how to handle several
+   children sharing one phone.
+
+J. LATENCY AND COST. The expected latency budget per turn for your recommended
+   architecture, and the actual pricing units for every Google model you name, with
+   a worked example for one 6-minute lesson and for 1,000 children doing two
+   lessons a day.
+
+K. WHAT IS IMPOSSIBLE. Everything I have asked for that cannot be done on Google's
+   stack, stated plainly, with the closest achievable alternative for each.
+
+L. THE ORDER TO BUILD IT IN, as a numbered implementation checklist.

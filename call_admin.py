@@ -104,6 +104,8 @@ def write_call_review_record(
     student_id: str | None = None,
     channel: str = "asterisk_audiosocket",
     hangup_event: dict[str, Any] | None = None,
+    usage_metadata: dict[str, Any] | None = None,
+    safeguarding_events: list[dict[str, Any]] | None = None,
     directory: Path | None = None,
 ) -> dict[str, Any] | None:
     path = call_sidecar_path(call_uuid, directory)
@@ -137,6 +139,12 @@ def write_call_review_record(
     record.setdefault("created_at", int(time.time()))
     if hangup_event:
         record["hangup_event"] = hangup_event
+    # Native-audio lanes bill per audio token, so the per-call usage is the only
+    # place a real cost figure can come from. Stored verbatim, never derived.
+    if usage_metadata:
+        record["usage_metadata"] = usage_metadata
+    if safeguarding_events:
+        record["safeguarding_events"] = safeguarding_events
     path.write_text(json.dumps(record, ensure_ascii=True, indent=2, sort_keys=True))
     return record
 

@@ -87,24 +87,49 @@ def phone_is_numeracy_only(
     }
 
 
-def phone_uses_gemini_live(
-    raw: str | None,
-    configured: str | None = None,
-) -> bool:
-    """Return whether this caller is in the persistent Gemini Live canary.
-
-    The allowlist is intentionally separate from the numeracy-only allowlist.
-    A learner can remain on the ordinary STT -> text LLM -> TTS pipeline while
-    still being numeracy-only, and an empty allowlist fails safely to the
-    established AudioSocket route.
-    """
-    if configured is None:
-        configured = os.getenv("SABI_GEMINI_LIVE_PHONES", "")
-    target = normalize_phone_number(raw)
-    if target == "unknown":
-        return False
-    return target in {
+def _phone_set(configured: str | None) -> set[str]:
+    return {
         normalize_phone_number(value)
         for value in re.split(r"[,;\n]+", configured or "")
         if value.strip()
     }
+
+
+def phone_uses_gemini_live(
+    raw: str | None,
+    configured: str | None = None,
+) -> bool:
+    """Return whether this caller runs on the persistent Gemini Live lane.
+
+    Two modes, chosen by ``SABI_GEMINI_LIVE_ALL`` (default on):
+
+    * **Default (production).** Every caller runs on Gemini Live except numbers
+      listed in ``SABI_GEMINI_LIVE_EXCLUDE_PHONES``. This is the opt-out switch
+      used to promote the lane; a Gemini setup failure still falls back to the
+      established turn-based pipeline inside the AudioSocket handler, so the
+      call is never lost.
+    * **Allowlist (canary).** Set ``SABI_GEMINI_LIVE_ALL=0`` to return to the
+      original behaviour, where only ``SABI_GEMINI_LIVE_PHONES`` reaches the
+      lane and an empty list fails safely to the established route.
+
+    Passing ``configured`` explicitly always uses allowlist semantics, so a
+    caller can test one specific list without depending on the environment.
+    """
+    target = normalize_phone_number(raw)
+
+    if configured is not None:
+        if target == "unknown":
+            return False
+        return target in _phone_set(configured)
+
+    default_all = os.getenv("SABI_GEMINI_LIVE_ALL", "1").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if not default_all:
+        if target == "unknown":
+            return False
+        return target in _phone_set(os.getenv("SABI_GEMINI_LIVE_PHONES", ""))
+
+    if target == "unknown":
+        return True
+    return target not in _phone_set(os.getenv("SABI_GEMINI_LIVE_EXCLUDE_PHONES", ""))

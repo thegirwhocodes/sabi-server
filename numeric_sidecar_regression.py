@@ -228,11 +228,38 @@ def main() -> int:
     check("late_turn_is_marked_stale", sidecar.summary()["stale_results"] == 1,
           str(sidecar.summary()))
 
-    # 12. Non-numeric turns and missing audio are skipped silently.
+    # 12. Missing audio is skipped silently. A turn with no expected answer is
+    # NOT skipped any more: checking whether Sabi heard the child correctly is
+    # Gemini's transcript against the two re-hearers, and needs no answer key.
     engine, _ = build_stt("thirty", "thirty")
     sidecar = NumericSidecar("call-skip", engine, audio_dir=tmp)
-    check("non_numeric_turn_skipped",
-          sidecar.submit(turn_index=0, audio_path=wav, expected_answer=None) is False)
+    check("turn_without_answer_key_still_runs",
+          sidecar.submit(turn_index=0, audio_path=wav, expected_answer=None) is True)
+    sidecar.drain(10)
+    skip_rows = [json.loads(line) for line in sidecar.record_path.read_text().splitlines()]
+    check("hearing_check_runs_without_expected_answer",
+          len(skip_rows) == 1 and skip_rows[0]["expected_answer"] is None
+          and skip_rows[0]["consensus_numeric_value"] == 30,
+          str(skip_rows))
+    # Naomi's 16:15 call in miniature: she said thirty, Gemini rendered it "13 €".
+    # Both re-hearers agreeing on 30 is what tells us Sabi mis-heard her.
+    engine, _ = build_stt("thirty", "thirty")
+    sidecar = NumericSidecar("call-mishear", engine, audio_dir=tmp)
+    sidecar.submit(turn_index=0, audio_path=wav, gemini_text="13 \u20ac", expected_answer=None)
+    sidecar.drain(10)
+    mishear = [json.loads(line) for line in sidecar.record_path.read_text().splitlines()]
+    check("mishear_is_flagged",
+          len(mishear) == 1 and mishear[0]["sabi_heard_it_right"] is False,
+          str(mishear))
+
+    engine, _ = build_stt("thirty", "thirty")
+    sidecar = NumericSidecar("call-heard-ok", engine, audio_dir=tmp)
+    sidecar.submit(turn_index=0, audio_path=wav, gemini_text="thirty naira", expected_answer=None)
+    sidecar.drain(10)
+    ok = [json.loads(line) for line in sidecar.record_path.read_text().splitlines()]
+    check("correct_hearing_is_not_flagged",
+          len(ok) == 1 and ok[0]["sabi_heard_it_right"] is True, str(ok))
+
     check("missing_audio_skipped",
           sidecar.submit(turn_index=0, audio_path=tmp / "nope.wav", expected_answer=4) is False)
     check("no_stt_disables_sidecar", NumericSidecar("call-none", None).enabled is False)

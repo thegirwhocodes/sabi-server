@@ -32,6 +32,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from numeric_grading import extract_numbers
+
 logger = logging.getLogger("sabi.numeric_sidecar")
 
 SIDECAR_VERSION = "shadow-1"
@@ -168,7 +170,11 @@ class NumericSidecar:
         Skipping is normal and must stay silent to the learner: a non-numeric
         turn, a missing recording, a disabled sidecar, or a full queue.
         """
-        if not self.enabled or expected_answer is None or not audio_path:
+        # Checking whether Sabi HEARD the child correctly needs no answer key:
+        # it is Gemini's own transcript against the two re-hearers. The expected
+        # answer only decides whether the number was right, which is a separate
+        # question, so it is optional here.
+        if not self.enabled or not audio_path:
             return False
         path = Path(audio_path)
         if not path.exists() or path.stat().st_size <= 44:
@@ -189,7 +195,7 @@ class NumericSidecar:
             "turn_index": int(turn_index),
             "audio_path": str(path),
             "gemini_text": " ".join(str(gemini_text or "").split()),
-            "expected_answer": int(expected_answer),
+            "expected_answer": None if expected_answer is None else int(expected_answer),
             "problem_id": str(problem_id or ""),
             "attempt": int(attempt or 0),
             "prompt_level": str(prompt_level or ""),
@@ -233,11 +239,12 @@ class NumericSidecar:
             self._records.append(record)
         self._write_record(record)
         logger.info(
-            "Numeric sidecar uuid=%s turn=%s status=%s groq=%r %s=%r consensus=%s "
-            "expected=%s gemini=%r stale=%s latency=%.2fs",
+            "Numeric sidecar uuid=%s turn=%s status=%s heard_right=%s groq=%r %s=%r "
+            "consensus=%s expected=%s gemini=%r stale=%s latency=%.2fs",
             self.call_uuid,
             record["turn_index"],
             record["status"],
+            {True: "yes", False: "NO", None: "unknown"}[record["sabi_heard_it_right"]],
             record["groq_text"],
             record["second_engine"],
             record["second_text"],
@@ -264,8 +271,16 @@ class NumericSidecar:
         consensus = result.get("consensus_numeric_value")
         expected = job["expected_answer"]
         agreement_matches_expected = (
-            consensus is not None and int(consensus) == int(expected)
+            consensus is not None and expected is not None and int(consensus) == int(expected)
         )
+        # The thing Naomi actually wants to see: did Sabi hear what the child
+        # said? Both re-hearers agreeing on a number that Gemini did not hear is
+        # a mis-hear, whether or not the number was the right answer.
+        gemini_numbers = extract_numbers(job["gemini_text"])
+        if consensus is None or not gemini_numbers:
+            sabi_heard_it_right: bool | None = None
+        else:
+            sabi_heard_it_right = int(consensus) in {int(n) for n in gemini_numbers}
         return {
             "sidecar_version": SIDECAR_VERSION,
             "mode": self.mode,
@@ -281,6 +296,8 @@ class NumericSidecar:
             "decision_eligible": bool(result.get("decision_eligible")),
             "consensus_numeric_value": consensus,
             "agreement_matches_expected": agreement_matches_expected,
+            "sabi_heard_it_right": sabi_heard_it_right,
+            "gemini_numeric_candidates": gemini_numbers,
             "hypothetical_action": result.get("hypothetical_action", ""),
             "selection_reason": result.get("selection_reason", ""),
             "decision_deadline_seconds": result.get("decision_deadline_seconds"),

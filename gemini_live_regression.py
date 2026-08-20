@@ -443,16 +443,32 @@ def main() -> int:
         "Hello! What is your name?",
         {"course": "numeracy", "active_skill": "multiplication"},
     )
-    ok &= check(
-        "session_context_is_injected_once_with_tool_requirements",
-        "one continuous" in constraints
-        and "Call get_next_numeracy_problem at lesson opening" in constraints
-        and "I don't know/help me" in constraints
-        and "Do not invent" in constraints
-        and "object words do not" in constraints
-        and "five to seven minutes" in constraints
-        and "get_lesson_progress BEFORE" in constraints,
-    )
+    # The injected contract has to match the mode that is actually running. With
+    # the tools off Sabi writes and marks her own naira questions, so the rules
+    # that name the tools are wrong to assert - what must hold instead is that
+    # she is told to mark the question she really asked.
+    if gemini_live.GEMINI_LIVE_TOOLS_ENABLED:
+        ok &= check(
+            "session_context_is_injected_once_with_tool_requirements",
+            "one continuous" in constraints
+            and "Call get_next_numeracy_problem at lesson opening" in constraints
+            and "I don't know/help me" in constraints
+            and "Do not invent" in constraints
+            and "object words do not" in constraints
+            and "five to seven minutes" in constraints
+            and "get_lesson_progress BEFORE" in constraints,
+        )
+    else:
+        ok &= check(
+            "session_context_tells_a_toolless_sabi_to_mark_what_she_asked",
+            "one continuous" in constraints
+            and "five to seven minutes" in constraints
+            and "make up your own questions" in constraints
+            and "no list to work through" in constraints
+            and "Mark the answer to the question you actually asked" in constraints
+            and "get_next_numeracy_problem" not in constraints
+            and "grade_numeric_answer" not in constraints,
+        )
     tool_declarations = (
         ((live_setup.get("tools") or [{}])[0]).get("functionDeclarations") or []
     )
@@ -466,7 +482,8 @@ def main() -> int:
     )
     ok &= check(
         "help_gate_is_described_in_the_grading_tool_contract",
-        "clear request" in str(grading_declaration.get("description") or "")
+        not gemini_live.GEMINI_LIVE_TOOLS_ENABLED
+        or "clear request" in str(grading_declaration.get("description") or "")
         and "complete reply" in str(
             (((grading_declaration.get("parameters") or {}).get("properties") or {})
              .get("learner_answer", {}))
@@ -474,6 +491,8 @@ def main() -> int:
             or ""
         ),
         grading_declaration,
+    ) if gemini_live.GEMINI_LIVE_TOOLS_ENABLED else check(
+        "grading_tool_is_absent_when_tools_are_off", not tool_declarations
     )
     ok &= check(
         "lesson_clock_blocks_early_wrap_and_opens_after_five_minutes",

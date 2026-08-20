@@ -70,9 +70,19 @@ GEMINI_LIVE_VOICE_AUTO = GEMINI_LIVE_VOICE.lower() in {"auto", "none", "default"
 # Gemini gets the prompt and nothing else — no problem deck, no deterministic
 # grader, no lesson clock — so it can no longer ask one question and grade the
 # answer against a different one.
-GEMINI_LIVE_TOOLS_ENABLED = os.getenv("SABI_GEMINI_LIVE_TOOLS", "on").strip().lower() not in {
-    "off", "0", "false", "no", "none",
-}
+GEMINI_LIVE_TOOLS_MODE = os.getenv("SABI_GEMINI_LIVE_TOOLS", "on").strip().lower()
+if GEMINI_LIVE_TOOLS_MODE in {"off", "0", "false", "no", "none"}:
+    GEMINI_LIVE_TOOLS_MODE = "off"
+elif GEMINI_LIVE_TOOLS_MODE not in {"on", "ledger"}:
+    GEMINI_LIVE_TOOLS_MODE = "on"
+
+# "ledger" is Naomi's idea, and it is the one that gets both things at once:
+# Sabi makes up her own naira question, then hands the grader the question and
+# the answer she expects BEFORE the child replies. The deck stops choosing the
+# lesson and becomes a record of it, so grading and mastery stay deterministic
+# while the teaching stays spontaneous.
+GEMINI_LIVE_TOOLS_ENABLED = GEMINI_LIVE_TOOLS_MODE != "off"
+GEMINI_LIVE_LEDGER_MODE = GEMINI_LIVE_TOOLS_MODE == "ledger"
 GEMINI_LIVE_SETUP_TIMEOUT_SECONDS = float(
     os.getenv("SABI_GEMINI_LIVE_SETUP_TIMEOUT_SECONDS", "12")
 )
@@ -283,6 +293,30 @@ def compact_live_learning_state(learning_state: dict[str, Any] | None) -> dict[s
         "next_step": state.get("next_step"),
         "mastery": mastery,
     }
+
+
+def _evaluate_working(working: str) -> int | None:
+    """Evaluate a plain sum like "20 + 10" or "3 x 4"; None if it is not one.
+
+    Deliberately not eval: this only understands whole numbers joined by + - x *,
+    which covers what a tutor writes on a market question and nothing else.
+    """
+    text = str(working or "").strip().lower().replace("\u00d7", "x").replace("*", "x")
+    if not text:
+        return None
+    tokens = re.findall(r"\d+|[+\-x]", text)
+    if len(tokens) < 3 or len(tokens) % 2 == 0:
+        return None
+    if "".join(tokens) != re.sub(r"[^0-9+\-x]", "", text):
+        return None  # something else was in there; do not guess
+    try:
+        total = int(tokens[0])
+        for op, number in zip(tokens[1::2], tokens[2::2]):
+            value = int(number)
+            total = total + value if op == "+" else total - value if op == "-" else total * value
+        return total
+    except (ValueError, IndexError):
+        return None
 
 
 class GeminiLiveSetupError(RuntimeError):
@@ -613,6 +647,7 @@ class GeminiLiveNumeracyTools:
         self.current_problem_resolved = False
         self.current_prompt_level = "none"
         self.current_attempt = 0
+        self._registered_index = 0
         self.problem_history: list[str] = []
         self.grade_history: list[dict[str, Any]] = []
         self.call_events: list[dict[str, Any]] = []
@@ -675,6 +710,76 @@ class GeminiLiveNumeracyTools:
         if self.current_problem_has_intro:
             result["teaching_intro"] = BEGINNER_EQUAL_GROUPS_INTRO
         return result
+
+    def register_question(self, args: dict[str, Any]) -> dict[str, Any]:
+        """File the question Sabi just invented, with the answer she expects.
+
+        The deck stops choosing the lesson here and starts recording it. Sabi is
+        free to ask whatever the moment calls for; grading stays deterministic
+        because the answer key is fixed before the child ever speaks.
+        """
+        question = " ".join(str(args.get("question") or "").split())
+        working = " ".join(str(args.get("working") or "").split())
+        raw_expected = args.get("expected_answer")
+
+        try:
+            expected = int(str(raw_expected).strip())
+        except (TypeError, ValueError):
+            return {
+                "status": "rejected",
+                "reason": "expected_answer must be a whole number",
+                "instruction": (
+                    "Ask a question whose answer is a whole number, and register it again "
+                    "before you say it out loud."
+                ),
+            }
+        if not question:
+            return {
+                "status": "rejected",
+                "reason": "question is required",
+                "instruction": "Register the exact question you are about to ask, word for word.",
+            }
+
+        # Sabi supplies the answer key, so the one new failure mode is her own
+        # arithmetic. `working` is a plain sum such as "20 + 10"; when it is
+        # given and it disagrees with expected_answer, the question is refused
+        # rather than filed, because a wrong key marks a right child wrong.
+        checked = _evaluate_working(working)
+        if checked is not None and checked != expected:
+            return {
+                "status": "rejected",
+                "reason": f"working {working!r} comes to {checked}, not {expected}",
+                "instruction": (
+                    "Work it out again, then register the question with the answer that "
+                    "matches your own working."
+                ),
+            }
+
+        self._registered_index += 1
+        problem = NumeracyProblem(
+            id=f"live_{self.call_uuid[:8]}_{self._registered_index}",
+            question=question,
+            expected=expected,
+            skill=str(args.get("skill") or MULTIPLICATION_MASTERY_SKILL),
+            item_form=str(args.get("item_form") or "invented_story"),
+            conceptual_hint=" ".join(str(args.get("hint") or "").split()),
+        )
+        self.current_problem = problem
+        self.current_problem_resolved = False
+        self.current_prompt_level = "none"
+        self.current_attempt = 0
+        self.problem_history.append(problem.id)
+        self.current_problem_has_intro = False
+        self._intro_pending = False
+        return {
+            "status": "registered",
+            "problem_id": problem.id,
+            "question": problem.question,
+            "instruction": (
+                "Now ask that exact question out loud and wait. When the child answers, "
+                "call grade_numeric_answer."
+            ),
+        }
 
     def grade_answer(self, learner_answer: str) -> dict[str, Any]:
         answer = " ".join(str(learner_answer or "").split())
@@ -819,6 +924,8 @@ class GeminiLiveNumeracyTools:
         args = args or {}
         if name == "get_next_numeracy_problem":
             return self.next_problem()
+        if name == "register_question":
+            return self.register_question(args)
         if name == "grade_numeric_answer":
             return self.grade_answer(str(args.get("learner_answer") or ""))
         if name == "get_lesson_progress":
@@ -1432,7 +1539,13 @@ class GeminiLiveCallRunner:
             problem_id = str(getattr(self.tools.current_problem, "id", "") or "")
             prompt_level = str(self.tools.current_prompt_level or "")
         else:
-            return False
+            # With the tools off there is no answer key at all, and that used to
+            # stop the sidecar dead. It should still run: the point is to check
+            # whether Sabi heard the child, which is her transcript against the
+            # two re-hearers, and that comparison needs no expected answer.
+            expected = None
+            problem_id = ""
+            prompt_level = ""
         try:
             return self.sidecar.submit(
                 turn_index=self.turn_index,

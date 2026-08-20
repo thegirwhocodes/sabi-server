@@ -44,57 +44,6 @@ def main() -> int:
         not phone_uses_gemini_live("+18604367048", ""),
     )
 
-    # The lane is promoted to production: default on for everyone, with a
-    # per-number opt-out. An explicit list argument keeps allowlist semantics
-    # so a caller can still test one specific configuration.
-    import os as _os
-
-    def _with_env(**pairs):
-        previous = {key: _os.environ.get(key) for key in pairs}
-        for key, value in pairs.items():
-            if value is None:
-                _os.environ.pop(key, None)
-            else:
-                _os.environ[key] = value
-        return previous
-
-    def _restore(previous):
-        for key, value in previous.items():
-            if value is None:
-                _os.environ.pop(key, None)
-            else:
-                _os.environ[key] = value
-
-    saved = _with_env(
-        SABI_GEMINI_LIVE_ALL=None,
-        SABI_GEMINI_LIVE_PHONES=None,
-        SABI_GEMINI_LIVE_EXCLUDE_PHONES=None,
-    )
-    ok &= check(
-        "live_lane_is_default_for_every_caller",
-        phone_uses_gemini_live("+2348000000000")
-        and phone_uses_gemini_live("+18605550199"),
-    )
-
-    _with_env(SABI_GEMINI_LIVE_EXCLUDE_PHONES="+1 (860) 555-0199")
-    ok &= check(
-        "excluded_number_stays_on_the_established_pipeline",
-        not phone_uses_gemini_live("+18605550199")
-        and phone_uses_gemini_live("+2348000000000"),
-    )
-
-    _with_env(
-        SABI_GEMINI_LIVE_ALL="0",
-        SABI_GEMINI_LIVE_PHONES="+18604367048",
-        SABI_GEMINI_LIVE_EXCLUDE_PHONES=None,
-    )
-    ok &= check(
-        "canary_mode_can_be_restored_without_a_code_change",
-        phone_uses_gemini_live("+18604367048")
-        and not phone_uses_gemini_live("+2348000000000"),
-    )
-    _restore(saved)
-
     setup = gemini_live.build_live_setup("Sabi regression prompt")
     live_setup = setup.get("setup") or {}
     generation = live_setup.get("generationConfig") or {}

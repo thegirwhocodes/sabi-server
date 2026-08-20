@@ -33,11 +33,7 @@ from call_admin import (
     write_call_review_record,
 )
 from curriculum_path import build_curriculum_path_prompt
-from guardrails import (
-    SABI_SAFETY_PREAMBLE,
-    guard_input,
-    raise_safeguarding_incident,
-)
+from guardrails import SABI_SAFETY_PREAMBLE
 from learning_state import analyze_session, force_numeracy_course
 from numeric_sidecar import NumericSidecar, expected_number_from_problem
 from gemini_grading import (
@@ -100,29 +96,6 @@ GEMINI_LIVE_TARGET_WRAP_SECONDS = int(
     os.getenv("SABI_GEMINI_LIVE_TARGET_WRAP_SECONDS", "420")
 )
 MULTIPLICATION_MASTERY_SKILL = "multiplication_equal_groups"
-
-# Open-feedback space on the Live lane. The turn-based lane owns the audio and
-# records the note itself; here Gemini keeps the microphone, so we only play the
-# same "go" beep, mark the next turn as the note, and store it in the identical
-# place. Everything reaching /admin/feedback is therefore lane-agnostic.
-FEEDBACK_OPEN_CUE = (
-    "[SABI_FEEDBACK_SPACE_OPEN] The caller asked to leave feedback. A beep has "
-    "already been played for them. Say nothing at all now — stay completely "
-    "silent and let them talk for as long as they want. Do not teach, do not "
-    "ask a maths question, and do not call any tool."
-)
-SAFEGUARDING_CUE = (
-    "[SABI_SAFEGUARDING_RESPONSE_SPOKEN] A fixed child-safety response has "
-    "already been spoken to the caller. Do not repeat it, do not add advice, "
-    "and do not return to the maths lesson on your own. Stay quiet and let "
-    "them lead. If they want to keep learning, follow them gently."
-)
-FEEDBACK_SAVED_CUE = (
-    "[SABI_FEEDBACK_SAVED] Their note is saved. In ONE short sentence, warmly "
-    "thank them for telling you and acknowledge how they feel. Do not teach and "
-    "do not grade that turn. Then ask whether they want to keep learning or "
-    "stop here, and wait."
-)
 
 INPUT_SAMPLE_RATE = 8000
 OUTPUT_SAMPLE_RATE = 24000
@@ -1350,9 +1323,6 @@ class GeminiLiveCallRunner:
         self.turn_interrupted = False
         self.turn_tool_events: list[dict[str, Any]] = []
         self.early_wrap_repairs = 0
-        self.feedback_pending = False
-        self.feedback_captured = False
-        self.safeguarding_events: list[dict[str, Any]] = []
         self.usage_metadata: dict[str, Any] = {}
         self.student: dict[str, Any] | None = None
         self.student_id: str | None = None
@@ -1635,184 +1605,6 @@ class GeminiLiveCallRunner:
             )
             return False
 
-    async def _handle_safeguarding(self, raw_user: str) -> bool:
-        """Run the deterministic crisis layer. True means the turn was handled.
-
-        Native audio cannot be filtered before the child hears it, so the input
-        guard is the enforceable half: Sabi's stream is cut, the fixed response
-        is spoken from our own TTS (never paraphrased by the model), and the
-        incident is raised exactly as on the turn-based lane.
-        """
-        try:
-            guard = guard_input(raw_user, student_id=self.student_id)
-        except Exception as exc:
-            logger.warning(
-                "Gemini Live input guard failed uuid=%s error=%s",
-                self.call.call_uuid,
-                type(exc).__name__,
-            )
-            return False
-        if not guard.short_circuit:
-            return False
-
-        logger.warning(
-            "Gemini Live input guard short-circuited uuid=%s category=%s risk=%s student=%s",
-            self.call.call_uuid,
-            guard.category,
-            guard.risk_level,
-            self.student_id or "unknown",
-        )
-        if guard.flag_for_safeguarding:
-            try:
-                await asyncio.to_thread(
-                    raise_safeguarding_incident,
-                    student_id=self.student_id,
-                    category=guard.category,
-                    risk_level=guard.risk_level,
-                    reason=guard.reason,
-                    utterance=raw_user,
-                    channel="asterisk_audiosocket_gemini_live",
-                    call_id=self.call.call_id,
-                )
-            except Exception as exc:
-                logger.error(
-                    "Gemini Live safeguarding incident failed uuid=%s error=%s",
-                    self.call.call_uuid,
-                    type(exc).__name__,
-                )
-
-        spoken = guard.safe_response or "Let's keep going with our lesson."
-        _drain_queue(self.playback_queue)
-        self.output_packet_buffer.clear()
-        try:
-            pcm = await self.call.synthesize_pcm(spoken, "gemini_live_safeguard")
-            if pcm:
-                buffer = bytearray(pcm)
-                while len(buffer) >= FRAME_BYTES_8K:
-                    self.playback_queue.put_nowait(bytes(buffer[:FRAME_BYTES_8K]))
-                    del buffer[:FRAME_BYTES_8K]
-        except Exception as exc:
-            logger.error(
-                "Gemini Live safeguarding TTS failed uuid=%s error=%s",
-                self.call.call_uuid,
-                type(exc).__name__,
-            )
-        self.messages.append({"role": "user", "content": raw_user})
-        self.messages.append({"role": "assistant", "content": spoken})
-        self.safeguarding_events.append(
-            {
-                "category": guard.category,
-                "risk_level": guard.risk_level,
-                "reason": guard.reason,
-                "turn": self.turn_index,
-            }
-        )
-        if self.websocket is not None and not self.call.hungup:
-            await self._send_json({"realtimeInput": {"text": SAFEGUARDING_CUE}})
-        return True
-
-    def _queue_go_cue(self) -> None:
-        """Play the same feedback beep the turn-based lane uses."""
-        from voice_realtime import _build_go_cue_pcm
-
-        buffer = bytearray(_build_go_cue_pcm())
-        while len(buffer) >= FRAME_BYTES_8K:
-            self.playback_queue.put_nowait(bytes(buffer[:FRAME_BYTES_8K]))
-            del buffer[:FRAME_BYTES_8K]
-
-    async def _capture_feedback_turn(self, raw_user: str, user_pcm: bytes) -> bool:
-        """Handle the open feedback space. True means this turn was not a lesson turn."""
-        from voice_realtime import SHARED_AUDIO_DIR, _looks_like_feedback_request
-        from feedback_admin import redact_feedback_text
-
-        # The caller is speaking their note right now: store it exactly where the
-        # turn-based lane stores one, so /admin/feedback needs no changes.
-        if self.feedback_pending:
-            self.feedback_pending = False
-            self.feedback_captured = True
-            self.messages.append({"role": "user", "content": raw_user})
-            duration_seconds = int(len(user_pcm) / (INPUT_SAMPLE_RATE * SAMPLE_WIDTH))
-            wav_path = SHARED_AUDIO_DIR / f"feedback_{self.call.call_uuid}.wav"
-            tags = ["gemini_live", "mid_call", "spoken_request"]
-            try:
-                if user_pcm:
-                    _write_wav(wav_path, user_pcm)
-                wav_path.with_suffix(".json").write_text(
-                    json.dumps(
-                        {
-                            "call_uuid": self.call.call_uuid,
-                            "call_id": self.call.call_id,
-                            "phone_number": self.call.phone,
-                            "student_id": self.student_id,
-                            "channel": "asterisk_audiosocket_gemini_live",
-                            "participant_type": "tester",
-                            "transcript": raw_user,
-                            "redacted_transcript": redact_feedback_text(raw_user),
-                            "duration_seconds": duration_seconds,
-                            "tags": tags,
-                            "feedback_mode": "spoken_request",
-                            "mode": self.call.mode,
-                            "attempt": self.call.attempt,
-                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                        },
-                        ensure_ascii=True,
-                        indent=2,
-                        default=str,
-                    )
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Could not write Live feedback note uuid=%s error=%s",
-                    self.call.call_uuid,
-                    type(exc).__name__,
-                )
-            try:
-                await self.call.memory.save_call_feedback(
-                    student_id=self.student_id,
-                    phone_number=self.call.phone,
-                    call_id=self.call.call_id,
-                    channel="asterisk_audiosocket_gemini_live",
-                    participant_type="tester",
-                    recording_path=str(wav_path),
-                    transcript=raw_user,
-                    duration_seconds=duration_seconds,
-                    metadata={"mode": self.call.mode, "attempt": self.call.attempt},
-                    tags=tags,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Could not save Live feedback note uuid=%s error=%s",
-                    self.call.call_uuid,
-                    type(exc).__name__,
-                )
-            logger.warning(
-                "Gemini Live feedback note captured uuid=%s seconds=%s text=%r",
-                self.call.call_uuid,
-                duration_seconds,
-                raw_user,
-            )
-            if self.websocket is not None and not self.call.hungup:
-                await self._send_json({"realtimeInput": {"text": FEEDBACK_SAVED_CUE}})
-            return True
-
-        # The caller just asked for the space: beep, then get out of the way.
-        if not self.feedback_captured and _looks_like_feedback_request(raw_user):
-            self.feedback_pending = True
-            self.messages.append({"role": "user", "content": raw_user})
-            _drain_queue(self.playback_queue)
-            self.output_packet_buffer.clear()
-            self._queue_go_cue()
-            logger.warning(
-                "Gemini Live feedback space opened uuid=%s request=%r",
-                self.call.call_uuid,
-                raw_user,
-            )
-            if self.websocket is not None and not self.call.hungup:
-                await self._send_json({"realtimeInput": {"text": FEEDBACK_OPEN_CUE}})
-            return True
-
-        return False
-
     async def _finalize_turn(self) -> None:
         raw_user = " ".join(self.input_transcript.split())
         assistant = " ".join(self.output_transcript.split())
@@ -1849,25 +1641,6 @@ class GeminiLiveCallRunner:
             assistant_pcm = bytes(self.played_pcm)
             self.input_pcm.clear()
             self.played_pcm.clear()
-
-        # Child safety runs before anything else can interpret the turn.
-        if raw_user and await self._handle_safeguarding(raw_user):
-            self.input_transcript = ""
-            self.output_transcript = ""
-            self.turn_interrupted = False
-            self.turn_tool_events = []
-            self.turn_started_at = time.monotonic()
-            return
-
-        # A feedback note is not a lesson turn: it must never be graded, never
-        # reach the numeric sidecar, and never move the learner's state.
-        if raw_user and await self._capture_feedback_turn(raw_user, user_pcm):
-            self.input_transcript = ""
-            self.output_transcript = ""
-            self.turn_interrupted = False
-            self.turn_tool_events = []
-            self.turn_started_at = time.monotonic()
-            return
 
         # The call-start signal produces an assistant-only greeting.  Preserve
         # it in session history but don't create a fake learner turn.
@@ -2121,8 +1894,6 @@ class GeminiLiveCallRunner:
             user_turns=user_turns,
             assistant_turns=assistant_turns,
             hangup_event=HANGUP_EVENTS.get(self.call.call_uuid),
-            usage_metadata=self.usage_metadata or None,
-            safeguarding_events=self.safeguarding_events or None,
             directory=SHARED_AUDIO_DIR,
         )
         if learning_result:

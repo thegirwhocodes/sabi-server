@@ -104,7 +104,26 @@ LIVE_ENDPOINT = (
 # and the lab's learner context used that same name, so it is not yet known
 # whether the model takes the name from the context or copies it from the
 # examples. Watch the first call from a differently-named learner.
-GEMINI_LIVE_TUTOR_PROMPT = """You are Sabi (say it SAH-bee), a Nigerian numeracy tutor on
+# The tutor prompt lives in prompts/sabi_tutor_prompt.md so it can be edited without
+# touching Python. The copy below is the fallback if that file is ever missing.
+_PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "sabi_tutor_prompt.md")
+
+
+def _load_tutor_prompt(fallback: str) -> str:
+    try:
+        with open(_PROMPT_FILE, encoding="utf-8") as handle:
+            text = handle.read().strip()
+        if text:
+            return text
+        logger.warning("Tutor prompt file is empty; using the built-in copy")
+    except FileNotFoundError:
+        logger.warning("Tutor prompt file not found at %s; using the built-in copy", _PROMPT_FILE)
+    except OSError as exc:
+        logger.warning("Could not read tutor prompt (%s); using the built-in copy", exc)
+    return fallback
+
+
+_FALLBACK_TUTOR_PROMPT = """You are Sabi (say it SAH-bee), a Nigerian numeracy tutor on
 a phone call with one child. You cannot see her and she cannot see you. Everything
 you are is in how you talk.
 
@@ -184,8 +203,10 @@ Stay on the registered maths question; do not invent your own. Ignore random
 non-speech. If words are genuinely unclear, ask once — never mark it wrong.
 Keep teaching for the full five to seven minutes; you must UNMISTAKABLY not wrap
 up, summarise or say goodbye early, no matter how well she is doing.
-Speak plainly — no markdown, no stage directions, no tool talk.
-"""
+Speak plainly — no markdown, no stage directions, no tool talk."""
+
+GEMINI_LIVE_TUTOR_PROMPT = _load_tutor_prompt(_FALLBACK_TUTOR_PROMPT)
+
 
 
 def build_gemini_live_base_prompt(

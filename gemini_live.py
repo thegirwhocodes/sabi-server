@@ -6,9 +6,11 @@ Live WebSocket remains open for the whole phone call.  Caller PCM is streamed
 continuously, Gemini retains the in-call context, and native audio is streamed
 back to Asterisk while the caller can interrupt it.
 
-Only callers explicitly listed in ``SABI_GEMINI_LIVE_PHONES`` reach this code.
-The ordinary AudioSocket path remains the fallback and the route for everyone
-else.
+Every caller reaches this code by default. ``SABI_GEMINI_LIVE_EXCLUDE_PHONES``
+provides per-number rollback, while ``SABI_GEMINI_LIVE_ALL=0`` restores the
+original allowlist behavior through ``SABI_GEMINI_LIVE_PHONES``. The ordinary
+AudioSocket path remains deployed for exclusions, global rollback, and setup
+failures before Gemini consumes caller media.
 """
 
 from __future__ import annotations

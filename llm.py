@@ -16,6 +16,7 @@ import httpx
 
 from curriculum_path import build_curriculum_path_prompt
 from diagnostic_flow import build_instructional_route_prompt
+from learning_state import brief_preview_prompt_block
 from numeric_grading import build_numeric_grading_hint
 from guardrails import (
     SABI_SAFETY_PREAMBLE,
@@ -269,6 +270,7 @@ class SabiLLM:
 
         system_prompt += build_instructional_route_prompt(messages, current_module, course)
         system_prompt += build_numeric_grading_hint(messages)
+        system_prompt += brief_preview_prompt_block(learning_state)
 
         return system_prompt
 

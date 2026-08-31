@@ -35,7 +35,7 @@ from numeric_grading import (
     verified_numeric_control_message,
 )
 from original_sabi_prompt import ORIGINAL_SABI_FIRST_MESSAGE, original_sabi_prompt_for_phone
-from phone_utils import phone_is_numeracy_only, phone_uses_gemini_live
+from phone_utils import phone_is_numeracy_only, phone_uses_brief_preview, phone_uses_gemini_live
 from transcript_normalizer import (
     is_likely_stt_hallucination_transcript,
     is_phone_system_transcript,
@@ -479,6 +479,9 @@ def _stt_mode_for_state(state: dict | None) -> str:
 def _course_state_for_phone(phone: str, state: dict | None) -> dict:
     """Apply reversible, caller-scoped course experiments to runtime state."""
     effective = dict(state or {})
+    if phone_uses_brief_preview(phone):
+        effective["brief_preview"] = True
+        return effective
     return force_numeracy_course(effective) if phone_is_numeracy_only(phone) else effective
 
 
@@ -2129,14 +2132,23 @@ class RealtimeCall:
             student = await self.memory.find_or_create_student(self.phone)
             student_id = student["id"]
             effective_state = await self.memory.get_effective_learning_state(student)
+            previous_course = str(effective_state.get("course") or "numeracy")
+            effective_state = _course_state_for_phone(self.phone, effective_state)
+            if self.mode == "preview_callback":
+                effective_state["brief_preview"] = True
+            student = {**student, "brief_preview": bool(effective_state.get("brief_preview"))}
             if phone_is_numeracy_only(self.phone):
-                previous_course = str(effective_state.get("course") or "numeracy")
-                effective_state = _course_state_for_phone(self.phone, effective_state)
                 logger.info(
                     "Phone-scoped numeracy-only route uuid=%s phone=%s previous_course=%s",
                     self.call_uuid,
                     self.phone,
                     previous_course,
+                )
+            elif phone_uses_brief_preview(self.phone):
+                logger.info(
+                    "Brief preview lane uuid=%s phone=%s — turn-based diagnostic/TaRL path, not production Gemini Live",
+                    self.call_uuid,
+                    self.phone,
                 )
             starting_learning_state = dict(effective_state)
             identity_confirmed = not student.get("needs_identity_confirmation")
@@ -2518,6 +2530,7 @@ class RealtimeCall:
                         student_id = resolved_student.get("id") or student_id
                         effective_state = await self.memory.get_effective_learning_state(student)
                         effective_state = _course_state_for_phone(self.phone, effective_state)
+                        student = {**student, "brief_preview": bool(effective_state.get("brief_preview"))}
                         starting_learning_state = dict(effective_state)
                         module = int(effective_state.get("current_module") or student.get("current_module") or module or 0)
                         identity_confirmed = True
@@ -2822,6 +2835,8 @@ async def handle_audiosocket_call(reader: asyncio.StreamReader, writer: asyncio.
         )
         if call.conversation_style == "original":
             await call.run_original_sabi()
+        elif call.mode == "preview_callback":
+            await call.run()
         elif phone_uses_gemini_live(call.phone):
             # The canary connects before starting the AudioSocket read loop.
             # A setup failure can therefore fall back safely to the established

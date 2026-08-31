@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from diagnostic_flow import (
+    CANONICAL_MARKET_ADDITION_PROMPT,
     NUMERACY_DIAGNOSTIC_ITEMS,
     analyze_diagnostic_progress,
     analyze_literacy_diagnostic_progress,
@@ -373,7 +374,41 @@ def merge_learning_state(student: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(current_module, int):
         state["current_module"] = current_module
         state["active_skill"] = MODULE_SKILLS.get(current_module, state.get("active_skill", "diagnostic"))
+    if student.get("brief_preview"):
+        state["brief_preview"] = True
     return state
+
+
+def _is_brief_preview(student: dict[str, Any] | None, state: dict[str, Any] | None) -> bool:
+    return bool((student or {}).get("brief_preview") or (state or {}).get("brief_preview"))
+
+
+def brief_preview_prompt_block(state: dict[str, Any] | None = None) -> str:
+    """Overrides production first-call onboarding for the demoted preview lane only."""
+    if not (state or {}).get("brief_preview"):
+        return ""
+    return f"""
+
+## BRIEF PREVIEW FLOW — overrides first-call onboarding
+This caller is on the demoted preview lane, not production Gemini Live.
+Do not ask about school or selling at the market as separate onboarding questions.
+1. Greet enthusiastically. Ask their name only if you do not already know it.
+2. Immediately run the learning assessment as a game: "Let me see what you already know — not a test, just a game."
+3. After placement, teach ONE lesson at that TaRL-style level in the current course, literacy or numeracy.
+4. Numeracy uses market scenarios. After placement, the first addition question is: "{CANONICAL_MARKET_ADDITION_PROMPT}"
+5. If they get two answers wrong in a row, bump down one curriculum level and teach from that point.
+6. If they get successive answers right and meet the mastery standard, elevate one level.
+7. Returning callers: greet by the remembered name and continue from the saved lesson. Never re-ask their name if you already have it.
+"""
+
+
+def _brief_preview_adjust_module(module: int, wrong_streak: int) -> int:
+    """Drop one curriculum level after two consecutive wrong answers. Elevate is post-call mastery."""
+    if module <= 0:
+        return module
+    if wrong_streak >= 2 and module > 1:
+        return module - 1
+    return module
 
 
 def route_next_course_after_session(
@@ -728,11 +763,18 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
         mastery_confirmation_count = 0
         next_mastery_confirmation_key = None
     should_advance = raw_mastery_ready and mastery_confirmation_count >= MIN_NUMERACY_MASTERY_CONFIRMATIONS
+    diagnostic_status = _diagnostic_status(current_module, recommended_module, diagnostic_progress, topics)
+    if _is_brief_preview(student, state) and diagnostic_status == "done":
+        recommended_module = _brief_preview_adjust_module(int(recommended_module or 0), wrong_streak)
     current_level = _current_level(skill_scores, scaffold_depth, wrong_streak)
     phase = _phase_for_state(current_module, recommended_module, messages, correct_count, wrong_count, diagnostic_progress, onboarding_status)
     scaffold_ladder = scaffold_ladder_for(active_skill, scaffold_depth, wrong_streak)
     next_step = _next_step(active_skill, scaffold_depth, wrong_streak, correct_streak, scaffold_ladder)
-    diagnostic_status = _diagnostic_status(current_module, recommended_module, diagnostic_progress, topics)
+    if _is_brief_preview(student, state) and wrong_streak >= 2 and int(recommended_module or 0) > 0:
+        next_step = (
+            f"Bump down to module {recommended_module} "
+            f"({MODULE_NAMES.get(recommended_module, 'numeracy')}) and teach from that level."
+        )
 
     updated_state = {
         **state,
@@ -758,6 +800,7 @@ def analyze_session(student: dict[str, Any] | None, messages: list[dict[str, str
         "repair_skill": active_skill if scaffold_ladder else None,
         "scaffold_ladder": scaffold_ladder,
         "next_step": next_step,
+        "brief_preview": _is_brief_preview(student, state),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -812,6 +855,7 @@ def build_learning_state_prompt(student: dict[str, Any] | None) -> str:
 - Literacy next step: {(state.get('literacy') or {}).get('next_step', 'Run the oral literacy diagnostic when literacy mode is selected.')}
 {research_block}
 {ladder_block}
+{brief_preview_prompt_block(state)}
 If wrong streak is 2 or more, do the proposed bump-down behavior immediately:
 1. Stop increasing difficulty.
 2. Follow the REQUIRED BUMP-DOWN LADDER above when it is present.

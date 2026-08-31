@@ -67,6 +67,10 @@ SABI_CHATTERBOX_SPEAKER=naomi
 `SABI_GEMINI_LIVE_EXCLUDE_PHONES` is a comma/semicolon/newline-separated list.
 Excluded callers immediately use the established STT → LLM → TTS pipeline.
 
+`SABI_BRIEF_PREVIEW_PHONES` is a separate demoted allowlist, empty by default.
+Listed numbers skip Gemini Live and use the turn-based diagnostic / TaRL path.
+Unknown callers and every unlisted number stay on production Gemini Live.
+
 For the fast global rollback, set `SABI_GEMINI_LIVE_ALL=0` and recreate the
 `sabi-server` container so it re-reads `.env`. In rollback mode only
 `SABI_GEMINI_LIVE_PHONES` uses Gemini; an empty allowlist sends every caller to

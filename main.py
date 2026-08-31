@@ -20,7 +20,7 @@ from pathlib import Path
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Form, Request, Response
+from fastapi import FastAPI, Form, Request, Response, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -47,6 +47,12 @@ from feedback_admin import (
     load_feedback_record,
 )
 from admin_review import render_admin_review_page
+from preview_call import (
+    preview_page_html,
+    run_preview_session,
+    simulator_disabled_payload,
+    simulator_enabled,
+)
 from curriculum_review import build_curriculum_review_map
 from launch_gates import build_launch_gate_report
 from pilot_evidence import build_pilot_evidence_report, pilot_evidence_csv
@@ -722,6 +728,27 @@ async def admin_call_index(
 async def admin_review_console():
     """Protected browser console for learner progress and call QA."""
     return HTMLResponse(render_admin_review_page())
+
+
+@app.get("/admin/preview-call")
+async def admin_preview_call():
+    """Demoted browser mimic of a Sabi phone call. Off unless the simulator flag is on."""
+    html = preview_page_html()
+    if html is None:
+        status, payload = simulator_disabled_payload()
+        return JSONResponse(payload, status_code=status)
+    return HTMLResponse(html)
+
+
+@app.websocket("/admin/preview-call/ws")
+async def admin_preview_call_ws(websocket: WebSocket):
+    """Same AudioSocket lesson path as a handset, after a fake flash-callback."""
+    if not simulator_enabled():
+        await websocket.accept()
+        await websocket.close(code=1008, reason="preview simulator off")
+        return
+    await websocket.accept()
+    await run_preview_session(websocket)
 
 
 @app.get("/admin/curriculum-map")

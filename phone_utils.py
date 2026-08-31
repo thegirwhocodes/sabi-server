@@ -95,6 +95,25 @@ def _phone_set(configured: str | None) -> set[str]:
     }
 
 
+def phone_uses_brief_preview(
+    raw: str | None,
+    configured: str | None = None,
+) -> bool:
+    """Return whether this caller is on the demoted TaRL-brief preview lane.
+
+    Production stays unchanged: the list is empty by default, so nobody is
+    routed here, including unknown caller IDs. Add E.164 numbers to
+    ``SABI_BRIEF_PREVIEW_PHONES`` only when you want to try the greeting →
+    game assessment → one placed lesson flow off Gemini Live.
+    """
+    if configured is None:
+        configured = os.getenv("SABI_BRIEF_PREVIEW_PHONES", "")
+    target = normalize_phone_number(raw)
+    if target == "unknown":
+        return False
+    return target in _phone_set(configured)
+
+
 def phone_uses_gemini_live(
     raw: str | None,
     configured: str | None = None,
@@ -114,7 +133,12 @@ def phone_uses_gemini_live(
 
     Passing ``configured`` explicitly always uses allowlist semantics, so a
     caller can test one specific list without depending on the environment.
+    Preview-lane numbers never use Gemini Live when routing from the
+    environment; they keep the turn-based diagnostic / literacy path.
     """
+    if configured is None and phone_uses_brief_preview(raw):
+        return False
+
     target = normalize_phone_number(raw)
 
     if configured is not None:

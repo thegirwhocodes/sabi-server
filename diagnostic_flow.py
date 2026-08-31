@@ -398,6 +398,12 @@ LITERACY_DIAGNOSTIC_ITEMS: tuple[LiteracyDiagnosticItem, ...] = (
 )
 
 
+CANONICAL_MARKET_ADDITION_PROMPT = (
+    "If you spent twenty naira on biscuits and thirty naira on groundnuts in the market, "
+    "how much did you spend altogether?"
+)
+
+
 def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | None) -> str:
     """Deterministic first turn so returning callers are not asked their name."""
     student = student or {}
@@ -406,6 +412,9 @@ def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | N
         return "Hello! I'm Sabi, your learning friend. I remember this phone, but more than one learner may use it. What is your name?"
 
     name = _clean_name(student.get("name") or "")
+    if student.get("brief_preview") or state.get("brief_preview"):
+        return _build_brief_preview_opening_turn(name, student, state)
+
     course = str(state.get("course") or student.get("course") or "numeracy")
     module = int(state.get("current_module") or student.get("current_module") or 0)
     diagnostic_status = state.get("diagnostic_status") or student.get("baseline_status") or "not_started"
@@ -444,6 +453,64 @@ def build_opening_turn(student: dict[str, Any] | None, state: dict[str, Any] | N
     warmup = warmups.get(module, "Tell me one thing you remember from our last lesson.")
     topic = state.get("active_skill") or student.get("current_topic") or "numbers"
     return f"Welcome back, {name}! Last time we worked on {topic}. Quick warm-up: {warmup}"
+
+
+def _build_brief_preview_opening_turn(
+    name: str,
+    student: dict[str, Any],
+    state: dict[str, Any],
+) -> str:
+    """Name → game assessment → one placed lesson. No school/market onboarding."""
+    course = str(state.get("course") or student.get("course") or "numeracy")
+    if not name:
+        return (
+            "Hello! I'm Sabi, your learning friend! Sabi means to know — and together, "
+            "we're going to know so much! What is your name?"
+        )
+
+    if course == "literacy":
+        literacy = state.get("literacy") if isinstance(state.get("literacy"), dict) else {}
+        literacy = literacy or {}
+        if literacy.get("diagnostic_status") != "done":
+            progress = literacy.get("diagnostic_results") if isinstance(literacy.get("diagnostic_results"), dict) else None
+            next_item = progress.get("next_item") if progress else None
+            if isinstance(next_item, dict) and next_item.get("prompt"):
+                return (
+                    f"Welcome back, {name}! I remember you. Let's keep playing our sound game — "
+                    f"not a test. {next_item['prompt']}"
+                )
+            first_item = LITERACY_DIAGNOSTIC_ITEMS[0]
+            return (
+                f"Hi {name}! Let's play a quick sound game so I know where to start — "
+                f"not a test, just a game. {first_item.prompt}"
+            )
+        topic = literacy.get("active_skill") or "sounds"
+        return (
+            f"Welcome back, {name}! I remember you. Last time we worked on {topic}. "
+            "Let's continue from there."
+        )
+
+    diagnostic_status = state.get("diagnostic_status") or student.get("baseline_status") or "not_started"
+    module = int(state.get("current_module") or student.get("current_module") or 0)
+    if module == 0 or diagnostic_status != "done":
+        progress = state.get("diagnostic_results") if isinstance(state.get("diagnostic_results"), dict) else None
+        next_item = progress.get("next_item") if progress else None
+        if isinstance(next_item, dict) and next_item.get("prompt"):
+            return (
+                f"Welcome back, {name}! I remember you. Let's keep playing our number game — "
+                f"not a test. {next_item['prompt']}"
+            )
+        first_item = NUMERACY_DIAGNOSTIC_ITEMS[0]
+        return (
+            f"Hi {name}! Let's play a quick number game so I know where to start — "
+            f"not a test, just a game. {first_item.prompt}"
+        )
+
+    skill = str(state.get("active_skill") or "numbers").replace("_", " ")
+    return (
+        f"Welcome back, {name}! I remember you. Last time we were on {skill}. "
+        "Let's continue from where we left off."
+    )
 
 
 def _build_literacy_opening_turn(

@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+  
+  body {
+    @apply bg-paper text-ink font-sans font-light text-sm antialiased;
+    background: radial-gradient(1200px 500px at 85% -10%, rgba(203, 168, 104, 0.10), transparent 60%), #f7f2e7;
+  }
+}
+
+@layer utilities {
+  .shadow-sabi {
+    box-shadow: 0 24px 60px rgba(45, 36, 20, 0.16);
+  }
+  
+  .shadow-sabi-soft {
+    box-shadow: 0 6px 22px rgba(45, 36, 20, 0.06);
+  }
+}

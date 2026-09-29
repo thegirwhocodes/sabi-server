@@ -58,6 +58,7 @@ from voice_realtime import record_hangup_event, register_call, start_audiosocket
 from secret_loader import get_secret
 from sentry_setup import init_sentry
 from phone_utils import normalize_phone_number
+from operations_api import router as operations_router
 
 load_dotenv()
 
@@ -330,6 +331,10 @@ app.include_router(voice_router, prefix="/voice")
 
 # Twilio voice webhook routes
 app.include_router(twilio_router, prefix="/voice/twilio")
+
+# Operations Dashboard API
+from operations_api import router as operations_router
+app.include_router(operations_router)
 
 
 @app.get("/health")

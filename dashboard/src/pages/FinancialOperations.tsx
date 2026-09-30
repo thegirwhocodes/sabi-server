@@ -1,5 +1,5 @@
-import { useQuery } from '@tantml/react-query'
-import { DollarSign, TrendingDown, TrendingUp, AlertCircle } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { TrendingDown, TrendingUp, AlertCircle } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 const COLORS = ['#1e7b43', '#cba868', '#9b5b00', '#b42318']

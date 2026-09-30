@@ -1,0 +1,13 @@
+# Ignore unnecessary files for deployment
+node_modules
+__pycache__
+*.pyc
+.git
+.env
+.venv
+venv
+*.log
+
+# Keep only what's needed
+!cofounder_agent/
+!vercel.json

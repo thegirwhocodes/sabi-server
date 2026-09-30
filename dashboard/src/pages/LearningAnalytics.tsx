@@ -60,7 +60,7 @@ export function LearningAnalytics() {
         </div>
         <div className="bg-card rounded-xl border border-line p-5 shadow-sabi-soft">
           <div className="text-2xl font-semibold text-ink mb-1">
-            {analytics?.completion Rate || 0}%
+            {analytics?.completionRate || 0}%
           </div>
           <div className="text-sm text-ink-muted">Lesson Completion</div>
         </div>

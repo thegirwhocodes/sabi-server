@@ -2,6 +2,8 @@
 """
 Example usage of the Co-Founder Agent
 This demonstrates how to programmatically interact with the agent.
+
+Run: python3 cofounder_agent/example_usage.py
 """
 
 from cofounder_agent import CofounderAgent

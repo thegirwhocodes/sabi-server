@@ -2,6 +2,8 @@
 """
 Co-Founder Agent CLI
 Command-line interface for interacting with your AI co-founder.
+
+Usage: python3 cofounder_agent/cli.py [command]
 """
 
 import sys

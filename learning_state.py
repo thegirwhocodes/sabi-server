@@ -513,6 +513,34 @@ def force_numeracy_course(state: dict[str, Any] | None) -> dict[str, Any]:
     return routed
 
 
+def force_literacy_course(state: dict[str, Any] | None) -> dict[str, Any]:
+    """Mirror of ``force_numeracy_course`` for the literacy Live lane.
+
+    Overwrites every teaching field on the top-level state so the model does
+    not follow numeracy cues (course=numeracy, active_skill=multiplication)
+    that leak in from prior calls. Nested numeracy state is preserved so we
+    can flip the caller back to numeracy without losing progress.
+    """
+    routed = dict(state or default_learning_state())
+    now = datetime.now(timezone.utc).isoformat()
+    rotation = dict(routed.get("course_rotation") or {})
+    rotation.update({"next_course": "literacy", "updated_at": now})
+    routed.update(
+        {
+            "course": "literacy",
+            "phase": "diagnostic",
+            "active_skill": "phonemic_awareness",
+            "next_step": (
+                "Open with the phonemic-awareness sound game "
+                "and do not switch to numeracy."
+            ),
+            "course_rotation": rotation,
+            "updated_at": now,
+        }
+    )
+    return routed
+
+
 def scaffold_ladder_for(active_skill: str, scaffold_depth: int, wrong_streak: int) -> dict[str, Any] | None:
     level = _scaffold_level(scaffold_depth, wrong_streak)
     if level <= 0:

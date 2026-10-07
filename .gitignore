@@ -26,3 +26,11 @@ afro-tts/reference_audio/
 # Secrets
 .env.local
 secrets/
+*.log
+*.bak
+*.bak[0-9]
+.env*
+!.env.example
+.npm-cache/
+.vercel/
+.aider*

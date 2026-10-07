@@ -157,3 +157,29 @@ def phone_uses_gemini_live(
     if target == "unknown":
         return True
     return target not in _phone_set(os.getenv("SABI_GEMINI_LIVE_EXCLUDE_PHONES", ""))
+
+
+def phone_uses_literacy_lane(
+    raw: str | None,
+    configured: str | None = None,
+) -> bool:
+    """Return whether this caller should be routed to the Gemini Live LITERACY prompt
+    instead of the default NUMERACY prompt.
+
+    Strict allowlist: an empty ``SABI_GEMINI_LIVE_LITERACY_PHONES`` means nobody uses
+    the literacy lane. This is deliberately opt-in — literacy is not yet
+    production-safe pedagogy, so it only fires for testers on the list.
+
+    Preview-lane numbers never get literacy; they keep the turn-based literacy path.
+    """
+    if configured is None and phone_uses_brief_preview(raw):
+        return False
+
+    target = normalize_phone_number(raw)
+    if target == "unknown":
+        return False
+
+    source = configured if configured is not None else os.getenv(
+        "SABI_GEMINI_LIVE_LITERACY_PHONES", ""
+    )
+    return target in _phone_set(source)

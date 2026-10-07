@@ -40,7 +40,7 @@ from guardrails import (
     guard_input,
     raise_safeguarding_incident,
 )
-from learning_state import analyze_session, force_numeracy_course
+from learning_state import analyze_session, force_literacy_course, force_numeracy_course
 from numeric_sidecar import NumericSidecar, expected_number_from_problem
 from gemini_grading import (
     CORRECT,
@@ -154,20 +154,29 @@ LIVE_ENDPOINT = (
 # The tutor prompt lives in prompts/sabi_tutor_prompt.md so it can be edited without
 # touching Python. The copy below is the fallback if that file is ever missing.
 _PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "sabi_tutor_prompt.md")
+_LITERACY_PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "sabi_literacy_prompt.md")
 
 
-def _load_tutor_prompt(fallback: str) -> str:
+def _load_prompt_file(path: str, fallback: str, label: str) -> str:
     try:
-        with open(_PROMPT_FILE, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             text = handle.read().strip()
         if text:
             return text
-        logger.warning("Tutor prompt file is empty; using the built-in copy")
+        logger.warning("%s prompt file is empty; using the built-in copy", label)
     except FileNotFoundError:
-        logger.warning("Tutor prompt file not found at %s; using the built-in copy", _PROMPT_FILE)
+        logger.warning("%s prompt file not found at %s; using the built-in copy", label, path)
     except OSError as exc:
-        logger.warning("Could not read tutor prompt (%s); using the built-in copy", exc)
+        logger.warning("Could not read %s prompt (%s); using the built-in copy", label, exc)
     return fallback
+
+
+def _load_tutor_prompt(fallback: str) -> str:
+    return _load_prompt_file(_PROMPT_FILE, fallback, "Tutor")
+
+
+def _load_literacy_prompt(fallback: str) -> str:
+    return _load_prompt_file(_LITERACY_PROMPT_FILE, fallback, "Literacy")
 
 
 _FALLBACK_TUTOR_PROMPT = """You are Sabi (say it SAH-bee), a Nigerian numeracy tutor on
@@ -254,14 +263,35 @@ Speak plainly — no markdown, no stage directions, no tool talk."""
 
 GEMINI_LIVE_TUTOR_PROMPT = _load_tutor_prompt(_FALLBACK_TUTOR_PROMPT)
 
+# Literacy lane: opt-in per phone number via SABI_GEMINI_LIVE_LITERACY_PHONES.
+# When a caller matches, we swap the numeracy tutor prompt for this literacy prompt
+# and change the "NUMERACY-ONLY" injection to a "LITERACY-ONLY" injection.
+# Kept separate from the numeracy prompt on disk so the two subjects never leak
+# into each other's lesson flow.
+_FALLBACK_LITERACY_PROMPT = (
+    "You are Sabi, a Nigerian literacy tutor for a child aged 8-14 on a phone call. "
+    "Teach phonemic awareness, letter sounds, blending, and sight words in warm Nigerian English. "
+    "Use one concept per 5-7 minute call. Never teach numeracy on this lane. "
+    "Stretch continuous sounds when a child struggles; give the sound (not the letter name) first."
+)
+GEMINI_LIVE_LITERACY_PROMPT = _load_literacy_prompt(_FALLBACK_LITERACY_PROMPT)
+
 
 
 def build_gemini_live_base_prompt(
     memory_context: str,
     curriculum_context: str,
+    lane: str = "numeracy",
 ) -> str:
-    """Build the compact Live-native prompt without legacy RAG duplication."""
-    parts = [GEMINI_LIVE_TUTOR_PROMPT, SABI_SAFETY_PREAMBLE]
+    """Build the compact Live-native prompt without legacy RAG duplication.
+
+    ``lane`` selects which subject prompt fires: ``numeracy`` (default) uses the
+    original hackathon-lineage tutor prompt; ``literacy`` uses the literacy prompt
+    for allow-listed callers. Everything else (safety preamble, memory context,
+    curriculum context, downstream flow) is identical across lanes.
+    """
+    tutor = GEMINI_LIVE_LITERACY_PROMPT if lane == "literacy" else GEMINI_LIVE_TUTOR_PROMPT
+    parts = [tutor, SABI_SAFETY_PREAMBLE]
     if str(memory_context or "").strip():
         parts.append(str(memory_context))
     if str(curriculum_context or "").strip():
@@ -1154,7 +1184,7 @@ the learner's name or another onboarding answer, ask your first naira question
 in the same turn."""
 
 
-def build_live_call_constraints(opening_turn: str, learning_state: dict | None) -> str:
+def build_live_call_constraints(opening_turn: str, learning_state: dict | None, lane: str = "numeracy") -> str:
     state_json = json.dumps(
         compact_live_learning_state(learning_state),
         ensure_ascii=False,
@@ -1177,8 +1207,7 @@ This is one continuous, full-duplex phone conversation. You hear the caller's
 audio directly and retain the complete context for this call. Do not describe
 transcription, STT providers, prompts, tools, APIs, or internal state.
 
-The caller is currently in a NUMERACY-ONLY test. Do not teach literacy, letter
-sounds, spelling, or phonics during this call.
+{ "The caller is currently in a LITERACY-ONLY session. Do not teach numeracy, arithmetic, market maths, or naira calculations during this call. If the child brings up numbers, gently return them to the sound game." if lane == "literacy" else "The caller is currently in a NUMERACY-ONLY test. Do not teach literacy, letter sounds, spelling, or phonics during this call." }
 
 Opening turn for this learner: {opening_turn!r}
 When you receive the literal text [SABI_CALL_STARTED], begin with that opening
@@ -1376,18 +1405,36 @@ class GeminiLiveCallRunner:
         self.student = await self.call.memory.find_or_create_student(self.call.phone)
         self.student_id = self.student["id"]
         state = await self.call.memory.get_effective_learning_state(self.student)
-        self.effective_state = force_numeracy_course(state)
+
+        # Decide the lane FIRST so the state gets forced to the right course.
+        # Otherwise force_numeracy_course would set course=numeracy /
+        # active_skill=multiplication even on a literacy call, and the model
+        # would follow those concrete state cues over the prose prompt.
+        from phone_utils import phone_uses_literacy_lane
+        lane = "literacy" if phone_uses_literacy_lane(self.call.phone) else "numeracy"
+
+        if lane == "literacy":
+            self.effective_state = force_literacy_course(state)
+        else:
+            self.effective_state = force_numeracy_course(state)
+
         self.starting_learning_state = dict(self.effective_state)
         self.module = int(
             self.effective_state.get("current_module")
             or self.student.get("current_module")
             or 0
         )
-        self.tools = GeminiLiveNumeracyTools(self.call.call_uuid, self.effective_state)
+        # Literacy lane does not have grading tools yet, so keep them None to
+        # avoid the tool contract asking Gemini to grade sound answers.
+        self.tools = (
+            None if lane == "literacy"
+            else GeminiLiveNumeracyTools(self.call.call_uuid, self.effective_state)
+        )
 
         # Gemini Live gets a compact native prompt.  The legacy text pipeline's
         # full RAG prompt duplicated the curriculum block and included turn-
         # based instructions that conflict with a continuous session.
+
         memory_context = build_gemini_live_learner_context(
             self.student,
             self.effective_state,
@@ -1395,11 +1442,12 @@ class GeminiLiveCallRunner:
         curriculum_context = build_curriculum_path_prompt(
             self.effective_state,
             self.module,
-            "numeracy",
+            lane,
         )
         base_prompt = build_gemini_live_base_prompt(
             memory_context or "",
             curriculum_context or "",
+            lane=lane,
         )
         from diagnostic_flow import build_opening_turn
 
@@ -1415,7 +1463,7 @@ class GeminiLiveCallRunner:
                 opening_turn = f"Welcome back, {learner_name}! Let's continue with {skill}."
             else:
                 opening_turn = f"Welcome back! Let's continue with {skill}."
-        return base_prompt + build_live_call_constraints(opening_turn, self.effective_state)
+        return base_prompt + build_live_call_constraints(opening_turn, self.effective_state, lane=lane)
 
     async def _send_json(self, payload: dict[str, Any]) -> None:
         async with self.send_lock:

@@ -1,0 +1,2016 @@
+From c8bf9befb3272060fce644f3bc41d1563b1979c3 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Mon, 12 Oct 2026 20:09:06 +0000
+Subject: [PATCH 4/6] Sabi: add shared site config, content data and marketing
+ components
+
+Centralise routes, nav and footer config in lib/sabi/site.ts, all page copy
+in lib/sabi/content.ts and per-page metadata in lib/sabi/metadata.ts. Add
+reusable Section/PageHeader/FeaturePhone/DataBlocks/Blocks/VideoFacade
+components, rebuild the nav (desktop + accessible mobile menu) and the
+config-driven footer, and extend the design system CSS.
+---
+ app/sabi/sabi-shell.css                      | 659 +++++++++++++++++++
+ components/sabi/SabiShellFooter.tsx          |  41 +-
+ components/sabi/SabiShellNav.tsx             | 104 ++-
+ components/sabi/marketing/Blocks.tsx         | 229 +++++++
+ components/sabi/marketing/CallTranscript.tsx |  39 ++
+ components/sabi/marketing/DataBlocks.tsx     | 100 +++
+ components/sabi/marketing/FeaturePhone.tsx   |  86 +++
+ components/sabi/marketing/Icons.tsx          |  55 ++
+ components/sabi/marketing/PageHeader.tsx     |  35 +
+ components/sabi/marketing/Section.tsx        |  61 ++
+ components/sabi/marketing/VideoFacade.tsx    |  44 ++
+ lib/sabi/content.ts                          | 267 ++++++++
+ lib/sabi/metadata.ts                         |  25 +
+ lib/sabi/site.ts                             |  86 +++
+ lib/seo.ts                                   |   2 +-
+ 15 files changed, 1785 insertions(+), 48 deletions(-)
+ create mode 100644 components/sabi/marketing/Blocks.tsx
+ create mode 100644 components/sabi/marketing/CallTranscript.tsx
+ create mode 100644 components/sabi/marketing/DataBlocks.tsx
+ create mode 100644 components/sabi/marketing/FeaturePhone.tsx
+ create mode 100644 components/sabi/marketing/Icons.tsx
+ create mode 100644 components/sabi/marketing/PageHeader.tsx
+ create mode 100644 components/sabi/marketing/Section.tsx
+ create mode 100644 components/sabi/marketing/VideoFacade.tsx
+ create mode 100644 lib/sabi/content.ts
+ create mode 100644 lib/sabi/metadata.ts
+ create mode 100644 lib/sabi/site.ts
+
+diff --git a/app/sabi/sabi-shell.css b/app/sabi/sabi-shell.css
+index 6f6d057..2af4f98 100644
+--- a/app/sabi/sabi-shell.css
++++ b/app/sabi/sabi-shell.css
+@@ -1171,6 +1171,665 @@ body.sabi-route > main {
+   overflow: hidden;
+ }
+ 
++/* ---------- Section tones ---------- */
++
++.sabi-tone-white {
++  background: var(--sabi-card);
++}
++
++.sabi-tone-paper {
++  background: var(--sabi-paper);
++}
++
++.sabi-tone-yellow {
++  background: var(--sabi-yellow);
++  color: var(--sabi-ink);
++}
++
++.sabi-tone-green,
++.sabi-tone-ink {
++  color: #fff;
++}
++
++.sabi-tone-green {
++  background: var(--sabi-green);
++}
++
++.sabi-tone-ink {
++  background: var(--sabi-ink);
++}
++
++.sabi-tone-green .sabi-display,
++.sabi-tone-ink .sabi-display,
++.sabi-tone-green .sabi-big-stat,
++.sabi-tone-ink .sabi-big-stat {
++  color: #fff;
++}
++
++.sabi-tone-green .sabi-section-index,
++.sabi-tone-ink .sabi-section-index,
++.sabi-tone-green .sabi-eyebrow,
++.sabi-tone-ink .sabi-eyebrow {
++  color: rgba(255, 255, 255, 0.6);
++}
++
++.sabi-tone-green .sabi-lede,
++.sabi-tone-ink .sabi-lede,
++.sabi-tone-green .sabi-page-lede,
++.sabi-tone-ink .sabi-page-lede {
++  color: rgba(255, 255, 255, 0.75);
++}
++
++.sabi-tone-yellow .sabi-section-index,
++.sabi-tone-yellow .sabi-eyebrow {
++  color: var(--sabi-ink);
++}
++
++.sabi-lede {
++  font-size: 1.125rem;
++  line-height: 1.6;
++  color: var(--sabi-muted);
++}
++
++/* ---------- Page header ---------- */
++
++.sabi-page-header {
++  border-bottom: 1.5px solid var(--sabi-ink);
++  position: relative;
++  overflow: hidden;
++}
++
++.sabi-page-header.sabi-tone-paper,
++.sabi-page-header.sabi-tone-white {
++  border-bottom-color: var(--sabi-border);
++}
++
++.sabi-page-title {
++  font-size: clamp(2.8rem, 6.6vw, 6rem);
++  line-height: 0.95;
++  letter-spacing: -0.045em;
++  font-weight: 800;
++}
++
++.sabi-page-lede {
++  font-size: clamp(1.1rem, 1.6vw, 1.3rem);
++  line-height: 1.55;
++  color: var(--sabi-ink-soft);
++}
++
++.sabi-page-eyebrow {
++  display: inline-block;
++  padding-top: 0.6rem;
++  border-top: 1.5px solid currentColor;
++  min-width: 180px;
++}
++
++/* ---------- Mobile nav ---------- */
++
++.sabi-menu-button {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 2.5rem;
++  height: 2.5rem;
++  border-radius: 999px;
++  border: 1.5px solid var(--sabi-ink);
++  color: var(--sabi-ink);
++}
++
++.sabi-menu-button:hover {
++  background: var(--sabi-yellow);
++}
++
++@media (min-width: 1024px) {
++  .sabi-menu-button,
++  .sabi-mobile-nav {
++    display: none !important;
++  }
++}
++
++.sabi-mobile-nav {
++  border-top: 1px solid var(--sabi-border);
++  background: var(--sabi-paper);
++}
++
++.sabi-mobile-link {
++  display: block;
++  padding: 0.85rem 0;
++  border-bottom: 1px solid var(--sabi-border);
++  font-family: var(--sabi-font-display), ui-sans-serif, sans-serif;
++  font-size: 1.6rem;
++  font-weight: 700;
++  letter-spacing: -0.03em;
++}
++
++.sabi-mobile-link[aria-current="page"] {
++  text-decoration: underline;
++  text-decoration-thickness: 2px;
++  text-underline-offset: 6px;
++}
++
++/* ---------- Cross-page links ---------- */
++
++.sabi-next-page {
++  display: block;
++  background: var(--sabi-paper);
++  border-top: 1.5px solid var(--sabi-ink);
++  transition: background 0.2s ease;
++}
++
++.sabi-next-page:hover {
++  background: var(--sabi-yellow-wash);
++}
++
++.sabi-next-arrow {
++  flex: 0 0 auto;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 4rem;
++  height: 4rem;
++  border-radius: 999px;
++  border: 1.5px solid var(--sabi-ink);
++  transition:
++    background 0.2s ease,
++    transform 0.2s ease;
++}
++
++.sabi-next-page:hover .sabi-next-arrow {
++  background: var(--sabi-yellow);
++  transform: translateX(4px);
++}
++
++.sabi-audience-card {
++  display: flex;
++  flex-direction: column;
++  min-height: 360px;
++  padding: 2rem;
++  border-radius: 22px;
++  border: 1.5px solid var(--sabi-ink);
++  transition:
++    transform 0.2s ease,
++    box-shadow 0.2s ease;
++}
++
++.sabi-audience-card:hover {
++  transform: translate(-3px, -3px);
++  box-shadow: 6px 6px 0 var(--sabi-ink);
++}
++
++.sabi-audience-card.sabi-tone-ink:hover,
++.sabi-audience-card.sabi-tone-green:hover {
++  box-shadow: 6px 6px 0 var(--sabi-yellow);
++}
++
++.sabi-audience-body {
++  opacity: 0.8;
++}
++
++.sabi-audience-arrow {
++  margin-top: auto;
++  padding-top: 2rem;
++  display: inline-flex;
++  align-self: flex-start;
++  transition: transform 0.2s ease;
++}
++
++.sabi-audience-card:hover .sabi-audience-arrow {
++  transform: translateX(6px);
++}
++
++/* ---------- How it works ---------- */
++
++.sabi-phone-name {
++  font-family: var(--sabi-font-display), ui-sans-serif, sans-serif;
++  font-size: 26px;
++  font-weight: 500;
++  line-height: 1;
++  letter-spacing: -0.02em;
++}
++
++.sabi-timeline {
++  display: grid;
++  gap: 2.5rem;
++  position: relative;
++}
++
++@media (min-width: 900px) {
++  .sabi-timeline {
++    grid-template-columns: repeat(5, 1fr);
++    gap: 2rem;
++  }
++
++  .sabi-timeline::before {
++    content: "";
++    position: absolute;
++    left: 0;
++    right: 0;
++    top: 2.15rem;
++    height: 1.5px;
++    background: var(--sabi-ink);
++  }
++}
++
++.sabi-timeline li {
++  position: relative;
++}
++
++.sabi-timeline-time {
++  font-family: var(--sabi-font-mono), ui-monospace, monospace;
++  font-size: 12px;
++  color: var(--sabi-muted);
++}
++
++.sabi-timeline-dot {
++  display: block;
++  margin-top: 0.75rem;
++  width: 1rem;
++  height: 1rem;
++  border-radius: 999px;
++  background: var(--sabi-yellow);
++  border: 1.5px solid var(--sabi-ink);
++  position: relative;
++}
++
++.sabi-feature-panel {
++  border-radius: 22px;
++  padding: 2rem;
++  border: 1.5px solid var(--sabi-ink);
++}
++
++@media (min-width: 768px) {
++  .sabi-feature-panel {
++    padding: 2.75rem;
++  }
++}
++
++.sabi-sms {
++  display: flex;
++  flex-direction: column;
++  gap: 0.6rem;
++  max-width: 360px;
++  font-size: 14px;
++}
++
++.sabi-sms-out,
++.sabi-sms-in {
++  padding: 0.6rem 0.9rem;
++  border-radius: 16px;
++  border: 1.5px solid var(--sabi-ink);
++}
++
++.sabi-sms-out {
++  align-self: flex-end;
++  background: var(--sabi-ink);
++  color: #fff;
++  font-weight: 600;
++  border-bottom-right-radius: 4px;
++}
++
++.sabi-sms-in {
++  align-self: flex-start;
++  background: var(--sabi-card);
++  border-bottom-left-radius: 4px;
++}
++
++.sabi-learner-chip {
++  display: inline-flex;
++  flex-direction: column;
++  padding: 0.7rem 1rem;
++  border-radius: 14px;
++  border: 1px solid var(--sabi-admin-line);
++  background: #19211c;
++  font-size: 13px;
++  color: var(--sabi-admin-text);
++}
++
++.sabi-learner-chip strong {
++  color: var(--sabi-yellow);
++  font-size: 15px;
++}
++
++.sabi-pipeline {
++  display: grid;
++  gap: 1px;
++  background: var(--sabi-admin-line);
++  border: 1px solid var(--sabi-admin-line);
++  border-radius: 20px;
++  overflow: hidden;
++}
++
++@media (min-width: 768px) {
++  .sabi-pipeline {
++    grid-template-columns: repeat(4, 1fr);
++  }
++}
++
++.sabi-pipeline li {
++  background: var(--sabi-ink);
++  padding: 2rem 1.75rem 2.25rem;
++}
++
++.sabi-pipeline li h3 {
++  color: var(--sabi-yellow) !important;
++}
++
++.sabi-video {
++  position: relative;
++  aspect-ratio: 16 / 9;
++  border-radius: 20px;
++  overflow: hidden;
++  border: 1.5px solid var(--sabi-ink);
++  box-shadow: 8px 8px 0 var(--sabi-ink);
++  background: var(--sabi-ink);
++}
++
++.sabi-video-poster {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++  background:
++    radial-gradient(circle at 50% 50%, rgba(255, 198, 41, 0.12), transparent 60%),
++    var(--sabi-ink);
++}
++
++.sabi-video-bars {
++  position: absolute;
++  inset: 0;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  gap: 6px;
++}
++
++.sabi-video-bars i {
++  display: block;
++  width: 7px;
++  border-radius: 4px;
++  background: var(--sabi-yellow);
++  opacity: 0.85;
++  transition: transform 0.3s ease;
++}
++
++.sabi-video-poster:hover .sabi-video-bars i {
++  transform: scaleY(1.12);
++}
++
++.sabi-video-play {
++  position: absolute;
++  left: 1.25rem;
++  bottom: 1.25rem;
++  display: inline-flex;
++  align-items: center;
++  gap: 0.6rem;
++  padding: 0.75rem 1.1rem 0.75rem 0.9rem;
++  border-radius: 999px;
++  background: var(--sabi-yellow);
++  color: var(--sabi-ink);
++  border: 1.5px solid var(--sabi-ink);
++  font-weight: 600;
++  font-size: 14px;
++  text-align: left;
++}
++
++/* ---------- Evidence ---------- */
++
++.sabi-table-wrap {
++  overflow-x: auto;
++  border: 1.5px solid var(--sabi-ink);
++  border-radius: 18px;
++  background: var(--sabi-card);
++}
++
++.sabi-table {
++  width: 100%;
++  min-width: 640px;
++  border-collapse: collapse;
++  text-align: left;
++}
++
++.sabi-table thead th {
++  font-family: var(--sabi-font-mono), ui-monospace, monospace;
++  font-size: 11.5px;
++  font-weight: 500;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--sabi-muted);
++  padding: 1rem 1.25rem;
++  border-bottom: 1.5px solid var(--sabi-ink);
++}
++
++.sabi-table tbody th,
++.sabi-table td {
++  padding: 1.25rem;
++  border-bottom: 1px solid var(--sabi-border);
++  vertical-align: baseline;
++}
++
++.sabi-table tbody tr:last-child th,
++.sabi-table tbody tr:last-child td {
++  border-bottom: 0;
++}
++
++.sabi-table tbody th {
++  font-weight: 600;
++}
++
++/* ---------- Families ---------- */
++
++.sabi-fact-card {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  background: var(--sabi-card);
++  border: 1.5px solid var(--sabi-ink);
++  border-radius: 20px;
++  box-shadow: 8px 8px 0 var(--sabi-ink);
++  overflow: hidden;
++}
++
++.sabi-fact-card > div {
++  padding: 1.4rem 1.5rem;
++  border-bottom: 1px solid var(--sabi-border);
++}
++
++.sabi-fact-card > div:nth-child(odd) {
++  border-right: 1px solid var(--sabi-border);
++}
++
++.sabi-fact-card > div:nth-last-child(-n + 2) {
++  border-bottom: 0;
++}
++
++.sabi-fact-card dt {
++  font-family: var(--sabi-font-mono), ui-monospace, monospace;
++  font-size: 11px;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--sabi-muted);
++}
++
++.sabi-fact-card dd {
++  font-size: 2.2rem;
++  margin-top: 0.4rem;
++}
++
++.sabi-notice {
++  padding: 1rem 1.15rem;
++  border-left: 4px solid var(--sabi-yellow);
++  background: var(--sabi-yellow-wash);
++  font-size: 15px;
++  line-height: 1.55;
++  color: var(--sabi-ink-soft);
++}
++
++.sabi-topic {
++  padding: 1rem 1.2rem;
++  border-radius: 14px;
++  border: 1px solid rgba(255, 255, 255, 0.22);
++  font-family: var(--sabi-font-display), ui-sans-serif, sans-serif;
++  font-weight: 600;
++  font-size: 1.15rem;
++  letter-spacing: -0.015em;
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++}
++
++.sabi-topic::before {
++  content: "";
++  width: 0.55rem;
++  height: 0.55rem;
++  border-radius: 999px;
++  background: var(--sabi-yellow);
++  flex: 0 0 auto;
++}
++
++/* ---------- Partners ---------- */
++
++.sabi-way-card {
++  display: flex;
++  flex-direction: column;
++  align-items: flex-start;
++  padding: 2rem;
++  border-radius: 22px;
++  border: 1.5px solid var(--sabi-border-strong);
++  background: var(--sabi-paper);
++  transition: border-color 0.2s ease;
++}
++
++.sabi-way-card:hover {
++  border-color: var(--sabi-ink);
++}
++
++@media (min-width: 768px) {
++  .sabi-way-card {
++    padding: 2.5rem;
++  }
++}
++
++.sabi-cost-grid > div {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 1.5rem;
++  padding: 1.1rem 0;
++  border-top: 1.5px solid var(--sabi-ink);
++}
++
++.sabi-cost-grid dt {
++  font-size: clamp(2rem, 3.6vw, 3rem);
++}
++
++.sabi-cost-grid dd {
++  text-align: right;
++  color: var(--sabi-ink-soft);
++}
++
++.sabi-logo-wall {
++  display: grid;
++  grid-template-columns: repeat(2, 1fr);
++  border-top: 1px solid var(--sabi-border-strong);
++  border-left: 1px solid var(--sabi-border-strong);
++}
++
++@media (min-width: 768px) {
++  .sabi-logo-wall {
++    grid-template-columns: repeat(3, 1fr);
++  }
++}
++
++@media (min-width: 1024px) {
++  .sabi-logo-wall {
++    grid-template-columns: repeat(6, 1fr);
++  }
++}
++
++.sabi-logo-wall li {
++  border-right: 1px solid var(--sabi-border-strong);
++  border-bottom: 1px solid var(--sabi-border-strong);
++}
++
++.sabi-logo-wall a {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  height: 120px;
++  padding: 1.25rem;
++  filter: grayscale(1);
++  opacity: 0.75;
++  transition:
++    filter 0.2s ease,
++    opacity 0.2s ease,
++    background 0.2s ease;
++}
++
++.sabi-logo-wall a:hover {
++  filter: none;
++  opacity: 1;
++  background: var(--sabi-card);
++}
++
++/* ---------- About ---------- */
++
++.sabi-portrait {
++  border-radius: 22px;
++  overflow: hidden;
++  border: 1.5px solid var(--sabi-ink);
++  box-shadow: 10px 10px 0 var(--sabi-yellow);
++}
++
++.sabi-story p {
++  font-size: clamp(1.15rem, 1.7vw, 1.4rem);
++  line-height: 1.6;
++  color: var(--sabi-ink-soft);
++}
++
++.sabi-story p + p {
++  margin-top: 1.4em;
++}
++
++.sabi-story p:first-child::first-letter {
++  font-family: var(--sabi-font-display), ui-sans-serif, sans-serif;
++  font-weight: 800;
++  float: left;
++  font-size: 4.6em;
++  line-height: 0.8;
++  margin: 0.08em 0.1em 0 0;
++  color: var(--sabi-ink);
++}
++
++.sabi-name {
++  font-size: clamp(6rem, 16vw, 13rem);
++  line-height: 0.85;
++  letter-spacing: -0.06em;
++  font-weight: 800;
++}
++
++.sabi-award-list li {
++  display: grid;
++  gap: 0.4rem 2rem;
++  padding: 1.5rem 0;
++  border-top: 1px solid var(--sabi-admin-line);
++  color: var(--sabi-admin-text);
++}
++
++.sabi-award-list li:last-child {
++  border-bottom: 1px solid var(--sabi-admin-line);
++}
++
++@media (min-width: 768px) {
++  .sabi-award-list li {
++    grid-template-columns: 1fr 1fr;
++    align-items: baseline;
++  }
++}
++
++.sabi-award-list .sabi-display {
++  font-size: clamp(1.5rem, 2.6vw, 2.2rem);
++  color: var(--sabi-yellow) !important;
++}
++
+ @media (prefers-reduced-motion: reduce) {
+   .sabi-shell *,
+   .sabi-shell *::before,
+diff --git a/components/sabi/SabiShellFooter.tsx b/components/sabi/SabiShellFooter.tsx
+index dcec459..73f0cd0 100644
+--- a/components/sabi/SabiShellFooter.tsx
++++ b/components/sabi/SabiShellFooter.tsx
+@@ -1,40 +1,43 @@
+ import Link from "next/link";
+ import { SabiMark } from "@/components/sabi/SabiLogo";
++import { SABI_FOOTER_NAV } from "@/lib/sabi/site";
++
++function FooterLink({ href, label }: { href: string; label: string }) {
++  return href.startsWith("/") ? <Link href={href}>{label}</Link> : <a href={href}>{label}</a>;
++}
+ 
+ export default function SabiShellFooter() {
+   return (
+     <footer className="mt-auto sabi-shell-footer">
+       <div className="max-w-7xl mx-auto px-5 md:px-8 pt-16 pb-8">
+         <div className="grid grid-cols-2 md:grid-cols-12 gap-10">
+-          <div className="col-span-2 md:col-span-5">
++          <div className="col-span-2 md:col-span-4">
+             <SabiMark size={40} tone="yellow" />
+             <p className="mt-5 max-w-sm text-[15px] leading-relaxed sabi-footer-lede">
+-              A free tutor any child can reach by calling a phone number. Built in Lagos by{" "}
++              A free tutor any child can reach by calling a phone number. Built for Lagos by{" "}
+               <a href="https://eduforequality.org" className="underline underline-offset-4">
+                 Education for Equality
+               </a>
+               , a 501(c)(3) nonprofit.
+             </p>
+           </div>
+-          <div className="md:col-span-3 md:col-start-7">
+-            <p className="sabi-footer-heading">Sabi</p>
+-            <ul className="mt-4 space-y-2.5 text-[15px]">
+-              <li><Link href="/sabi">For families</Link></li>
+-              <li><Link href="/demo">Talk to Sabi</Link></li>
+-              <li><Link href="/chat">Chat with Sabi</Link></li>
+-            </ul>
+-          </div>
+-          <div className="md:col-span-3">
+-            <p className="sabi-footer-heading">Build &amp; partner</p>
+-            <ul className="mt-4 space-y-2.5 text-[15px]">
+-              <li><Link href="/sabi/pricing">API &amp; pricing</Link></li>
+-              <li><Link href="/sabi/developers">Developer access</Link></li>
+-              <li><a href="mailto:info@eduforequality.org">info@eduforequality.org</a></li>
+-            </ul>
+-          </div>
++          {SABI_FOOTER_NAV.map((group, i) => (
++            <div key={group.heading} className={`md:col-span-2 ${i === 0 ? "md:col-start-7" : ""}`}>
++              <p className="sabi-footer-heading">{group.heading}</p>
++              <ul className="mt-4 space-y-2.5 text-[15px]">
++                {group.items.map((item) => (
++                  <li key={item.href}>
++                    <FooterLink {...item} />
++                  </li>
++                ))}
++              </ul>
++            </div>
++          ))}
+         </div>
+ 
+-        <p className="sabi-footer-wordmark" aria-hidden="true">sabi</p>
++        <p className="sabi-footer-wordmark" aria-hidden="true">
++          sabi
++        </p>
+ 
+         <div className="flex flex-col sm:flex-row justify-between gap-2 text-xs sabi-footer-meta">
+           <span>/sah-bee/ &mdash; &ldquo;to know&rdquo; in Nigerian Pidgin</span>
+diff --git a/components/sabi/SabiShellNav.tsx b/components/sabi/SabiShellNav.tsx
+index 06d49fd..736103e 100644
+--- a/components/sabi/SabiShellNav.tsx
++++ b/components/sabi/SabiShellNav.tsx
+@@ -2,49 +2,97 @@
+ 
+ import Link from "next/link";
+ import { usePathname } from "next/navigation";
++import { useEffect, useState } from "react";
+ import { SabiLogo } from "@/components/sabi/SabiLogo";
++import { MenuIcon, MicIcon } from "@/components/sabi/marketing/Icons";
++import { SABI_PRIMARY_NAV, SABI_ROUTES, isActivePath } from "@/lib/sabi/site";
+ 
+ export default function SabiShellNav() {
+   const pathname = usePathname();
+-  const onPricing = pathname?.startsWith("/sabi/pricing");
+-  const onDevelopers = pathname?.startsWith("/sabi/developers");
+-  const ctaHref = onDevelopers ? "/sabi/pricing" : "/sabi/developers";
+-  const ctaLabel = onDevelopers ? "View pricing" : onPricing ? "Join early access" : "For developers";
+-  const ctaMobileLabel = onDevelopers ? "Pricing" : onPricing ? "Join list" : "Developers";
++  const [open, setOpen] = useState(false);
++  const [lastPath, setLastPath] = useState(pathname);
++  const onApi = isActivePath(pathname, SABI_ROUTES.pricing);
+ 
+-  const linkClass = (href: string) => {
+-    const active = pathname === href || (href !== "/sabi" && pathname?.startsWith(href));
+-    return active ? "sabi-nav-link is-active" : "sabi-nav-link";
+-  };
++  // Close the mobile menu whenever the route changes.
++  if (pathname !== lastPath) {
++    setLastPath(pathname);
++    setOpen(false);
++  }
++
++  useEffect(() => {
++    if (!open) return;
++    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
++    document.addEventListener("keydown", onKey);
++    return () => document.removeEventListener("keydown", onKey);
++  }, [open]);
++
++  const cta = onApi
++    ? { href: SABI_ROUTES.developers, label: "Request API access", short: "API access" }
++    : { href: SABI_ROUTES.talk, label: "Talk to Sabi", short: "Talk to Sabi" };
+ 
+   return (
+     <header className="sticky top-0 z-50 sabi-shell-header">
+       <div className="max-w-7xl mx-auto px-5 md:px-8 h-16 flex items-center justify-between gap-4">
+-        <Link href="/sabi" className="flex items-center gap-2 min-w-0" aria-label="Sabi home">
++        <Link href={SABI_ROUTES.home} className="flex items-center gap-2 min-w-0" aria-label="Sabi home">
+           <SabiLogo />
+-          {(onPricing || onDevelopers) && <span className="sabi-api-tag">API</span>}
++          {onApi && <span className="sabi-api-tag">API</span>}
+         </Link>
+ 
+-        <nav className="hidden md:flex items-center gap-8 text-[15px]">
+-          <Link href="/sabi" className={linkClass("/sabi")}>
+-            For families
+-          </Link>
+-          <Link href="/sabi/pricing" className={linkClass("/sabi/pricing")}>
+-            API &amp; pricing
+-          </Link>
+-          <a href="mailto:info@eduforequality.org" className="sabi-nav-link">
+-            Contact
+-          </a>
+-          <a href="https://eduforequality.org" className="sabi-nav-link">
+-            Education for Equality
+-          </a>
++        <nav aria-label="Main" className="hidden lg:flex items-center gap-7 text-[15px]">
++          {SABI_PRIMARY_NAV.map((item) => {
++            const active = isActivePath(pathname, item.href);
++            return (
++              <Link
++                key={item.href}
++                href={item.href}
++                aria-current={active ? "page" : undefined}
++                className={`sabi-nav-link ${active ? "is-active" : ""}`}
++              >
++                {item.label}
++              </Link>
++            );
++          })}
+         </nav>
+ 
+-        <Link href={ctaHref} className="sabi-btn-primary px-4 py-2 text-sm whitespace-nowrap">
+-          <span className="hidden sm:inline">{ctaLabel}</span>
+-          <span className="sm:hidden">{ctaMobileLabel}</span>
+-        </Link>
++        <div className="flex items-center gap-2">
++          <Link href={cta.href} className="sabi-btn-primary px-4 py-2 text-sm whitespace-nowrap">
++            {!onApi && <MicIcon size={15} />}
++            <span className="hidden sm:inline">{cta.label}</span>
++            <span className="sm:hidden">{cta.short}</span>
++          </Link>
++          <button
++            type="button"
++            className="lg:hidden sabi-menu-button"
++            aria-expanded={open}
++            aria-controls="sabi-mobile-nav"
++            aria-label={open ? "Close menu" : "Open menu"}
++            onClick={() => setOpen((v) => !v)}
++          >
++            <MenuIcon open={open} />
++          </button>
++        </div>
+       </div>
++
++      <nav
++        id="sabi-mobile-nav"
++        aria-label="Main"
++        hidden={!open}
++        className="lg:hidden sabi-mobile-nav"
++      >
++        <ul className="max-w-7xl mx-auto px-5 md:px-8 py-4">
++          {SABI_PRIMARY_NAV.map((item) => (
++            <li key={item.href}>
++              <Link
++                href={item.href}
++                aria-current={isActivePath(pathname, item.href) ? "page" : undefined}
++                className="sabi-mobile-link"
++              >
++                {item.label}
++              </Link>
++            </li>
++          ))}
++        </ul>
++      </nav>
+     </header>
+   );
+ }
+diff --git a/components/sabi/marketing/Blocks.tsx b/components/sabi/marketing/Blocks.tsx
+new file mode 100644
+index 0000000..50dfcd0
+--- /dev/null
++++ b/components/sabi/marketing/Blocks.tsx
+@@ -0,0 +1,229 @@
++import Image from "next/image";
++import Link from "next/link";
++import type { ReactNode } from "react";
++import { CallRings } from "@/components/sabi/marketing/FeaturePhone";
++import { ArrowIcon, MicIcon } from "@/components/sabi/marketing/Icons";
++import { Container } from "@/components/sabi/marketing/Section";
++import { FOUNDER_QUOTE, PILOT } from "@/lib/sabi/content";
++import { SABI_FAQS } from "@/lib/seo";
++import { CONTACT_EMAIL, SABI_ROUTES } from "@/lib/sabi/site";
++
++/** The product's two entry points: voice demo first, chat second. */
++export function TryButtons({ onDark = false }: { onDark?: boolean }) {
++  return (
++    <div className="flex flex-col sm:flex-row sm:items-center gap-5">
++      <Link href={SABI_ROUTES.talk} className={`${onDark ? "sabi-btn-gold" : "sabi-btn-primary"} px-7 py-4 text-base`}>
++        <MicIcon />
++        Talk to Sabi
++      </Link>
++      <Link href={SABI_ROUTES.chat} className={`sabi-text-link text-base ${onDark ? "text-white" : ""}`}>
++        Or chat with Sabi <ArrowIcon size={16} />
++      </Link>
++    </div>
++  );
++}
++
++export function CtaBand({
++  title = <>Go on, give Sabi a&nbsp;call.</>,
++  lede = "Hear what a lesson sounds like, right here in your browser.",
++  actions = <TryButtons />,
++}: {
++  title?: ReactNode;
++  lede?: ReactNode;
++  actions?: ReactNode;
++}) {
++  return (
++    <section className="sabi-final-cta">
++      <div className="absolute right-[-120px] top-1/2 hidden md:block">
++        <CallRings sizes={[260, 400, 540, 680, 820]} pulse={260} />
++      </div>
++      <Container className="relative py-24 md:py-32">
++        <h2 className="sabi-display sabi-hero-title max-w-4xl">{title}</h2>
++        <p className="mt-6 text-lg md:text-xl max-w-xl text-[var(--sabi-ink-soft)]">{lede}</p>
++        <div className="mt-9">{actions}</div>
++        <p className="sabi-mono text-xs mt-12 text-[var(--sabi-ink-soft)]">
++          {PILOT.where} pilot planned {PILOT.when} · {PILOT.size} {PILOT.detail}
++        </p>
++      </Container>
++    </section>
++  );
++}
++
++/** "Up next" link at the foot of a subpage, so each page leads into the next. */
++export function NextPage({ href, label, title }: { href: string; label: string; title: string }) {
++  return (
++    <Link href={href} className="sabi-next-page group">
++      <Container className="py-10 md:py-14 flex items-center justify-between gap-6">
++        <span>
++          <span className="sabi-eyebrow block">{label}</span>
++          <span className="sabi-display block mt-2 text-3xl md:text-5xl">{title}</span>
++        </span>
++        <span className="sabi-next-arrow" aria-hidden="true">
++          <ArrowIcon size={28} />
++        </span>
++      </Container>
++    </Link>
++  );
++}
++
++export function QuoteBand() {
++  return (
++    <section className="sabi-photo-band">
++      <Image
++        src="/partner-child.jpg"
++        alt="A smiling girl in a classroom holds a chalk slate above her head"
++        fill
++        sizes="100vw"
++        className="object-cover object-[60%_30%]"
++      />
++      <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/10 to-transparent" />
++      <Container className="relative py-20 md:py-28 flex items-end min-h-[560px]">
++        <blockquote className="sabi-quote-card max-w-xl p-8 md:p-10">
++          <span className="sabi-quote-mark block" aria-hidden="true">
++            &ldquo;
++          </span>
++          <p className="sabi-display text-2xl md:text-[1.9rem] !font-semibold !leading-[1.15] !tracking-tight mt-2">
++            {FOUNDER_QUOTE}
++          </p>
++          <footer className="mt-6 flex items-center gap-3">
++            <Image
++              src="/founder-naomi.png"
++              alt=""
++              width={44}
++              height={44}
++              className="rounded-full object-cover w-11 h-11 border-[1.5px] border-[var(--sabi-ink)]"
++            />
++            <span className="text-sm">
++              <strong className="font-semibold">Naomi Ivie</strong>
++              <span className="block text-[var(--sabi-ink-soft)]">Founder, Education for Equality</span>
++            </span>
++          </footer>
++        </blockquote>
++      </Container>
++    </section>
++  );
++}
++
++export function DevCallout() {
++  return (
++    <div className="sabi-dev-callout grid lg:grid-cols-12 gap-10 p-8 md:p-12">
++      <div className="lg:col-span-5">
++        <p className="sabi-eyebrow !text-[var(--sabi-yellow)]">For developers &amp; organisations</p>
++        <h3 className="sabi-display !text-white text-3xl md:text-4xl mt-4">Build on the voice behind Sabi.</h3>
++        <p className="mt-4 text-white/70 leading-relaxed">
++          The same African-accent pipeline, rentable per minute: speech-to-text, LLM and a Nigerian voice in one
++          call. From $0.06 a minute, with 1,000 minutes free every month.
++        </p>
++        <div className="mt-8 flex flex-wrap items-center gap-5">
++          <Link href={SABI_ROUTES.pricing} className="sabi-btn-gold px-6 py-3 text-sm">
++            See pricing <ArrowIcon size={16} />
++          </Link>
++          <Link href={SABI_ROUTES.developers} className="sabi-text-link text-sm text-white">
++            Request access
++          </Link>
++        </div>
++      </div>
++      <pre className="sabi-dev-code lg:col-span-7 self-center p-6 overflow-x-auto" aria-label="Example API request">
++        <code>
++          <span className="tok-c"># One request: audio in, Nigerian voice out</span>
++          {"\n"}
++          <span className="tok-k">curl</span> https://api.eduforequality.org/v1/voice/process \{"\n"}
++          {"  "}-H <span className="tok-s">&quot;Authorization: Bearer sk_sabi_...&quot;</span> \{"\n"}
++          {"  "}-d <span className="tok-s">&apos;{"{"}&quot;audio&quot;: &quot;base64_encoded_audio&quot;,</span>
++          {"\n"}
++          {"       "}
++          <span className="tok-s">&quot;voice&quot;: &quot;bukola&quot;,</span>
++          {"\n"}
++          {"       "}
++          <span className="tok-s">&quot;language&quot;: &quot;en-NG&quot;{"}"}&apos;</span>
++        </code>
++      </pre>
++    </div>
++  );
++}
++
++/**
++ * The visible source of the FAQPage structured data in app/sabi/layout.tsx.
++ * Both render from SABI_FAQS so the markup and the schema stay identical.
++ */
++export function FaqList({ questions }: { questions?: string[] }) {
++  const faqs = questions ? SABI_FAQS.filter((f) => questions.includes(f.question)) : SABI_FAQS;
++  return (
++    <div className="sabi-faq">
++      {faqs.map((faq, i) => (
++        <details key={faq.question} open={i === 0}>
++          <summary>
++            {faq.question}
++            <span className="sabi-faq-toggle" aria-hidden="true" />
++          </summary>
++          <p className="pb-6 -mt-1 pr-12 text-[var(--sabi-ink-soft)] leading-relaxed">{faq.answer}</p>
++        </details>
++      ))}
++    </div>
++  );
++}
++
++export function FaqSection({ index, questions }: { index: string; questions?: string[] }) {
++  return (
++    <section className="sabi-tone-white border-t border-[var(--sabi-border)]">
++      <Container className="py-20 md:py-28 grid lg:grid-cols-12 gap-12">
++        <div className="lg:col-span-4">
++          <div className="lg:sticky lg:top-28">
++            <p className="sabi-section-index max-w-[220px]">{index}</p>
++            <h2 className="sabi-display sabi-h2 mt-8">Common questions about Sabi</h2>
++            <p className="mt-5 text-[var(--sabi-muted)]">
++              Something else? Write to{" "}
++              <a href={`mailto:${CONTACT_EMAIL}`} className="underline underline-offset-4 text-[var(--sabi-ink)]">
++                {CONTACT_EMAIL}
++              </a>
++            </p>
++          </div>
++        </div>
++        <div className="lg:col-span-7 lg:col-start-6">
++          <FaqList questions={questions} />
++        </div>
++      </Container>
++    </section>
++  );
++}
++
++const AUDIENCES = [
++  {
++    href: SABI_ROUTES.families,
++    who: "For families",
++    title: "Five minutes a day, on the phone you have.",
++    body: "What a call is like, what it costs (nothing), and how Sabi keeps your child safe.",
++    tone: "yellow",
++  },
++  {
++    href: SABI_ROUTES.partners,
++    who: "For schools & funders",
++    title: "Bring Sabi to a whole community.",
++    body: "Host a pilot cohort, sponsor children, keep the line free, or evaluate it with us.",
++    tone: "green",
++  },
++  {
++    href: SABI_ROUTES.pricing,
++    who: "For developers",
++    title: "Rent the African voice pipeline.",
++    body: "Speech-to-text, tutor LLM and a Nigerian voice in one API. 1,000 minutes free a month.",
++    tone: "ink",
++  },
++] as const;
++
++export function AudienceGrid() {
++  return (
++    <div className="grid md:grid-cols-3 gap-5">
++      {AUDIENCES.map((a) => (
++        <Link key={a.href} href={a.href} className={`sabi-audience-card sabi-tone-${a.tone} group`}>
++          <span className="sabi-eyebrow sabi-audience-who">{a.who}</span>
++          <span className="sabi-display block text-3xl mt-10 !leading-[1.05]">{a.title}</span>
++          <span className="block mt-4 text-[15px] leading-relaxed sabi-audience-body">{a.body}</span>
++          <span className="sabi-audience-arrow mt-10" aria-hidden="true">
++            <ArrowIcon size={20} />
++          </span>
++        </Link>
++      ))}
++    </div>
++  );
++}
+diff --git a/components/sabi/marketing/CallTranscript.tsx b/components/sabi/marketing/CallTranscript.tsx
+new file mode 100644
+index 0000000..e2f8ae6
+--- /dev/null
++++ b/components/sabi/marketing/CallTranscript.tsx
+@@ -0,0 +1,39 @@
++import { FIRST_CALL, NEXT_DAY_CALL, type CallLine } from "@/lib/sabi/content";
++
++function Line({ line }: { line: CallLine }) {
++  return (
++    <div className={`sabi-call-line ${line.speaker === "Sabi" ? "is-sabi" : "is-child"}`}>
++      <span className="sabi-mono text-[var(--sabi-meta)]">{line.time}</span>
++      <span className="sabi-who font-semibold text-sm pt-px">{line.speaker === "Child" ? "Chidi" : "Sabi"}</span>
++      <span>{line.text}</span>
++    </div>
++  );
++}
++
++export default function CallTranscript({ caption = true }: { caption?: boolean }) {
++  return (
++    <figure>
++      <div className="sabi-call-log">
++        <div className="sabi-call-log-head">
++          <div className="flex items-center gap-3">
++            <span className="sabi-live-dot" />
++            <span className="font-semibold">Call 1 · Chidi</span>
++          </div>
++          <span className="sabi-mono text-xs text-white/60 hidden sm:inline">Subtraction · market change</span>
++        </div>
++        <div>
++          {FIRST_CALL.map((line) => (
++            <Line key={line.time} line={line} />
++          ))}
++        </div>
++        <div className="sabi-call-divider">
++          <span className="sabi-eyebrow">Next day · Call 2</span>
++        </div>
++        {NEXT_DAY_CALL.map((line) => (
++          <Line key={line.time} line={line} />
++        ))}
++      </div>
++      {caption && <figcaption className="sabi-source mt-6">An example first and second call, transcribed.</figcaption>}
++    </figure>
++  );
++}
+diff --git a/components/sabi/marketing/DataBlocks.tsx b/components/sabi/marketing/DataBlocks.tsx
+new file mode 100644
+index 0000000..d0d4027
+--- /dev/null
++++ b/components/sabi/marketing/DataBlocks.tsx
+@@ -0,0 +1,100 @@
++import { CALL_STEPS, EVIDENCE, PHONE_FACTS, PRINCIPLES, PROBLEM_STATS } from "@/lib/sabi/content";
++
++/** One headline stat and two supporting ones, separated by heavy rules. */
++export function ProblemStats() {
++  const [lead, ...rest] = PROBLEM_STATS;
++  return (
++    <div className="grid md:grid-cols-12 gap-10 md:gap-8">
++      <div className="md:col-span-6 sabi-rule-top pt-6">
++        <p className="sabi-big-stat text-[6.5rem] md:text-[10rem]">{lead.value}</p>
++        <p className="mt-5 text-lg max-w-sm">{lead.label}</p>
++        <p className="sabi-source mt-3">{lead.source}</p>
++      </div>
++      {rest.map((s) => (
++        <div key={s.value} className="md:col-span-3 sabi-rule-top pt-6">
++          <p className="sabi-big-stat text-6xl md:text-7xl">{s.value}</p>
++          <p className="mt-5 text-base">{s.label}</p>
++          <p className="sabi-source mt-3">{s.source}</p>
++        </div>
++      ))}
++    </div>
++  );
++}
++
++/** Horizontal bars for phone ownership and coverage. Expects a dark (green/ink) section. */
++export function PhoneCoverage() {
++  return (
++    <div className="flex flex-col gap-9">
++      {PHONE_FACTS.map((f) => (
++        <div key={f.label}>
++          <div className="flex items-baseline justify-between gap-4 mb-3">
++            <span className="sabi-big-stat !text-white text-5xl md:text-6xl">{f.value}%</span>
++            <span className="text-white/75 text-right">{f.label}</span>
++          </div>
++          <div
++            className="sabi-bar-track"
++            role="meter"
++            aria-valuenow={f.value}
++            aria-valuemin={0}
++            aria-valuemax={100}
++            aria-label={f.label}
++          >
++            <div className="sabi-bar-fill" style={{ width: `${f.value}%` }} />
++          </div>
++        </div>
++      ))}
++    </div>
++  );
++}
++
++export function EvidenceList({ showInforms = false, limit }: { showInforms?: boolean; limit?: number }) {
++  const rows = typeof limit === "number" ? EVIDENCE.slice(0, limit) : EVIDENCE;
++  return (
++    <div>
++      {rows.map((e) => (
++        <div key={e.stat} className="sabi-evidence-row">
++          <p className="sabi-display text-4xl md:text-5xl">
++            <span className="sabi-highlight">{e.stat}</span>
++            <span className="block mt-3 text-xl md:text-2xl !font-semibold !tracking-tight">{e.title}</span>
++          </p>
++          <div>
++            <p className="text-base leading-relaxed text-[var(--sabi-ink-soft)]">{e.body}</p>
++            {showInforms && (
++              <p className="mt-3 text-sm font-semibold text-[var(--sabi-green-bright)]">→ {e.informs}</p>
++            )}
++          </div>
++          <p className="sabi-source">{e.source}</p>
++        </div>
++      ))}
++    </div>
++  );
++}
++
++export function NumberedSteps({ steps = CALL_STEPS }: { steps?: { title: string; body: string }[] }) {
++  return (
++    <ol className="sabi-steps">
++      {steps.map((s, i) => (
++        <li key={s.title}>
++          <span className="sabi-step-index">{String(i + 1).padStart(2, "0")}</span>
++          <div>
++            <h3 className="sabi-display text-xl !font-semibold !tracking-tight">{s.title}</h3>
++            <p className="mt-1.5 text-[15px] leading-relaxed text-[var(--sabi-muted)]">{s.body}</p>
++          </div>
++        </li>
++      ))}
++    </ol>
++  );
++}
++
++export function Principles({ items = PRINCIPLES }: { items?: { title: string; body: string }[] }) {
++  return (
++    <div className="grid md:grid-cols-3 gap-10 md:gap-8">
++      {items.map((p) => (
++        <div key={p.title} className="sabi-principle">
++          <h3 className="sabi-principle-title">{p.title}</h3>
++          <p className="mt-4 text-base leading-relaxed text-[var(--sabi-ink-soft)] max-w-sm">{p.body}</p>
++        </div>
++      ))}
++    </div>
++  );
++}
+diff --git a/components/sabi/marketing/FeaturePhone.tsx b/components/sabi/marketing/FeaturePhone.tsx
+new file mode 100644
+index 0000000..da97bb6
+--- /dev/null
++++ b/components/sabi/marketing/FeaturePhone.tsx
+@@ -0,0 +1,86 @@
++const KEYS: [string, string][] = [
++  ["1", ""],
++  ["2", "abc"],
++  ["3", "def"],
++  ["4", "ghi"],
++  ["5", "jkl"],
++  ["6", "mno"],
++  ["7", "pqrs"],
++  ["8", "tuv"],
++  ["9", "wxyz"],
++  ["*", ""],
++  ["0", "+"],
++  ["#", ""],
++];
++
++const WAVE = [6, 14, 22, 12, 26, 18, 30, 16, 24, 10, 20, 28, 14, 8, 18, 24, 12, 6];
++
++/** A candybar handset mid-call with Sabi. Decorative: the surrounding copy carries the meaning. */
++export function FeaturePhone({ timer = "02:41", label = "Lesson 4" }: { timer?: string; label?: string }) {
++  return (
++    <div className="sabi-phone" aria-hidden="true">
++      <div className="sabi-phone-speaker" />
++      <div className="sabi-phone-screen">
++        <div className="flex items-center justify-between text-[9px] tracking-wider">
++          <span>▮▮▮▯ 2G</span>
++          <span>▭ 64%</span>
++        </div>
++        <p className="mt-3 text-[10px] tracking-[0.14em] uppercase opacity-70">Calling</p>
++        <p className="sabi-phone-name">Sabi</p>
++        <div className="sabi-phone-bars mt-3">
++          {WAVE.map((h, i) => (
++            <i key={i} style={{ height: h, animationDelay: `${(i % 6) * 0.12}s` }} />
++          ))}
++        </div>
++        <div className="mt-2 flex items-center justify-between text-[11px]">
++          <span>{timer}</span>
++          <span className="opacity-70">{label}</span>
++        </div>
++      </div>
++      <div className="sabi-phone-softkeys">
++        <span className="bg-[#2a332d]" />
++        <span className="bg-[var(--sabi-coral)]" />
++      </div>
++      <div className="sabi-phone-keys">
++        {KEYS.map(([n, letters]) => (
++          <div key={n} className="sabi-phone-key">
++            {n}
++            {letters && <small>{letters}</small>}
++          </div>
++        ))}
++      </div>
++    </div>
++  );
++}
++
++/** Concentric "ringing" circles, centred on the parent's origin. */
++export function CallRings({ sizes, pulse }: { sizes: number[]; pulse?: number }) {
++  return (
++    <div className="sabi-rings" aria-hidden="true">
++      {sizes.map((s) => (
++        <span key={s} style={{ width: s, height: s }} />
++      ))}
++      {pulse && <span className="sabi-ring-pulse" style={{ width: pulse, height: pulse }} />}
++    </div>
++  );
++}
++
++/** Phone + rings + two speech bubbles, as used in the home hero. */
++export function CallScene() {
++  return (
++    <div className="relative h-[540px] md:h-[600px] w-full max-w-[480px] mx-auto">
++      <CallRings sizes={[300, 440, 580, 720]} pulse={300} />
++      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
++        <FeaturePhone />
++      </div>
++      <div className="sabi-bubble left-0 top-6 md:-left-6 md:top-14 max-w-[210px] md:max-w-[250px]">
++        <span className="sabi-bubble-label">Sabi</span>
++        If a customer gives you ₦500 and groundnuts cost ₦350, how much change?
++      </div>
++      <div className="sabi-bubble sabi-bubble-child right-0 bottom-16 md:-right-2 md:bottom-24">
++        <span className="sabi-bubble-label">Chidi</span>
++        150!
++      </div>
++    </div>
++  );
++}
+diff --git a/components/sabi/marketing/Icons.tsx b/components/sabi/marketing/Icons.tsx
+new file mode 100644
+index 0000000..a806bbd
+--- /dev/null
++++ b/components/sabi/marketing/Icons.tsx
+@@ -0,0 +1,55 @@
++type IconProps = { size?: number; className?: string };
++
++const base = {
++  fill: "none",
++  stroke: "currentColor",
++  strokeWidth: 2,
++  strokeLinecap: "round" as const,
++  strokeLinejoin: "round" as const,
++  "aria-hidden": true,
++};
++
++export function ArrowIcon({ size = 18, className }: IconProps) {
++  return (
++    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...base}>
++      <line x1="5" y1="12" x2="19" y2="12" />
++      <polyline points="12 5 19 12 12 19" />
++    </svg>
++  );
++}
++
++export function MicIcon({ size = 18, className }: IconProps) {
++  return (
++    <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...base}>
++      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
++      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
++      <line x1="12" y1="19" x2="12" y2="22" />
++    </svg>
++  );
++}
++
++export function PlayIcon({ size = 22, className }: IconProps) {
++  return (
++    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
++      <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" fill="currentColor" />
++    </svg>
++  );
++}
++
++export function MenuIcon({ open, size = 22 }: { open: boolean; size?: number }) {
++  return (
++    <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
++      {open ? (
++        <>
++          <line x1="6" y1="6" x2="18" y2="18" />
++          <line x1="18" y1="6" x2="6" y2="18" />
++        </>
++      ) : (
++        <>
++          <line x1="4" y1="8" x2="20" y2="8" />
++          <line x1="4" y1="16" x2="20" y2="16" />
++        </>
++      )}
++    </svg>
++  );
++}
+diff --git a/components/sabi/marketing/PageHeader.tsx b/components/sabi/marketing/PageHeader.tsx
+new file mode 100644
+index 0000000..42641f7
+--- /dev/null
++++ b/components/sabi/marketing/PageHeader.tsx
+@@ -0,0 +1,35 @@
++import type { ReactNode } from "react";
++import { Container, type SectionTone } from "@/components/sabi/marketing/Section";
++
++/** The opening band of every Sabi subpage. */
++export default function PageHeader({
++  eyebrow,
++  title,
++  lede,
++  tone = "paper",
++  aside,
++  children,
++}: {
++  eyebrow: string;
++  title: ReactNode;
++  lede?: ReactNode;
++  tone?: SectionTone;
++  /** Rendered in the right-hand column on large screens. */
++  aside?: ReactNode;
++  /** Rendered under the lede (CTAs, meta). */
++  children?: ReactNode;
++}) {
++  return (
++    <header className={`sabi-page-header sabi-tone-${tone}`}>
++      <Container className="pt-16 pb-16 md:pt-24 md:pb-24 grid lg:grid-cols-12 gap-12 lg:gap-8 items-end">
++        <div className={aside ? "lg:col-span-7" : "lg:col-span-10"}>
++          <p className="sabi-eyebrow sabi-page-eyebrow">{eyebrow}</p>
++          <h1 className="sabi-display sabi-page-title mt-6">{title}</h1>
++          {lede && <p className="sabi-page-lede mt-7 max-w-2xl">{lede}</p>}
++          {children && <div className="mt-9">{children}</div>}
++        </div>
++        {aside && <div className="lg:col-span-5">{aside}</div>}
++      </Container>
++    </header>
++  );
++}
+diff --git a/components/sabi/marketing/Section.tsx b/components/sabi/marketing/Section.tsx
+new file mode 100644
+index 0000000..b5f220e
+--- /dev/null
++++ b/components/sabi/marketing/Section.tsx
+@@ -0,0 +1,61 @@
++import type { ReactNode } from "react";
++
++export type SectionTone = "paper" | "white" | "yellow" | "green" | "ink";
++
++const TONE_CLASS: Record<SectionTone, string> = {
++  paper: "sabi-tone-paper",
++  white: "sabi-tone-white",
++  yellow: "sabi-tone-yellow",
++  green: "sabi-tone-green",
++  ink: "sabi-tone-ink",
++};
++
++export function Container({ children, className = "" }: { children: ReactNode; className?: string }) {
++  return <div className={`max-w-7xl mx-auto px-5 md:px-8 ${className}`}>{children}</div>;
++}
++
++export function Section({
++  children,
++  tone = "white",
++  id,
++  className = "",
++  containerClassName = "",
++  bare = false,
++}: {
++  children: ReactNode;
++  tone?: SectionTone;
++  id?: string;
++  className?: string;
++  containerClassName?: string;
++  /** Skip the default container and vertical rhythm (for full-bleed content). */
++  bare?: boolean;
++}) {
++  return (
++    <section id={id} className={`${TONE_CLASS[tone]} ${className}`}>
++      {bare ? children : <Container className={`py-20 md:py-28 ${containerClassName}`}>{children}</Container>}
++    </section>
++  );
++}
++
++/** Mono index label + headline, laid out on the site's two-column grid. */
++export function SectionHead({
++  index,
++  title,
++  lede,
++  className = "",
++}: {
++  index: string;
++  title: ReactNode;
++  lede?: ReactNode;
++  className?: string;
++}) {
++  return (
++    <div className={`sabi-section-head ${className}`}>
++      <p className="sabi-section-index">{index}</p>
++      <div>
++        <h2 className="sabi-display sabi-h2 max-w-4xl">{title}</h2>
++        {lede && <p className="sabi-lede mt-5 max-w-2xl">{lede}</p>}
++      </div>
++    </div>
++  );
++}
+diff --git a/components/sabi/marketing/VideoFacade.tsx b/components/sabi/marketing/VideoFacade.tsx
+new file mode 100644
+index 0000000..7587077
+--- /dev/null
++++ b/components/sabi/marketing/VideoFacade.tsx
+@@ -0,0 +1,44 @@
++"use client";
++
++import { useState } from "react";
++import { PlayIcon } from "@/components/sabi/marketing/Icons";
++
++const BARS = [10, 18, 30, 22, 40, 28, 52, 34, 46, 24, 38, 56, 30, 20, 42, 48, 26, 14, 34, 44, 22, 12, 28, 36, 18];
++
++/**
++ * A designed poster that only mounts the YouTube iframe on click, so the page
++ * doesn't load YouTube's player scripts until someone actually wants the video.
++ */
++export default function VideoFacade({ id, title, duration }: { id: string; title: string; duration?: string }) {
++  const [playing, setPlaying] = useState(false);
++
++  return (
++    <div className="sabi-video">
++      {playing ? (
++        <iframe
++          src={`https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`}
++          title={title}
++          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
++          allowFullScreen
++          className="absolute inset-0 w-full h-full"
++        />
++      ) : (
++        <button type="button" onClick={() => setPlaying(true)} className="sabi-video-poster group">
++          <span className="sabi-video-bars" aria-hidden="true">
++            {BARS.map((h, i) => (
++              <i key={i} style={{ height: h * 1.6 }} />
++            ))}
++          </span>
++          <span className="sabi-video-play">
++            <PlayIcon />
++            <span>
++              Play the demo
++              {duration && <span className="sabi-mono font-normal opacity-70"> · {duration}</span>}
++            </span>
++          </span>
++          <span className="sr-only">{title}</span>
++        </button>
++      )}
++    </div>
++  );
++}
+diff --git a/lib/sabi/content.ts b/lib/sabi/content.ts
+new file mode 100644
+index 0000000..418ebdd
+--- /dev/null
++++ b/lib/sabi/content.ts
+@@ -0,0 +1,267 @@
++/**
++ * Copy and data for the Sabi marketing pages. Kept apart from the components so
++ * a stat or citation is edited in one place and every page that shows it agrees.
++ */
++
++export type Stat = { value: string; label: string; source: string };
++
++export const PROBLEM_STATS: Stat[] = [
++  { value: "7 in 10", label: "Nigerian 10-year-olds cannot read a single sentence.", source: "World Bank, 2022" },
++  { value: "98M", label: "children are out of school in Sub-Saharan Africa.", source: "UNESCO, 2024" },
++  {
++    value: "16%",
++    label: "of planned learning actually happens in school.",
++    source: "Attendance × lesson completion × teacher presence",
++  },
++];
++
++export const PHONE_FACTS = [
++  { value: 70, label: "of Africans have a mobile phone" },
++  { value: 95, label: "of Lagos households own one" },
++  { value: 99, label: "2G network coverage" },
++];
++
++export const CALL_STEPS = [
++  { title: "A child calls the number", body: "Any phone works, even a $5 feature phone. No app, no data, no account." },
++  { title: "Sabi greets them by name", body: "New callers introduce themselves once. Returning callers are recognised instantly." },
++  {
++    title: "A lesson begins",
++    body: "Taught at the child's actual level, using things they know: the market, Naira, everyday Lagos life.",
++  },
++  {
++    title: "Five to seven minutes, one idea",
++    body: "Short, focused calls. Harder when the child is ready, slower when they struggle.",
++  },
++  {
++    title: "They call back tomorrow",
++    body: "Sabi remembers their name, their level and their mistakes, and picks up where they left off.",
++  },
++];
++
++export type CallLine = { time: string; speaker: "Sabi" | "Child"; text: string };
++
++export const FIRST_CALL: CallLine[] = [
++  { time: "00:03", speaker: "Sabi", text: "Hello! My name is Sabi. What is your name?" },
++  { time: "00:07", speaker: "Child", text: "Chidi." },
++  { time: "00:09", speaker: "Sabi", text: "Hi Chidi! Do you ever help your family at the market?" },
++  { time: "00:14", speaker: "Child", text: "Yes, I sell groundnuts." },
++  {
++    time: "00:17",
++    speaker: "Sabi",
++    text: "Ah, you know business! If a customer gives you ₦500, and groundnuts cost ₦350, how much change do you give back?",
++  },
++  { time: "00:29", speaker: "Child", text: "150." },
++  {
++    time: "00:31",
++    speaker: "Sabi",
++    text: "You got it! You already know maths, Chidi — you just don't know you know it. Now let me show you how they write that in school…",
++  },
++];
++
++export const NEXT_DAY_CALL: CallLine[] = [
++  {
++    time: "00:02",
++    speaker: "Sabi",
++    text: "Welcome back, Chidi! Yesterday you learned subtraction using market change. You got 4 out of 5 right. Today, let's try adding things together…",
++  },
++];
++
++export const LESSON_ANATOMY = [
++  { minute: "0:00", title: "Hello, by name", body: "Sabi greets the child and recalls what they did last time." },
++  { minute: "0:30", title: "Warm-up", body: "A quick question on yesterday's idea, to check it stuck." },
++  { minute: "1:30", title: "One new idea", body: "Framed in something familiar: change at the market, sharing groundnuts, reading a sign." },
++  { minute: "3:00", title: "Practice", body: "A few questions that get harder if the child is flying, and slower if they're stuck." },
++  { minute: "5:30", title: "Wrap-up", body: "What they learned today, and a reason to call back tomorrow." },
++];
++
++export const PIPELINE = [
++  {
++    verb: "Hears",
++    body: "Speech recognition tuned for Nigerian English and Pidgin, on noisy 2G phone lines.",
++  },
++  {
++    verb: "Thinks",
++    body: "A curriculum-aware tutor that knows this child's level, history and last mistakes.",
++  },
++  {
++    verb: "Checks",
++    body: "A child-safety layer reviews what the child said and what Sabi is about to say, on every turn.",
++  },
++  {
++    verb: "Speaks",
++    body: "A warm Nigerian voice, streamed sentence by sentence so the child isn't left waiting.",
++  },
++];
++
++export const EVIDENCE = [
++  {
++    stat: "9×",
++    title: "Market maths beats abstract maths",
++    body: "Children solved comparable subtraction tasks nine times more often when framed as a market sale than in school format (48.5% vs 5.4%).",
++    source: "Weber, Bogler & Vollmer 2024 · North-West Nigeria",
++    informs: "Why every lesson starts in the market.",
++  },
++  {
++    stat: "1.5–2 yrs",
++    title: "of learning in six weeks",
++    body: "A World Bank RCT in Nigeria found AI tutoring delivered one and a half to two years of learning gains in just six weeks.",
++    source: "World Bank 2024 · benefit–cost ratio 161–260",
++    informs: "Why the tutor is AI, not a recording.",
++  },
++  {
++    stat: "7% → 45%",
++    title: "Reading, with no teacher in the room",
++    body: "In Tanzania, children given only tablets went from 7% to 45% reading ability in fifteen months.",
++    source: "Global Learning XPRIZE",
++    informs: "Why a child can learn alone, at home.",
++  },
++  {
++    stat: "$0.50–5",
++    title: "per student, per year",
++    body: "Ten to a hundred times cheaper than the alternatives. At $2 a student, reaching 100,000 children costs $200,000 a year.",
++    source: "Self-hosted open-source stack",
++    informs: "Why it can stay free for families.",
++  },
++];
++
++/** Published phone and chat tutoring results the pilot will be read against. */
++export const BENCHMARKS = [
++  { name: "ConnectEd (J-PAL)", effect: "0.33 SD", cost: "~$12 / child", dose: "~3 hours over 8–9 weeks, by phone" },
++  { name: "Rori (Rising Academies)", effect: "0.36 SD", cost: "~$5 / child / year", dose: "~32 hours over 8 months, by chat" },
++  { name: "Teaching at the Right Level", effect: "19% → 79%", cost: "Varies", dose: "Readers before and after learning camps" },
++];
++
++export const PILOT_MEASURES = [
++  {
++    title: "Level movement",
++    body: "The share of children who move up at least one reading or maths level from their first-call placement.",
++  },
++  {
++    title: "Learning gain",
++    body: "A short baseline and endline probe, so gains are reported as an effect size beside published programmes.",
++  },
++  {
++    title: "Dosage",
++    body: "Calls answered and completed, minutes of real lesson time, and how many children call back the next week.",
++  },
++  {
++    title: "Cost per child",
++    body: "Delivery cost per learner, and learning per dollar, so funders can compare like with like.",
++  },
++];
++
++export const PILOT = {
++  when: "Q4 2026",
++  where: "Lagos",
++  size: "100–500 students",
++  detail: "in high-burden local government areas",
++};
++
++export const PRINCIPLES = [
++  { title: "Any phone.", body: "Works on a $5 feature phone. No smartphone, no internet, no app download. Just a phone call." },
++  {
++    title: "It remembers.",
++    body: "Sabi remembers every child: their name, their level, their mistakes. Each call picks up where the last one ended.",
++  },
++  {
++    title: "Free. Always.",
++    body: "Toll-free calls. No subscription, no paywall. Sponsored by Education for Equality, a 501(c)(3) nonprofit.",
++  },
++];
++
++export const FAMILY_STEPS = [
++  { title: "Text CALL", body: "Send the word CALL by SMS or WhatsApp. Sabi rings you back, and the call is free." },
++  { title: "Sabi rings you", body: "Answer, and hand the phone to your child. Each lesson takes five to seven minutes." },
++  { title: "Same time tomorrow", body: "Sabi remembers where your child stopped and carries on from there." },
++];
++
++export const SAFETY_POINTS = [
++  {
++    title: "A tutor, not a friend",
++    body: "Sabi stays on reading and maths. It is built to teach, not to chat, and it steers back to the lesson.",
++  },
++  {
++    title: "Checked on every turn",
++    body: "A safety layer reviews what your child says and what Sabi is about to say, before a single word is spoken.",
++  },
++  {
++    title: "A real person if it matters",
++    body: "If a child says something that suggests they are in danger, it goes to a named safeguarding lead for review.",
++  },
++  {
++    title: "Never asks for money",
++    body: "Sabi will never ask for money, passwords or bank details. If anyone claiming to be Sabi does, it is not us.",
++  },
++  {
++    title: "Your child's voice stays theirs",
++    body: "Recordings are only used to improve Sabi if a parent or guardian gives separate permission.",
++  },
++  {
++    title: "One phone, many children",
++    body: "Brothers and sisters can share a phone. Sabi keeps a separate place for each child.",
++  },
++];
++
++export const PARTNER_WAYS = [
++  {
++    who: "Schools & local governments",
++    title: "Host a pilot cohort",
++    body: "Bring Sabi to a group of children in your schools or LGA. Sabi brings the phone line, the lessons and a progress record for every child.",
++    cta: "Talk about a pilot",
++    subject: "Sabi pilot",
++  },
++  {
++    who: "Funders & foundations",
++    title: "Sponsor a cohort",
++    body: "At around $2 a child a year, a small grant reaches a whole community. You get per-child evidence, not anecdotes.",
++    cta: "Fund a cohort",
++    subject: "Funding a Sabi cohort",
++  },
++  {
++    who: "Telecoms",
++    title: "Keep the line free",
++    body: "Toll-free numbers and free callbacks are what keep Sabi free for families. Help us reach every network.",
++    cta: "Partner on the line",
++    subject: "Sabi telecoms partnership",
++  },
++  {
++    who: "Researchers",
++    title: "Measure it with us",
++    body: "Every call produces structured, consented learning data. We want independent evaluation, including an RCT.",
++    cta: "Propose a study",
++    subject: "Sabi research collaboration",
++  },
++];
++
++export const RECOGNITION = [
++  { org: "MIT Sloan Africa Business Club", title: "2nd Place", detail: "MIT Africa Business Challenge 2026, $3,000 prize" },
++  { org: "Wesleyan Patricelli Center", title: "Campus-backed", detail: "$1,200 Wesleyan grant plus PCE-sponsored MIT trip" },
++  { org: "Technovation + Generation Unlimited", title: "Accelerator cohort", detail: "Selected for the 2026 AI Ventures Accelerator" },
++  { org: "ElevenLabs", title: "Impact Program", detail: "Voice AI credits supporting Sabi demos and testing" },
++];
++
++export const PARTNER_LOGOS = [
++  { name: "ElevenLabs Impact Program", href: "https://elevenlabs.io/impact-program", src: "/partners/elevenlabs.svg", width: 156, height: 44 },
++  { name: "Wesleyan Patricelli Center", href: "https://www.wesleyan.edu/patricelli/", src: "/partners/wesleyan-pce.webp", width: 104, height: 96 },
++  { name: "AI Ventures Accelerator", href: "https://www.technovation.org/ai-ventures-accelerator/", src: "/partners/ai-ventures.svg", width: 210, height: 70 },
++  { name: "UNICEF Generation Unlimited", href: "https://www.unicef.org/generationunlimited/", src: "/partners/generation-unlimited.svg", width: 220, height: 62 },
++  { name: "Technovation", href: "https://www.technovation.org/", src: "/partners/technovation.svg", width: 210, height: 70 },
++  { name: "MIT Sloan Africa Business Club", href: "https://mit-africa.com/hackathon/", src: "/partners/mit-sloan-abc.svg", width: 210, height: 70 },
++];
++
++export const ADVISORS = [
++  { name: "Hon. Folasade Adefisayo", role: "Former Lagos Commissioner of Education (2019–2023), who launched EKOEXCEL across 1,016 schools" },
++  { name: "Dr. Sonia Ivie", role: "Director of Schools, EKOEXCEL" },
++  { name: "Rhoda Odigboh", role: "CEO, Kizazi; former NewGlobe Regional Director" },
++];
++
++export const FOUNDER_STORY = [
++  "Growing up in Lagos, Nigeria, I attended my secondary school on a scholarship and a discount based on my mother's salary as a teacher. Sometimes my family didn't have food to eat.",
++  "On the way to school every day, I saw children my age hawking wares or fixing cars so their families could survive. I knew there was no difference between me and them. Without the grace of God and the extreme sacrifices of my parents, I would have been one of those kids.",
++  "Education gave me a way out. Now I want to extend the same opportunity to every child who didn't get one. If we can teach people across Africa to solve problems around them, we can set off a chain reaction of transformation across the continent.",
++];
++
++export const FOUNDER_QUOTE =
++  "We're not building another app that sits in an app store. We're building something a mother hears about at church, dials after dinner, and hands to her child for five minutes.";
++
++export const DEMO_VIDEO_ID = "KUGy9RsFXzA";
+diff --git a/lib/sabi/metadata.ts b/lib/sabi/metadata.ts
+new file mode 100644
+index 0000000..4f2710c
+--- /dev/null
++++ b/lib/sabi/metadata.ts
+@@ -0,0 +1,25 @@
++import type { Metadata } from "next";
++import { SABI_URL, sabiOpenGraph } from "@/lib/seo";
++
++/**
++ * Metadata for a Sabi subpage. `path` is the clean subdomain path (e.g.
++ * "/evidence"), which is the canonical URL even though the page file lives at
++ * app/sabi/evidence.
++ */
++export function sabiPageMetadata({
++  path,
++  title,
++  description,
++}: {
++  path: `/${string}`;
++  title: string;
++  description: string;
++}): Metadata {
++  return {
++    title: { absolute: `${title} | Sabi` },
++    description,
++    alternates: { canonical: `${SABI_URL}${path}` },
++    openGraph: { ...sabiOpenGraph(path), title, description, siteName: "Sabi" },
++    twitter: { title, description },
++  };
++}
+diff --git a/lib/sabi/site.ts b/lib/sabi/site.ts
+new file mode 100644
+index 0000000..db4297b
+--- /dev/null
++++ b/lib/sabi/site.ts
+@@ -0,0 +1,86 @@
++/**
++ * Route map for the Sabi marketing site.
++ *
++ * Pages live under app/sabi/* so they render on both hosts. Internal links use
++ * the /sabi/* path because it resolves on eduforequality.org *and* on the
++ * subdomain (middleware lets /sabi/* through). The subdomain also gets clean
++ * aliases (/how-it-works -> /sabi/how-it-works) via SABI_SUBDOMAIN_PAGES, and
++ * those clean URLs are what each page declares as canonical.
++ */
++
++export const SABI_ROUTES = {
++  home: "/sabi",
++  howItWorks: "/sabi/how-it-works",
++  evidence: "/sabi/evidence",
++  families: "/sabi/families",
++  partners: "/sabi/partners",
++  about: "/sabi/about",
++  pricing: "/sabi/pricing",
++  developers: "/sabi/developers",
++  // Served by the subdomain rewrites in middleware.ts.
++  talk: "/demo",
++  chat: "/chat",
++} as const;
++
++/** Subdomain paths that rewrite to /sabi/<slug>. Keep in sync with app/sabi/*. */
++export const SABI_SUBDOMAIN_PAGES = [
++  "how-it-works",
++  "evidence",
++  "families",
++  "partners",
++  "about",
++  "pricing",
++  "developers",
++] as const;
++
++export const CONTACT_EMAIL = "info@eduforequality.org";
++
++export type SabiNavItem = { href: string; label: string };
++
++export const SABI_PRIMARY_NAV: SabiNavItem[] = [
++  { href: SABI_ROUTES.howItWorks, label: "How it works" },
++  { href: SABI_ROUTES.evidence, label: "Evidence" },
++  { href: SABI_ROUTES.families, label: "Families" },
++  { href: SABI_ROUTES.partners, label: "Partners" },
++  { href: SABI_ROUTES.about, label: "About" },
++  { href: SABI_ROUTES.pricing, label: "Developers" },
++];
++
++export const SABI_FOOTER_NAV: { heading: string; items: SabiNavItem[] }[] = [
++  {
++    heading: "Sabi",
++    items: [
++      { href: SABI_ROUTES.howItWorks, label: "How it works" },
++      { href: SABI_ROUTES.evidence, label: "Evidence" },
++      { href: SABI_ROUTES.talk, label: "Talk to Sabi" },
++      { href: SABI_ROUTES.chat, label: "Chat with Sabi" },
++    ],
++  },
++  {
++    heading: "Who it's for",
++    items: [
++      { href: SABI_ROUTES.families, label: "Families" },
++      { href: SABI_ROUTES.partners, label: "Schools & funders" },
++      { href: SABI_ROUTES.pricing, label: "API & pricing" },
++      { href: SABI_ROUTES.developers, label: "Developer access" },
++    ],
++  },
++  {
++    heading: "Organisation",
++    items: [
++      { href: SABI_ROUTES.about, label: "About" },
++      { href: "https://eduforequality.org", label: "Education for Equality" },
++      { href: `mailto:${CONTACT_EMAIL}`, label: "Contact" },
++    ],
++  },
++];
++
++/** True when `href` is the current page or (for section roots) an ancestor of it. */
++export function isActivePath(pathname: string | null, href: string) {
++  if (!pathname) return false;
++  if (href === SABI_ROUTES.home) return pathname === href;
++  if (href === SABI_ROUTES.pricing) {
++    return pathname.startsWith(SABI_ROUTES.pricing) || pathname.startsWith(SABI_ROUTES.developers);
++  }
++  return pathname === href || pathname.startsWith(`${href}/`);
++}
+diff --git a/lib/seo.ts b/lib/seo.ts
+index 52c65df..b08ce53 100644
+--- a/lib/seo.ts
++++ b/lib/seo.ts
+@@ -23,7 +23,7 @@ const SOCIAL_PROFILES = [
+   "https://www.instagram.com/_educationforequality/",
+ ];
+ 
+-const AWARDS = [
++export const AWARDS = [
+   "MIT Sloan Africa Business Challenge — 2nd place",
+   "Wesleyan New Venture Awards — Grand Prize",
+   "UNICEF AI Ventures Accelerator — inaugural cohort",
+-- 
+2.43.0
+

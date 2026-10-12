@@ -1,0 +1,57 @@
+From c96edf482383d45a8c5d3e210710d426ba4e26a0 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Mon, 12 Oct 2026 20:09:06 +0000
+Subject: [PATCH 6/6] Sabi: route new pages on the subdomain and add them to
+ the sitemap
+
+---
+ app/sitemap.ts | 5 +++++
+ middleware.ts  | 9 ++++-----
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/app/sitemap.ts b/app/sitemap.ts
+index 759ace2..03ba02a 100644
+--- a/app/sitemap.ts
++++ b/app/sitemap.ts
+@@ -16,6 +16,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
+   const routes: { url: string; priority: number; freq: MetadataRoute.Sitemap[number]["changeFrequency"] }[] = [
+     // Sabi — the product, and the pages that should win the brand query.
+     { url: SABI_URL, priority: 1, freq: "weekly" },
++    { url: `${SABI_URL}/how-it-works`, priority: 0.8, freq: "monthly" },
++    { url: `${SABI_URL}/families`, priority: 0.8, freq: "monthly" },
++    { url: `${SABI_URL}/evidence`, priority: 0.7, freq: "monthly" },
++    { url: `${SABI_URL}/partners`, priority: 0.7, freq: "monthly" },
++    { url: `${SABI_URL}/about`, priority: 0.6, freq: "monthly" },
+     { url: `${SABI_URL}/pricing`, priority: 0.7, freq: "monthly" },
+     { url: `${SABI_URL}/developers`, priority: 0.7, freq: "monthly" },
+ 
+diff --git a/middleware.ts b/middleware.ts
+index 22e6e22..fd8b823 100644
+--- a/middleware.ts
++++ b/middleware.ts
+@@ -1,6 +1,7 @@
+ import { createServerClient } from '@supabase/ssr';
+ import { NextResponse, type NextRequest } from 'next/server';
+ import { isBoardMemberUser } from '@/lib/board-access';
++import { SABI_SUBDOMAIN_PAGES } from '@/lib/sabi/site';
+ 
+ // Served verbatim on every host — never rewritten or redirected.
+ const CRAWLER_FILES = new Set(['/robots.txt', '/sitemap.xml', '/favicon.ico']);
+@@ -115,11 +116,9 @@ export async function middleware(request: NextRequest) {
+     if (path === '/chat') {
+       return NextResponse.rewrite(new URL('/sabi-demo', request.url));
+     }
+-    if (path === '/pricing') {
+-      return NextResponse.rewrite(new URL('/sabi/pricing', request.url));
+-    }
+-    if (path === '/developers') {
+-      return NextResponse.rewrite(new URL('/sabi/developers', request.url));
++    const page = path.replace(/^\/|\/$/g, '');
++    if ((SABI_SUBDOMAIN_PAGES as readonly string[]).includes(page)) {
++      return NextResponse.rewrite(new URL(`/sabi/${page}`, request.url));
+     }
+     // Crawler files must be served, not swept into the /demo catch-all below —
+     // otherwise the subdomain has no reachable robots.txt or sitemap at all.
+-- 
+2.43.0
+

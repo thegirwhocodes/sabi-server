@@ -1,7 +1,7 @@
 From 6846eb7d36d723da1c837b656e1573980df0606f Mon Sep 17 00:00:00 2001
 From: Cursor Agent <cursoragent@cursor.com>
 Date: Mon, 12 Oct 2026 19:44:36 +0000
-Subject: [PATCH 2/3] Redesign the Sabi landing page around the phone call
+Subject: [PATCH 2/6] Redesign the Sabi landing page around the phone call
 
 Feature-phone hero with call rings, an editorial problem section, phone
 coverage bars, a timestamped call transcript, an evidence table, a founder

@@ -20,10 +20,25 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# 1. System packages
+# 0. Clean disk space if low
+echo "[0/6] Cleaning up old packages and cache to ensure free disk space..."
+apt-get clean || true
+apt-get autoremove -y || true
+rm -rf /var/lib/apt/lists/* || true
+rm -rf /tmp/* /var/tmp/* || true
+journalctl --vacuum-time=1d 2>/dev/null || true
+if command -v docker >/dev/null 2>&1; then
+    docker system prune -af --volumes 2>/dev/null || true
+fi
+
+# 1. System packages (install minimal essentials only)
 echo "[1/6] Updating system packages & installing dependencies..."
-apt update -qq
-apt install -y -qq curl wget git tar ufw ca-certificates gnupg python3 python3-pip python3-venv
+apt-get update -qq
+apt-get install -y --no-install-recommends curl wget git tar ufw ca-certificates gnupg python3 python3-pip python3-venv
+
+# Clean apt cache immediately to save space
+apt-get clean
+rm -rf /var/lib/apt/lists/*
 
 # 2. Setup user
 echo "[2/6] Ensuring developer user '$DEV_USER' exists..."
@@ -39,23 +54,18 @@ if getent group docker >/dev/null 2>&1; then
     usermod -aG docker "$DEV_USER"
 fi
 
-# 3. Download VS Code standalone CLI
+# 3. Download VS Code standalone CLI directly
 echo "[3/6] Installing official VS Code CLI binary..."
 USER_HOME=$(eval echo "~$DEV_USER")
-TMP_DIR=$(mktemp -d)
-cd "$TMP_DIR"
-curl -sSLk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' --output vscode_cli.tar.gz
-tar -xf vscode_cli.tar.gz
-install -m 755 code /usr/local/bin/code
-cd - >/dev/null
-rm -rf "$TMP_DIR"
+cd /tmp
+curl -sSLk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' | tar -xz -C /usr/local/bin
 echo "VS Code CLI installed to /usr/local/bin/code ($(code --version))"
 
-# 4. Clone Sabi Server if not already present
+# 4. Clone Sabi Server with shallow depth to save disk space
 DEV_WORKSPACE="$USER_HOME/sabi-server"
 if [ ! -d "$DEV_WORKSPACE" ]; then
-    echo "[4/6] Cloning sabi-server into $DEV_WORKSPACE..."
-    sudo -u "$DEV_USER" git clone https://github.com/thegirwhocodes/sabi-server.git "$DEV_WORKSPACE"
+    echo "[4/6] Cloning sabi-server (depth 1) into $DEV_WORKSPACE..."
+    sudo -u "$DEV_USER" git clone --depth 1 https://github.com/thegirwhocodes/sabi-server.git "$DEV_WORKSPACE"
 else
     echo "[4/6] Workspace already exists at $DEV_WORKSPACE."
 fi

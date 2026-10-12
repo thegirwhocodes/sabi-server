@@ -1,0 +1,321 @@
+From d0fc051b1306b61e7daddadb98b5d9a0bccda20a Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Mon, 12 Oct 2026 19:44:36 +0000
+Subject: [PATCH 3/6] Bring the tester guide and share image onto the new Sabi
+ palette
+
+---
+ app/sabi/opengraph-image.tsx | 77 ++++++++++++++++++++++++------------
+ app/sabi/testers/page.tsx    | 76 +++++++++++++++++------------------
+ 2 files changed, 89 insertions(+), 64 deletions(-)
+
+diff --git a/app/sabi/opengraph-image.tsx b/app/sabi/opengraph-image.tsx
+index 123c960..8b19e64 100644
+--- a/app/sabi/opengraph-image.tsx
++++ b/app/sabi/opengraph-image.tsx
+@@ -5,6 +5,9 @@ export const alt =
+ export const size = { width: 1200, height: 630 };
+ export const contentType = "image/png";
+ 
++const INK = "#0f1512";
++const YELLOW = "#ffc629";
++
+ export default function Image() {
+   return new ImageResponse(
+     (
+@@ -15,46 +18,68 @@ export default function Image() {
+           display: "flex",
+           flexDirection: "column",
+           justifyContent: "space-between",
+-          background: "linear-gradient(135deg, #10261f 0%, #1c3d31 55%, #2b5a45 100%)",
+-          color: "#f6f1e4",
+-          padding: "72px 80px",
++          background: YELLOW,
++          color: INK,
++          padding: "64px 80px",
+           fontFamily: "sans-serif",
++          position: "relative",
+         }}
+       >
+-        <div
+-          style={{
+-            display: "flex",
+-            fontSize: 26,
+-            letterSpacing: 4,
+-            textTransform: "uppercase",
+-            color: "#e2c275",
+-          }}
+-        >
+-          Education for Equality
++        {[360, 520, 680, 840].map((d) => (
++          <div
++            key={d}
++            style={{
++              position: "absolute",
++              right: 180 - d / 2,
++              top: 315 - d / 2,
++              width: d,
++              height: d,
++              borderRadius: 9999,
++              border: "3px solid rgba(15,21,18,0.18)",
++            }}
++          />
++        ))}
++
++        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
++          <div
++            style={{
++              width: 64,
++              height: 64,
++              borderRadius: 18,
++              background: INK,
++              display: "flex",
++              alignItems: "center",
++              justifyContent: "center",
++              gap: 6,
++            }}
++          >
++            <div style={{ width: 8, height: 16, borderRadius: 4, background: YELLOW }} />
++            <div style={{ width: 8, height: 36, borderRadius: 4, background: YELLOW }} />
++            <div style={{ width: 8, height: 22, borderRadius: 4, background: YELLOW }} />
++          </div>
++          <div style={{ display: "flex", fontSize: 56, fontWeight: 800, letterSpacing: -2 }}>sabi</div>
+         </div>
+ 
+         <div style={{ display: "flex", flexDirection: "column" }}>
+-          <div style={{ display: "flex", fontSize: 132, fontWeight: 700, lineHeight: 1 }}>
+-            Sabi
+-          </div>
+-          <div style={{ display: "flex", fontSize: 34, color: "#c9d8cf", marginTop: 18 }}>
+-            /sah-bee/ — &ldquo;to know&rdquo; in Nigerian Pidgin
+-          </div>
+           <div
+             style={{
+               display: "flex",
+-              fontSize: 44,
+-              lineHeight: 1.3,
+-              marginTop: 34,
+-              maxWidth: 940,
++              fontSize: 104,
++              fontWeight: 800,
++              lineHeight: 0.95,
++              letterSpacing: -4,
++              maxWidth: 820,
+             }}
+           >
+-            An AI tutor any child can reach by calling a phone number.
++            The tutor who picks up the phone.
++          </div>
++          <div style={{ display: "flex", fontSize: 32, marginTop: 28, color: "#3a423d" }}>
++            Free reading and maths lessons on any phone. No internet. No cost.
+           </div>
+         </div>
+ 
+-        <div style={{ display: "flex", fontSize: 30, color: "#e2c275" }}>
+-          No smartphone. No internet. No cost.
++        <div style={{ display: "flex", fontSize: 24, letterSpacing: 2, textTransform: "uppercase" }}>
++          Education for Equality · /sah-bee/ — &ldquo;to know&rdquo;
+         </div>
+       </div>
+     ),
+diff --git a/app/sabi/testers/page.tsx b/app/sabi/testers/page.tsx
+index 97e3dc7..9dbff89 100644
+--- a/app/sabi/testers/page.tsx
++++ b/app/sabi/testers/page.tsx
+@@ -112,13 +112,13 @@ const reportQuestions = [
+ 
+ export default function SabiTesterGuidePage() {
+   return (
+-    <div className="min-h-screen bg-[#f6f1e7] text-[#171713]">
+-      <header className="border-b border-[#d8c9a5] bg-[#112b26] text-white">
++    <div className="min-h-screen bg-[var(--sabi-paper)] text-[var(--sabi-ink)]">
++      <header className="border-b border-[var(--sabi-border)] bg-[var(--sabi-green)] text-white">
+         <div className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
+-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#d9bb72]">
++          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--sabi-yellow)]">
+             Invited adult tester guide
+           </p>
+-          <h1 className="mt-4 max-w-3xl font-serif text-5xl leading-[0.95] sm:text-7xl">
++          <h1 className="mt-4 max-w-3xl sabi-display !text-white text-5xl leading-[0.95] sm:text-7xl">
+             Five days
+             <br />
+             with Sabi
+@@ -143,24 +143,24 @@ export default function SabiTesterGuidePage() {
+           </div>
+           <a
+             href="tel:+2342017001459"
+-            className="mt-8 inline-flex min-h-12 items-center justify-center bg-[#d9bb72] px-6 py-3 font-semibold text-[#112b26]"
++            className="mt-8 inline-flex min-h-12 items-center justify-center rounded-full bg-[var(--sabi-yellow)] px-6 py-3 font-semibold text-[var(--sabi-ink)]"
+           >
+             Call Sabi: +234 201 700 1459
+           </a>
+         </div>
+       </header>
+ 
+-      <main className="mx-auto max-w-5xl space-y-8 px-5 py-12 sm:space-y-10 sm:px-8 sm:py-16 [&>section+section]:border-t [&>section+section]:border-[#ded3bc] [&>section+section]:pt-8 sm:[&>section+section]:pt-10">
++      <main className="mx-auto max-w-5xl space-y-8 px-5 py-12 sm:space-y-10 sm:px-8 sm:py-16 [&>section+section]:border-t [&>section+section]:border-[var(--sabi-border)] [&>section+section]:pt-8 sm:[&>section+section]:pt-10">
+         <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+           <div>
+-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8a6926]">
++            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--sabi-green-bright)]">
+               What Sabi is
+             </p>
+-            <h2 className="mt-3 font-serif text-4xl text-[#112b26]">
++            <h2 className="mt-3 sabi-display text-4xl text-[var(--sabi-ink)]">
+               A teacher reached by phone call.
+             </h2>
+           </div>
+-          <div className="space-y-4 text-base leading-7 text-[#46443c]">
++          <div className="space-y-4 text-base leading-7 text-[var(--sabi-ink-soft)]">
+             <p>
+               Sabi is an AI tutor that teaches foundational numeracy through a
+               natural voice conversation. She asks questions, listens to the
+@@ -175,12 +175,12 @@ export default function SabiTesterGuidePage() {
+ 
+         <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+           <div>
+-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8a6926]">
++            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--sabi-green-bright)]">
+               Getting your call
+             </p>
+-            <h2 className="mt-3 font-serif text-4xl text-[#112b26]">You should not pay.</h2>
++            <h2 className="mt-3 sabi-display text-4xl text-[var(--sabi-ink)]">You should not pay.</h2>
+           </div>
+-          <div className="space-y-4 text-base leading-7 text-[#46443c]">
++          <div className="space-y-4 text-base leading-7 text-[var(--sabi-ink-soft)]">
+             <p>
+               Use the Nigerian Sabi number Naomi sent you. Let it ring once, then hang
+               up. Sabi will call you back. Answer the callback and begin.
+@@ -190,7 +190,7 @@ export default function SabiTesterGuidePage() {
+               If the callback does not arrive, message Naomi with your network—MTN,
+               Airtel, Glo or 9mobile—and the time you tried.
+             </p>
+-            <div className="border-l-4 border-[#c99c3d] bg-white px-5 py-4 text-sm">
++            <div className="border-l-4 border-[var(--sabi-yellow)] bg-white px-5 py-4 text-sm">
+               Save the number as <strong>Sabi</strong>. There is no automatic second
+               attempt if you miss the callback.
+             </div>
+@@ -198,20 +198,20 @@ export default function SabiTesterGuidePage() {
+         </section>
+ 
+         <section>
+-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8a6926]">
++          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--sabi-green-bright)]">
+             On every call
+           </p>
+-          <h2 className="mt-3 max-w-2xl font-serif text-4xl text-[#112b26]">
++          <h2 className="mt-3 max-w-2xl sabi-display text-4xl text-[var(--sabi-ink)]">
+             Six small tests that reveal big problems
+           </h2>
+           <div className="mt-7 grid gap-3 sm:grid-cols-2">
+             {everyCall.map((item) => (
+-              <article key={item.number} className="border border-[#ded3bc] bg-white p-5">
++              <article key={item.number} className="border border-[var(--sabi-border)] bg-white p-5">
+                 <div className="flex gap-4">
+-                  <span className="font-mono text-sm font-bold text-[#a87920]">{item.number}</span>
++                  <span className="font-mono text-sm font-bold text-[var(--sabi-green-bright)]">{item.number}</span>
+                   <div>
+-                    <h3 className="font-semibold text-[#112b26]">{item.title}</h3>
+-                    <p className="mt-2 text-sm leading-6 text-[#625f55]">{item.detail}</p>
++                    <h3 className="font-semibold text-[var(--sabi-ink)]">{item.title}</h3>
++                    <p className="mt-2 text-sm leading-6 text-[var(--sabi-muted)]">{item.detail}</p>
+                   </div>
+                 </div>
+               </article>
+@@ -220,26 +220,26 @@ export default function SabiTesterGuidePage() {
+         </section>
+ 
+         <section>
+-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8a6926]">
++          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--sabi-green-bright)]">
+             The five-day plan
+           </p>
+-          <h2 className="mt-3 font-serif text-4xl text-[#112b26]">A different pressure each day</h2>
+-          <div className="mt-7 divide-y divide-[#ded3bc] border-y border-[#ded3bc]">
++          <h2 className="mt-3 sabi-display text-4xl text-[var(--sabi-ink)]">A different pressure each day</h2>
++          <div className="mt-7 divide-y divide-[var(--sabi-border)] border-y border-[var(--sabi-border)]">
+             {days.map((item, index) => (
+               <details key={item.day} className="group bg-white/50" open={index === 0}>
+                 <summary className="flex cursor-pointer list-none items-center gap-4 px-4 py-5 sm:px-6">
+-                  <span className="min-w-16 text-xs font-bold uppercase tracking-[0.14em] text-[#a87920]">
++                  <span className="min-w-16 text-xs font-bold uppercase tracking-[0.14em] text-[var(--sabi-green-bright)]">
+                     {item.day}
+                   </span>
+                   <span className="flex-1">
+-                    <span className="block text-lg font-semibold text-[#112b26]">{item.title}</span>
+-                    <span className="mt-1 block text-sm text-[#6c685e]">{item.summary}</span>
++                    <span className="block text-lg font-semibold text-[var(--sabi-ink)]">{item.title}</span>
++                    <span className="mt-1 block text-sm text-[var(--sabi-muted)]">{item.summary}</span>
+                   </span>
+-                  <span aria-hidden className="text-2xl text-[#8a6926] group-open:rotate-45">
++                  <span aria-hidden className="text-2xl text-[var(--sabi-green-bright)] group-open:rotate-45">
+                     +
+                   </span>
+                 </summary>
+-                <ul className="space-y-3 px-4 pb-6 pl-24 text-sm leading-6 text-[#514e46] sm:px-6 sm:pl-28">
++                <ul className="space-y-3 px-4 pb-6 pl-24 text-sm leading-6 text-[var(--sabi-ink-soft)] sm:px-6 sm:pl-28">
+                   {item.tasks.map((task) => (
+                     <li key={task} className="list-disc pl-1">
+                       {task}
+@@ -251,12 +251,12 @@ export default function SabiTesterGuidePage() {
+           </div>
+         </section>
+ 
+-        <section className="grid gap-8 bg-[#112b26] px-5 py-8 text-white sm:px-8 sm:py-10 lg:grid-cols-2">
++        <section className="grid gap-8 bg-[var(--sabi-green)] px-5 py-8 text-white sm:px-8 sm:py-10 lg:grid-cols-2">
+           <div>
+-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#d9bb72]">
++            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--sabi-yellow)]">
+               After every call
+             </p>
+-            <h2 className="mt-3 font-serif text-4xl">Tell us what really happened.</h2>
++            <h2 className="mt-3 sabi-display !text-white text-4xl">Tell us what really happened.</h2>
+             <p className="mt-4 text-sm leading-6 text-white/70">
+               Send Naomi a WhatsApp voice note for how the call felt. For every
+               misheard number, also send one typed sentence with what you said and
+@@ -266,16 +266,16 @@ export default function SabiTesterGuidePage() {
+           <ol className="space-y-3">
+             {reportQuestions.map((question, index) => (
+               <li key={question} className="flex gap-3 text-sm leading-6">
+-                <span className="font-mono text-[#d9bb72]">{String(index + 1).padStart(2, "0")}</span>
++                <span className="font-mono text-[var(--sabi-yellow)]">{String(index + 1).padStart(2, "0")}</span>
+                 <span>{question}</span>
+               </li>
+             ))}
+           </ol>
+         </section>
+ 
+-        <section className="border border-[#d4c49e] bg-[#efe4ca] p-5 sm:p-7">
+-          <h2 className="font-serif text-3xl text-[#112b26]">Before you begin</h2>
+-          <div className="mt-4 space-y-3 text-sm leading-6 text-[#514e46]">
++        <section className="border border-[var(--sabi-border-strong)] bg-[var(--sabi-yellow-wash)] p-5 sm:p-7">
++          <h2 className="sabi-display text-3xl text-[var(--sabi-ink)]">Before you begin</h2>
++          <div className="mt-4 space-y-3 text-sm leading-6 text-[var(--sabi-ink-soft)]">
+             <p>
+               This round is for adults. Do not put a child on the phone. Every call is
+               recorded and automatically transcribed so the team can inspect what
+@@ -296,17 +296,17 @@ export default function SabiTesterGuidePage() {
+ 
+         <section className="grid gap-7 lg:grid-cols-[0.85fr_1.15fr]">
+           <div>
+-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#8a6926]">
++            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--sabi-green-bright)]">
+               Join the five-day test
+             </p>
+-            <h2 className="mt-3 font-serif text-4xl text-[#112b26]">Tell us who to call.</h2>
+-            <p className="mt-4 max-w-md text-sm leading-6 text-[#625f55]">
++            <h2 className="mt-3 sabi-display text-4xl text-[var(--sabi-ink)]">Tell us who to call.</h2>
++            <p className="mt-4 max-w-md text-sm leading-6 text-[var(--sabi-muted)]">
+               Enter your name, Nigerian phone number and preferred call time. Your
+               details stay private and are used only to organise Sabi&apos;s adult
+               testing calls.
+             </p>
+           </div>
+-          <div className="border border-[#ded3bc] bg-white p-5 sm:p-7">
++          <div className="border border-[var(--sabi-border)] bg-white p-5 sm:p-7">
+             <SignupForm />
+           </div>
+         </section>
+-- 
+2.43.0
+

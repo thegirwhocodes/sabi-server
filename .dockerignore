@@ -1,0 +1,21 @@
+# Keys reach the container as Docker secrets (/run/secrets), never in the image.
+secrets/
+.env
+.env.*
+!.env.example
+
+# Runtime data and local caches
+audio_cache/
+__pycache__/
+*.pyc
+.git/
+
+# Research, training and test material the server never imports
+whisper-finetune/
+fake_child_harness/outputs/
+voice-auditions/
+chatterbox-tts/
+afro-tts/
+*.wav
+*.mp3
+*.bak*

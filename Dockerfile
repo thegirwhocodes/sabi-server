@@ -1,18 +1,19 @@
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+# CPU-only base. The production box has no GPU, torch is the +cpu wheel, and
+# faster-whisper runs on CPU, so the CUDA runtime image was only dead weight.
+FROM python:3.10-slim-bookworm
 
-# Install Python + ffmpeg (for audio processing)
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip python3-venv \
-    ffmpeg \
+# ffmpeg converts TTS audio to Asterisk's 8 kHz format; curl backs health checks.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg curl \
     && rm -rf /var/lib/apt/lists/*
-
-RUN ln -sf /usr/bin/python3 /usr/bin/python
 
 WORKDIR /app
 
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt requests
+COPY requirements.txt requirements.lock.txt ./
+# The lock file pins every transitive package to what production runs, so a
+# rebuild installs the same versions instead of whatever is newest that day.
+RUN pip install --no-cache-dir -r requirements.txt requests -c requirements.lock.txt
 
 # Open audio-native endpoint detector used after Silero finds a pause. Pin the
 # exact Hugging Face revision and checksum so production builds are repeatable.

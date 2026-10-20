@@ -17,24 +17,7 @@ services:
       - shared_audio:/shared/audio
     restart: unless-stopped
 
-  # Self-hosted LLM (Ollama with Llama 3.1 8B)
-  ollama:
-    image: ollama/ollama:latest
-    container_name: sabi-ollama
-    ports:
-      - "127.0.0.1:11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
-
-  # Sabi voice server (FastAPI + Whisper + YarnGPT TTS + Claude/Ollama LLM)
+  # Sabi voice server (FastAPI + Gemini Live; turn-based fallback: Whisper/Groq + Claude/Groq + ElevenLabs)
   sabi:
     build:
       context: .
@@ -49,7 +32,6 @@ services:
     env_file:
       - .env
     environment:
-      - OLLAMA_URL=http://ollama:11434
       - AMI_HOST=asterisk
       # Keep carrier choice explicit and versioned. A deployment can override
       # either value in .env for an immediate rollback to Africa's Talking.
@@ -80,8 +62,6 @@ services:
     volumes:
       - ./audio_cache:/app/audio_cache
       - shared_audio:/shared/audio
-    depends_on:
-      - ollama
     restart: unless-stopped
 
 secrets:
@@ -113,5 +93,4 @@ secrets:
     file: ./secrets/AZURE_SPEECH_REGION
 
 volumes:
-  ollama_data:
   shared_audio:

@@ -22,8 +22,8 @@ Removed components are recorded in [REMOVED_COMPONENTS_LOG.md](REMOVED_COMPONENT
 | 4 | Slim image: CPU base, no Ollama, no keys in image, pinned versions (`requirements.lock.txt`) | ✅ Live Oct 19 (12.4 GB → 8.45 GB; Ollama 9.2 GB removed; disk 82%) |
 | 5 | Delete old image after the slim one handles real calls | ⏳ After step 4 is proven |
 | 6 | Recordings → Naomi's Google storage, nightly, verified by checksum; delete local copies older than 14 days only after verified upload | ⏳ Needs Naomi's one-time Google sign-in |
-| 7 | Fallback + crisis voice → ElevenLabs (`SABI_TTS_TEST_PRIMARY=elevenlabs`) with the Starter key | ⏳ Needs the Starter `sk_` key on the box |
-| 8 | Billing safety: card + autopay on Vultr, low-balance alert; Gemini spend cap | ⏳ Naomi (console) |
+| 7 | Fallback + crisis voice → ElevenLabs (`SABI_TTS_TEST_PRIMARY=elevenlabs`), pay-as-you-go key, Bukola voice `oC2pCZZWEDRe6lmZpaaw` | ✅ Done Oct 19 (verified end to end inside the container). Also fixed: an empty `ELEVENLABS_VOICE_ID` secret file was overriding the default voice → 404 |
+| 8 | Billing safety: card + autopay on Vultr, low-balance alert; Gemini spend cap | ✅ Vultr card done by Naomi Oct 19; Gemini spend cap still open |
 | 9 | Real cost per call from Gemini `usage_metadata` in past call records | ⏳ |
 | 10 | Split: phone gateway (Asterisk, Reserved IP) vs lesson workers; Asterisk asks the server which worker takes each call | ⏳ |
 | 11 | Shared call state (Redis/Supabase) instead of in-memory `CALL_REGISTRY` | ⏳ |
@@ -34,7 +34,8 @@ Removed components are recorded in [REMOVED_COMPONENTS_LOG.md](REMOVED_COMPONENT
 | 16 | Second phone gateway + second Africa's Talking whitelist entry (ask Samuel) | ⏳ |
 
 ## Open questions for Naomi
-- Which Google account holds the 5 TB, and is it OK for children's call
-  recordings to live there (NDPA consent, who can access it)?
-- Keep or delete Vultr instance `sabi-dev` (London)?
 - E4E's legal entity type (for startup credit programs).
+
+## Decisions (Oct 19)
+- Recordings go to Google Drive on naomi.ivie04@gmail.com (5 TB); Naomi confirms the consent form covers recording.
+- Keep Vultr `sabi-dev` (London).

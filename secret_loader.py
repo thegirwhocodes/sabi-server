@@ -18,7 +18,12 @@ def get_secret(name: str, default: str = "") -> str:
     secret_path = os.path.join(SECRETS_DIR, name)
     try:
         with open(secret_path) as f:
-            return f.read().strip()
+            value = f.read().strip()
+        # An empty secret file means "not set", not "set to blank". Oct 2026:
+        # an empty ELEVENLABS_VOICE_ID file overrode the Bukola default and
+        # every ElevenLabs request went to /text-to-speech/ with no voice (404).
+        if value:
+            return value
     except FileNotFoundError:
         pass
-    return os.getenv(name, default)
+    return os.getenv(name) or default

@@ -28,9 +28,14 @@ was suspended for non-payment on Sep 4 2026. The Vultr box is CPU-only.
 | 6 | **Old production image** `sabi-server-sabi:pre-slim-20261019` (ID `3f33a64bbd5c`) | 12.4 GB | The image that served calls Sep 6 – Oct 19. | Replaced by the slim image. **Kept as a rollback until the slim image has handled real calls**, then deleted. | **Yes.** Rollback while it exists: `docker tag sabi-server-sabi:pre-slim-20261019 sabi-server-sabi:latest && docker compose up -d sabi`. After deletion: rebuild from `Dockerfile.bak-20261019` / git (~15 min). |
 | 7 | apt package cache, systemd journal trimmed to 50 MB | <0.5 GB | Package downloads, old logs. | Disposable. | Regenerated automatically. |
 
+## 2026-10-20 — recordings retention (session 6d4de6ca)
+
+| # | What | What it was for | Why | Can we get it back? / How |
+|---|---|---|---|---|
+| 8 | Call audio, per-turn audio, call records, sidecars older than **14 days** in the `sabi-server_shared_audio` volume | Evidence for review (`/admin/calls`, `/admin/feedback`), pilot evidence, future STT training data | Nothing ever deleted them; they would refill the disk. Now moved nightly to Google Drive. | **Yes, every file is in Drive** at `Sabi Call Recordings/shared_audio` (naomi.ivie04@gmail.com), uploaded and checksum-verified before local deletion. Restore: `rclone copy "gdrive:Sabi Call Recordings/shared_audio" <volume path>`. Note: the admin console only lists what is on the server, so calls older than 14 days no longer appear there. |
+
 ### Deliberately NOT removed
 - **Whisper large-v3** baked in the image (`/root/.cache/huggingface`, ~2.9 GB). Still used by the turn-based fallback lane and the numeric sidecar's second opinion. Removing it would change behavior. (It is slow on 2 CPUs — ~11–14 s per clip — a candidate to replace with Groq-only later, as a separate decision.)
-- **Call recordings and per-turn audio** (`sabi-server_shared_audio` volume, 232 MB). Evidence and future training data. They move to Naomi's Google storage first; local copies are deleted only after a verified upload.
 - **`/swapfile` (6.4 GB)**. Could shrink to ~2 GB now that RAM is 4 GB. Separate decision.
 - **`sabi_literacy_prompt.md` at the repo root on the box.** It differs from `prompts/sabi_literacy_prompt.md` (the file the code loads). Kept until someone confirms which version is wanted.
 - **Vultr instance `sabi-dev`** (London, vc2-1c-1gb, ~$5/mo, created Oct 12, IP 78.141.233.143). Purpose unconfirmed; awaiting Naomi.

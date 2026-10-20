@@ -21,7 +21,7 @@ Removed components are recorded in [REMOVED_COMPONENTS_LOG.md](REMOVED_COMPONENT
 | 3 | Upgrade to 4 GB | ✅ Done Oct 19 |
 | 4 | Slim image: CPU base, no Ollama, no keys in image, pinned versions (`requirements.lock.txt`) | ✅ Live Oct 19 (12.4 GB → 8.45 GB; Ollama 9.2 GB removed; disk 82%) |
 | 5 | Delete old image after the slim one handles real calls | ⏳ After step 4 is proven |
-| 6 | Recordings → Naomi's Google storage, nightly, verified by checksum; delete local copies older than 14 days only after verified upload | ⏳ Needs Naomi's one-time Google sign-in |
+| 6 | Recordings → Google Drive (naomi.ivie04, folder "Sabi Call Recordings/shared_audio"), nightly 01:30 UTC via `ops/sync_recordings_to_drive.sh` + `/etc/cron.d/sabi-recordings`; local copies older than 14 days deleted only after verified upload | ✅ Set up Oct 20 (rclone, scope drive.file). Log: `/var/log/sabi-recordings-sync.log`; last success: `/var/lib/sabi-recordings-last-success` |
 | 7 | Fallback + crisis voice → ElevenLabs (`SABI_TTS_TEST_PRIMARY=elevenlabs`), pay-as-you-go key, Bukola voice `oC2pCZZWEDRe6lmZpaaw` | ✅ Done Oct 19 (verified end to end inside the container). Also fixed: an empty `ELEVENLABS_VOICE_ID` secret file was overriding the default voice → 404 |
 | 8 | Billing safety: card + autopay on Vultr, low-balance alert; Gemini spend cap | ✅ Vultr card done by Naomi Oct 19; Gemini spend cap still open |
 | 9 | Real cost per call from Gemini `usage_metadata` in past call records | ⏳ |
@@ -32,6 +32,10 @@ Removed components are recorded in [REMOVED_COMPONENTS_LOG.md](REMOVED_COMPONENT
 | 14 | Automatic scaling on live call count | ⏳ |
 | 15 | Rebuild script in git so a fresh box is one command | ⏳ |
 | 16 | Second phone gateway + second Africa's Talking whitelist entry (ask Samuel) | ⏳ |
+
+## Found Oct 20
+- **Gemini prepaid credits are depleted** (API returns 402). Every call currently falls back to the turn-based lane, which now speaks with ElevenLabs. Last Gemini Live call: Sep 21. Fix: top up / switch to postpay in AI Studio + set a spend cap.
+- The Drive sign-in token was accidentally printed in a session transcript; revoke rclone's access in the Google account and re-authorize.
 
 ## Open questions for Naomi
 - E4E's legal entity type (for startup credit programs).

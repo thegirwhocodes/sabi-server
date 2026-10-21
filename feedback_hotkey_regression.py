@@ -234,6 +234,13 @@ def main() -> int:
     ok &= check("stop_on_no", not voice_realtime._wants_to_continue_lesson("no"))
     ok &= check("stop_on_stop_phrase", not voice_realtime._wants_to_continue_lesson("I am done, stop"))
     ok &= check("stop_on_empty", not voice_realtime._wants_to_continue_lesson(""))
+    # Oct 20 2026, Lagos caller was hung up on after saying this.
+    ok &= check(
+        "continue_on_negated_stop",
+        voice_realtime._wants_to_continue_lesson("Want to keep learning, I don't want to stop.")
+        and voice_realtime._wants_to_continue_lesson("I don't want to stop"),
+    )
+    ok &= check("stop_on_tired_stop", not voice_realtime._wants_to_continue_lesson("I'm tired, let's stop"))
 
     # Mid-call flow: continue path.
     cont_result, cont_msgs, cont_spoken = asyncio.run(run_midcall("yes let's keep going"))

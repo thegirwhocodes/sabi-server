@@ -104,7 +104,15 @@ GROQ_API_KEY = get_secret("GROQ_API_KEY")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
 CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Groq retired the Llama 3.3 models; by Oct 2026 every Groq chat call 404'd, so
+# the turn-based fallback lane could hear and speak but not think.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+
+def _reasoning_params(model: str) -> dict:
+    """gpt-oss spends max_tokens on hidden reasoning and returns empty content
+    unless reasoning is kept low (measured Oct 20 2026: empty at 90 tokens)."""
+    return {"reasoning_effort": "low"} if "gpt-oss" in (model or "") else {}
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 CEREBRAS_DISABLED = os.getenv("CEREBRAS_DISABLED", "0").lower() in {"1", "true", "yes", "on"}
 
@@ -596,6 +604,7 @@ class SabiLLM:
                 {"role": "system", "content": system_prompt},
                 *messages,
             ],
+            **_reasoning_params(model),
         }
         if temperature is not None:
             request_body["temperature"] = temperature
@@ -609,7 +618,13 @@ class SabiLLM:
         )
         response.raise_for_status()
         data = response.json()
-        text = data["choices"][0]["message"]["content"]
+        text = data["choices"][0]["message"].get("content") or ""
+        if not text.strip():
+            # An empty reply must fall through to the next provider, not be spoken.
+            raise RuntimeError(
+                f"{provider} returned empty content "
+                f"(finish_reason={data['choices'][0].get('finish_reason')})"
+            )
         logger.info(f"{provider}: {len(text)} chars")
         return text
 
@@ -638,6 +653,7 @@ class SabiLLM:
                 "model": model,
                 "max_tokens": 200,
                 "stream": True,
+                **_reasoning_params(model),
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     *messages,

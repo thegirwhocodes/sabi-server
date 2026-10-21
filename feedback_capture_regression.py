@@ -392,6 +392,23 @@ def main() -> int:
         "feedback_request_intent_rejects_lesson_answer",
         not voice_realtime._looks_like_feedback_request("five naira and three naira makes eight"),
     )
+    # Oct 20 2026, Lagos caller: both of these opened the feedback recorder.
+    ok &= check(
+        "feedback_request_rejects_negated_feedback",
+        not voice_realtime._looks_like_feedback_request(
+            "Sabi, I'm okay, I don't have any feedback. Please go on with the class."
+        )
+        and not voice_realtime._looks_like_feedback_request(
+            "Tabi, I said I want to continue with today's lesson. I don't have any feedback."
+        )
+        and not voice_realtime._looks_like_feedback_request("no feedback, continue")
+        and not voice_realtime._looks_like_feedback_request("nothing to report"),
+    )
+    ok &= check(
+        "feedback_request_still_detected_after_unrelated_negation",
+        voice_realtime._looks_like_feedback_request("it doesn't hear me, I want to leave feedback")
+        and voice_realtime._looks_like_feedback_request("no problem, I want to report a problem"),
+    )
     ok &= check(
         "feedback_offer_allows_requested_even_without_student_id",
         voice_realtime._should_offer_feedback(

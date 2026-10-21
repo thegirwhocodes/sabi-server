@@ -671,16 +671,28 @@ _CONTINUE_LESSON_MARKERS = (
 )
 
 
+# "I don't want to stop", "not stop", "never stop" — a negated stop/end word is a
+# request to KEEP going. Oct 20 2026: a Lagos caller said "Want to keep
+# learning, I don't want to stop." and the substring "stop" hung up on them.
+_NEGATED_STOP = re.compile(
+    r"\b(?:don'?t|do not|not|never|no|i'?m not)\s+(?:want(?:ing)?\s+to\s+|wanna\s+|going\s+to\s+|gonna\s+)?"
+    r"(?:stop|end|leave|hang up|go|finish|be done)\b"
+)
+
+
 def _wants_to_continue_lesson(text: str) -> bool:
     """Decide whether a caller's reply to 'keep going or stop?' means continue.
 
     Bias: a clear stop word stops; a clear continue word (or any other
     non-empty answer, since they are still engaged and talking) continues;
-    an empty/no-answer stops.
+    an empty/no-answer stops. Negated stop words ("I don't want to stop")
+    count as continue, not stop.
     """
     normalized = " ".join((text or "").lower().replace("-", " ").split()).strip(" .,!?:;")
     if not normalized:
         return False
+    if _NEGATED_STOP.search(normalized):
+        return True
     if any(marker in normalized for marker in _STOP_LESSON_MARKERS):
         # A bare "no" also stops.
         return False
@@ -692,9 +704,23 @@ def _wants_to_continue_lesson(text: str) -> bool:
     return True
 
 
+# Negation must govern the word itself ("don't have any feedback", "no
+# complaints", "nothing to report"), so "it doesn't hear me, I want to leave
+# feedback" is still a request.
+_NEGATED_FEEDBACK = re.compile(
+    r"\b(?:don'?t|do not|doesn'?t|not|no|never|nothing|without)\s+(?:[\w']+\s+){0,3}?"
+    r"(?:feed ?back|complain\w*|notes?|report)\b"
+)
+
+
 def _looks_like_feedback_request(text: str) -> bool:
     normalized = " ".join((text or "").lower().replace("-", " ").split()).strip(" .,!?:;")
     if not normalized:
+        return False
+    # "I don't have any feedback, please go on with the class" is the opposite of
+    # a request. Oct 20 2026 a Lagos caller said exactly that twice and was put
+    # into the feedback recorder both times.
+    if _NEGATED_FEEDBACK.search(normalized):
         return False
     direct_phrases = (
         "leave feedback",

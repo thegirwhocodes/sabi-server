@@ -39,3 +39,10 @@ was suspended for non-payment on Sep 4 2026. The Vultr box is CPU-only.
 - **`/swapfile` (6.4 GB)**. Could shrink to ~2 GB now that RAM is 4 GB. Separate decision.
 - **`sabi_literacy_prompt.md` at the repo root on the box.** It differs from `prompts/sabi_literacy_prompt.md` (the file the code loads). Kept until someone confirms which version is wanted.
 - **Vultr instance `sabi-dev`** (London, vc2-1c-1gb, ~$5/mo, created Oct 12, IP 78.141.233.143). Purpose unconfirmed; awaiting Naomi.
+
+## 2026-10-20 — dead AI providers on the fallback lane (session 6d4de6ca)
+
+| # | What | What it was for | Why | Can we get it back? / How |
+|---|---|---|---|---|
+| 9 | `CEREBRAS_API_KEY` commented out in `/opt/sabi/sabi-server/.env` (backup `.env.bak-20261020`) | First, fastest LLM on the turn-based lane (Llama 3.3 70B on Cerebras) | Key returns 401; every call wasted a round trip before falling through | Put a valid key back and uncomment the line, then `docker compose up -d sabi`. |
+| 10 | Groq default model `llama-3.3-70b-versatile` → `openai/gpt-oss-120b` (with `reasoning_effort: low`) in `llm.py` | Groq is the fallback-lane brain and the per-turn "is this an answer?" check | Groq retired Llama 3.3; every Groq chat call returned 404, so with Claude's key also rejected (401) the lane answered "Sorry, I had a little problem" on every turn (Lagos caller …4773, Oct 20 07:4x UTC) | Set env `GROQ_MODEL` to any model in Groq's `/models` list. Without low reasoning, gpt-oss returns empty text at Sabi's 80–200 token limits. |

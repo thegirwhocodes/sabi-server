@@ -27,6 +27,7 @@ from call_admin import merge_call_hangup_event, write_call_review_record
 from call_admin import append_call_turn_review, call_turn_audio_path, write_call_learning_summary
 from curriculum_path import resolve_literacy_lesson, resolve_numeracy_lesson
 from diagnostic_flow import build_opening_turn
+from identity_capture import is_confirmation_question
 from learning_state import analyze_session, force_numeracy_course
 from numeric_grading import (
     analyze_latest_numeric_turn,
@@ -2497,6 +2498,23 @@ class RealtimeCall:
                 if asked_for_name and turn_is_answer and assessed_name:
                     text_for_lesson = f"My name is {assessed_name}"
                     turn_flags.append("name_validated_by_llm")
+                    # Write the identity now, while the answer is in hand. The
+                    # transcript used to be the only path to sabi_students, which
+                    # is how STT noise became learner names.
+                    recorded_name = await self.memory.record_name_confirmation(
+                        student_id,
+                        assessed_name,
+                        call_sid=getattr(self, "call_id", None),
+                        status=(
+                            "confirmed_repeat"
+                            if is_confirmation_question(latest_question)
+                            else "unverified_utterance"
+                        ),
+                    )
+                    if recorded_name:
+                        turn_flags.append("name_written_live")
+                        if isinstance(student, dict):
+                            student["name"] = recorded_name
                 elif asked_for_name and not turn_is_answer:
                     # Preserve the raw STT in the call-review record, but keep
                     # non-name speech out of deterministic name extraction.

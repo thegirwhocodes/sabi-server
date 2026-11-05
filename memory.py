@@ -22,7 +22,14 @@ from curriculum_path import (
 )
 from curriculum_review import resolve_position_review
 from curriculum_mastery import build_call_scorecard, cross_session_signal, mastery_label
-from identity_capture import identity_event_payloads
+from identity_capture import (
+    STATUS_CONFIRMED_CAREGIVER,
+    STATUS_CONFIRMED_REPEAT,
+    STATUS_UNKNOWN,
+    assess_answer,
+    clean_name,
+    identity_event_payloads,
+)
 from learning_state import (
     MODULE_NAMES as NUMERACY_SKILL_NAMES,
     MODULE_SKILLS as NUMERACY_MODULE_SKILLS,
@@ -179,6 +186,90 @@ class StudentMemory:
             self.client.table("sabi_identity_events").insert(rows).execute()
         except Exception:  # noqa: BLE001 - audit logging must never fail a lesson
             logger.debug("identity event logging skipped", exc_info=True)
+
+    async def record_name_confirmation(
+        self,
+        student_id: str | None,
+        name: str | None,
+        *,
+        call_sid: str | None = None,
+        status: str = STATUS_CONFIRMED_REPEAT,
+    ) -> str | None:
+        """Write the name the caller just gave, at the moment they give it.
+
+        The voice loop already knows the name: an LLM turn assessed that the
+        utterance answers the name question. Until this method existed the value
+        was only folded back into the transcript, and the record was rebuilt
+        afterwards by re-parsing text, which is how "A Speech" and "What The"
+        became learners. Writing here means the truth never has to survive STT
+        twice, and the transcript pass becomes an audit and backfill path.
+
+        Refuses anything ``assess_answer`` would not accept as a name, so a bad
+        turn cannot overwrite a good row. Never raises into the call.
+        """
+        if not self.client or not student_id or not name:
+            return None
+
+        cleaned = sanitize_child_name_for_storage(clean_name(name))
+        if not cleaned:
+            return None
+        candidate = assess_answer(cleaned, asked_for_name=True)
+        if not candidate.accepted:
+            logger.info(
+                "identity live write refused student=%s value=%r verdict=%s",
+                student_id,
+                cleaned,
+                candidate.verdict,
+            )
+            return None
+
+        trusted = status in (STATUS_CONFIRMED_REPEAT, STATUS_CONFIRMED_CAREGIVER)
+        try:
+            current = (
+                self.client.table("sabi_students")
+                .select("id,name,name_status")
+                .eq("id", student_id)
+                .execute()
+            )
+            row = current.data[0] if current and current.data else {}
+            old_name = row.get("name")
+            old_status = row.get("name_status") or STATUS_UNKNOWN
+            if old_name == cleaned and old_status == status:
+                return cleaned
+
+            payload = {
+                "name": cleaned,
+                "name_status": status,
+                "name_source": "voice_agent",
+            }
+            if trusted:
+                payload["name_verified_at"] = datetime.now(timezone.utc).isoformat()
+                payload["name_verified_by"] = "voice_agent"
+            self.client.table("sabi_students").update(payload).eq("id", student_id).execute()
+            self.client.table("sabi_identity_events").insert(
+                {
+                    "student_id": student_id,
+                    "event_type": "name_confirmed" if trusted else "name_candidate",
+                    "field": "name",
+                    "old_value": old_name,
+                    "new_value": cleaned,
+                    "source": "voice_agent",
+                    "actor": "child" if trusted else "sabi",
+                    "confidence": 0.95 if trusted else 0.6,
+                    "call_sid": call_sid,
+                }
+            ).execute()
+            logger.info(
+                "identity live write student=%s old=%r new=%r status=%s",
+                student_id,
+                old_name,
+                cleaned,
+                status,
+            )
+            return cleaned
+        except Exception:  # noqa: BLE001 - identity writes must never break a lesson
+            logger.debug("identity live write skipped", exc_info=True)
+            return None
 
     async def save_phone_session(
         self,

@@ -1,0 +1,1 @@
+{"cleanUrls": true, "functions": {"api/*.py": {"memory": 512, "maxDuration": 30}}}

@@ -22,12 +22,14 @@ from curriculum_path import (
 )
 from curriculum_review import resolve_position_review
 from curriculum_mastery import build_call_scorecard, cross_session_signal, mastery_label
+from identity_capture import identity_event_payloads
 from learning_state import (
     MODULE_NAMES as NUMERACY_SKILL_NAMES,
     MODULE_SKILLS as NUMERACY_MODULE_SKILLS,
     analyze_session,
     build_learning_state_prompt,
     default_learning_state,
+    capture_name_result,
     extract_child_name,
     merge_learning_state,
     force_numeracy_course,
@@ -155,6 +157,29 @@ class StudentMemory:
         """Clear call state after call ends."""
         self._call_messages.pop(call_id, None)
 
+    def _log_identity_events(self, capture_result, student_id: str | None, call_sid: str | None = None) -> None:
+        """Append identity evidence to sabi_identity_events. Never breaks a call."""
+        if not self.client or not capture_result:
+            return
+        rows = [
+            {
+                "student_id": event.get("student_id"),
+                "event_type": event.get("event_type"),
+                "field": event.get("field") or "name",
+                "new_value": event.get("new_value"),
+                "source": event.get("source") or "phone_stt",
+                "actor": event.get("actor"),
+                "call_sid": event.get("call_sid"),
+            }
+            for event in identity_event_payloads(capture_result, student_id=student_id, call_sid=call_sid)
+        ]
+        if not rows:
+            return
+        try:
+            self.client.table("sabi_identity_events").insert(rows).execute()
+        except Exception:  # noqa: BLE001 - audit logging must never fail a lesson
+            logger.debug("identity event logging skipped", exc_info=True)
+
     async def save_phone_session(
         self,
         student_id: str,
@@ -197,7 +222,8 @@ class StudentMemory:
             student = student_result.data[0] if student_result.data else {}
             normalized_phone = normalize_phone_number(phone_number)
             variants = phone_lookup_variants(phone_number)
-            spoken_child_name = sanitize_child_name_for_storage(extract_child_name(cleaned_messages))
+            capture_result = capture_name_result(cleaned_messages)
+            spoken_child_name = sanitize_child_name_for_storage(capture_result.name_for_storage)
             original_student_id = student_id
             if spoken_child_name and student:
                 resolved_student = self._resolve_student_for_session(
@@ -227,6 +253,7 @@ class StudentMemory:
                             student_id,
                             spoken_child_name,
                         )
+            self._log_identity_events(capture_result, student_id=student_id, call_sid=call_id)
             analysis_student = dict(student or {})
             if isinstance(starting_learning_state, dict) and starting_learning_state:
                 analysis_student["learning_state"] = starting_learning_state
@@ -508,6 +535,7 @@ class StudentMemory:
             insert_payload = {
                 **_single_phone_identity_payload(normalized_phone, child_name),
                 "name": child_name,
+                **_name_provenance_fields(child_name),
                 "current_level": "beginner",
                 "current_module": 0,
                 "current_topic": "diagnostic",
@@ -566,6 +594,7 @@ class StudentMemory:
         insert_payload = {
             **_phone_identity_payload(normalized_phone, child_name),
             "name": child_name,
+            **_name_provenance_fields(child_name),
             "current_level": "beginner",
             "current_module": 0,
             "current_topic": "diagnostic",
@@ -1439,6 +1468,21 @@ def sanitize_child_name_for_storage(name: str | None) -> str | None:
     if len(words) > 2:
         return None
     return " ".join(word.capitalize() for word in words)
+
+
+def _name_provenance_fields(child_name: str | None, status: str | None = None) -> dict:
+    """Columns that record where a stored name came from.
+
+    Rows written before the identity migration have no provenance, so anything
+    created from here on declares itself: a phone-derived name is never
+    silently trusted, it is marked unverified until a confirmation is heard.
+    """
+    if not child_name:
+        return {"name_status": "unknown", "name_source": "phone_stt"}
+    return {
+        "name_status": status or "unverified_utterance",
+        "name_source": "phone_stt",
+    }
 
 
 def learner_key_for(normalized_phone: str | None, child_name: str | None) -> str | None:

@@ -18,6 +18,7 @@ from diagnostic_flow import (
     analyze_literacy_diagnostic_progress,
     onboarding_status_from_messages,
 )
+from identity_capture import capture
 from numeric_grading import analyze_latest_numeric_turn
 from pilot_research_design import build_research_state, research_prompt_block
 
@@ -564,42 +565,26 @@ def _looks_like_total_spend_question(question_lower: str) -> bool:
 
 
 def extract_child_name(messages: list[dict[str, str]]) -> str | None:
-    non_names = {
-        "yes", "no", "okay", "ok", "hello", "hi", "ready", "thank you",
-        "thanks", "sorry", "i'm sorry", "im sorry", "i am sorry",
-        "i don't know", "i dont know", "and some", "numerous",
-        "not available", "currently unavailable", "unavailable",
-        "not reachable", "line busy", "busy", "voicemail", "voice mail",
-        "mailbox", "recording", "hang up",
-    }
-    for index, message in enumerate(messages[:8]):
-        if message.get("role") != "user":
-            continue
-        text = message.get("content", "").strip()
-        normalized = re.sub(r"[^a-z' ]", "", text.lower()).strip()
-        if normalized in non_names or _looks_like_phone_system_name_capture(text):
-            continue
-        previous_assistant = ""
-        for prev_index in range(index - 1, -1, -1):
-            if messages[prev_index].get("role") == "assistant":
-                previous_assistant = messages[prev_index].get("content", "").lower()
-                break
-        asked_name = "your name" in previous_assistant or "tell me your name" in previous_assistant
-        match = re.search(r"\b(my name is|i am|i'm|its|it's)\s+([A-Za-z][A-Za-z' -]{1,30})", text, re.I)
-        if match:
-            phrase = match.group(1).lower()
-            candidate = _clean_name(match.group(2))
-            if candidate and candidate.lower() not in non_names:
-                if phrase == "my name is" or asked_name:
-                    return candidate
-        if (
-            asked_name
-            and 1 <= len(text.split()) <= 3
-            and normalized not in non_names
-            and not re.search(r"\d|\b(yes|no|okay|hello|hi|ready|thank|thanks)\b", text, re.I)
-        ):
-            return _clean_name(text)
-    return None
+    """The learner name from a transcript, refusing speech-to-text artifacts.
+
+    Delegates to identity_capture.capture(), which only accepts an utterance
+    that plausibly is a name: questions ("What the heck?"), greetings, carrier
+    messages and every artifact we have actually stored are refused. A name
+    heard once without a confirmation turn is still returned so learner
+    continuity keeps working, but capture_name_status() reports it as
+    unverified_utterance so it is never treated as a trusted identity.
+    """
+    return capture(messages).name_for_storage
+
+
+def capture_name_status(messages: list[dict[str, str]]) -> str:
+    """Provenance of the name in this transcript: confirmed, unverified, or rejected."""
+    return capture(messages).status
+
+
+def capture_name_result(messages: list[dict[str, str]]):
+    """Full capture record, including rejected attempts, for audit logging."""
+    return capture(messages)
 
 
 def _looks_like_phone_system_name_capture(text: str) -> bool:

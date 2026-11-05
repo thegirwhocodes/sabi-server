@@ -27,6 +27,7 @@ from call_admin import merge_call_hangup_event, write_call_review_record
 from call_admin import append_call_turn_review, call_turn_audio_path, write_call_learning_summary
 from curriculum_path import resolve_literacy_lesson, resolve_numeracy_lesson
 from diagnostic_flow import build_opening_turn
+import demographic_intake as demographics
 from identity_capture import is_confirmation_question
 from learning_state import analyze_session, force_numeracy_course
 from numeric_grading import (
@@ -733,6 +734,64 @@ async def _send_packet(writer: asyncio.StreamWriter, packet_type: int, payload: 
 
 
 class RealtimeCall:
+    INTAKE_QUESTION_PATTERNS = (
+        ("age_years", ("how old are you", "how old", "your age")),
+        ("sex", ("boy or a girl", "boy or girl", "are you a boy", "are you a girl")),
+        ("school_type", ("government school", "private school", "private one", "which school")),
+        ("schooling_status", ("go to school", "in school", "attend school")),
+        ("location_state", ("which state", "what state", "where do you live")),
+        ("home_language", ("language do you speak", "speak at home", "which language", "language do you use")),
+    )
+
+    def intake_field_for_question(self, question: str) -> str | None:
+        """Which first-call intake field the assistant just asked about."""
+        text = (question or "").lower()
+        if not text:
+            return None
+        for field_name, patterns in self.INTAKE_QUESTION_PATTERNS:
+            if any(pattern in text for pattern in patterns):
+                return field_name
+        return None
+
+    async def _record_demographic_turn(self, student, student_id: str, question: str, answer: str) -> str:
+        """Normalise one intake answer and write it while the call is live.
+
+        Returns a short outcome string for the turn flags. Nothing here can
+        raise into the lesson: a bad answer or a failed write is only logged.
+        """
+        try:
+            if not isinstance(student, dict) or student.get("demographics_completed_at"):
+                return "intake_complete"
+            field_name = self.intake_field_for_question(question)
+            if not field_name:
+                return "no_intake_question"
+            before = self.demographic_answers.answered()
+            demographics.apply_answer(self.demographic_answers, field_name, answer)
+            if self.demographic_answers.answered() <= before:
+                return "intake_unparsed"
+            result = await asyncio.to_thread(
+                demographics.write_demographics,
+                self.memory,
+                student_id,
+                self.demographic_answers,
+            )
+            if result.get("ok"):
+                student["demographics_completed_at"] = (
+                    result.get("completed") and "in_call" or student.get("demographics_completed_at")
+                )
+                logger.info(
+                    "Realtime demographics field=%s answered=%s completed=%s student=%s",
+                    field_name,
+                    result.get("answered"),
+                    result.get("completed"),
+                    student_id,
+                )
+                return "demographic_answer_written"
+            return "demographic_write_failed"
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Demographic turn failed student=%s: %s", student_id, exc)
+            return "demographic_turn_failed"
+
     def __init__(self, call_uuid: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                  stt, llm, tts, memory, tts_primary: str = "", conversation_style: str = "current",
                  barge_in_enabled: bool | None = None):
@@ -755,6 +814,10 @@ class RealtimeCall:
         # SABI_TTS_TEST_PRIMARY so Chatterbox can be canaried without touching
         # the production chain.
         self.tts_primary = (tts_primary or "").strip().lower()
+        # First-call demographic intake: filled one answer at a time as the
+        # child answers, written to sabi_students as soon as each answer lands.
+        self.demographic_answers = demographics.DemographicAnswers()
+        self.demographics_student_id = ""
         self.last_tts_provider = ""
         metadata = CALL_REGISTRY.pop(call_uuid, {})
         self.phone = metadata.get("phone", "unknown")
@@ -2524,6 +2587,11 @@ class RealtimeCall:
                 if text_for_lesson != text:
                     turn_flags.append("transcript_normalized")
                 messages.append({"role": "user", "content": text_for_lesson})
+                if turn_is_answer and not keypad_text:
+                    intake_flag = await self._record_demographic_turn(
+                        student, student_id, latest_question, text
+                    )
+                    turn_flags.append(intake_flag)
                 if turn_is_answer and not identity_confirmed:
                     resolved_student = await self.memory.resolve_student_for_spoken_identity(
                         student,
